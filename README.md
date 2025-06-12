@@ -8,7 +8,7 @@ This project aims to bridge the gap in education for refugees by providing a pla
 
 ## GitHub Repository
 
-[GitHub Repository Link](https://github.com/your-username/refugee-learning-platform)
+[GitHub Repository Link](https://github.com/innocentmanzi/RefuLearn)
 
 ## How to Set Up the Environment and the Project
 
@@ -70,19 +70,7 @@ This project aims to bridge the gap in education for refugees by providing a pla
 
 ### Figma Mockups
 
-[Figma Design Link](https://www.figma.com/file/example)
-
-### Circuit Diagram
-
-![Circuit Diagram](path/to/circuit-diagram.png)
-
-### Screenshots of the App Interfaces
-
-- **Login Page**  
-  ![Login Page](path/to/login-screenshot.png)
-
-- **Dashboard**  
-  ![Dashboard](path/to/dashboard-screenshot.png)
+[Figma Design Link](https://www.figma.com/design/3rL7F5O6h6RzK2oc5wK0Vd/refugee-platform?node-id=0-1&p=f&t=rnqD0gMumTpAWeuJ-0)
 
 ## Deployment Plan
 
@@ -90,25 +78,19 @@ This project adopts a modular deployment structure to ensure reliability, scalab
 
 ### Frontend (React + PouchDB)
 
-The frontend will be deployed using **Netlify**, which offers continuous deployment from GitHub. The application is built with React and leverages PouchDB for client-side data storage. This enables offline-first functionality, allowing users to access and interact with educational content without an internet connection. When a connection is restored, PouchDB will automatically synchronize with the central CouchDB database.
+The frontend will be deployed using **Netlify**, which offers continuous deployment from GitHub. The application is built with React and leverages PouchDB for client-side data storage. This enables offline-first functionality, allowing users to access and interact with educational content without an internet connection. PouchDB will automatically synchronize with the central CouchDB database when a connection is restored.
 
 ### Backend (Django + CouchDB)
 
-The backend will be developed using the Django framework and hosted on **Heroku**, which supports Python applications. Instead of a traditional SQL database, CouchDB will be used as the primary data store. Django will handle API requests, authentication, and business logic, while facilitating data sync between CouchDB and PouchDB for consistent and reliable data exchange.
+The backend will be developed using the Django framework and hosted on **Heroku**, which supports Python applications. CouchDB will be the primary data store instead of a traditional SQL database. Django will handle API requests, authentication, and business logic, while facilitating data sync between CouchDB and PouchDB for consistent and reliable data exchange.
 
 ## Video Demo
 
-[Video Demo Link](https://www.youtube.com/watch?v=example)
-
-## API Documentation
-
-The API documentation is available at:
-- Swagger UI: [http://localhost:8000/swagger/](http://localhost:8000/swagger/)
-- ReDoc: [http://localhost:8000/redoc/](http://localhost:8000/redoc/)
+[Video Demo Link]( https://www.youtube.com/watch?v=6F0ZV88agiI)
 
 ## Contributing
 
-Contributions are welcome! Please follow the guidelines in the `CONTRIBUTING.md` file.
+Contributions are welcome! Please follow the guidelines.
 
 ## License
 
