@@ -6,6 +6,10 @@ const Container = styled.div`
   padding: 2rem;
   background: ${({ theme }) => theme.colors.white};
   min-height: 100vh;
+  max-width: 100vw;
+  @media (max-width: 900px) {
+    padding: 1rem;
+  }
 `;
 
 const Title = styled.h1`
@@ -18,17 +22,26 @@ const FlexRow = styled.div`
   gap: 2rem;
   @media (max-width: 900px) {
     flex-direction: column;
+    gap: 1rem;
   }
 `;
 
 const LeftColumn = styled.div`
   flex: 1;
-  min-width: 280px;
+  min-width: 220px;
+  width: 100%;
+  @media (max-width: 600px) {
+    min-width: 0;
+  }
 `;
 
 const RightColumn = styled.div`
   flex: 2;
-  min-width: 320px;
+  min-width: 280px;
+  width: 100%;
+  @media (max-width: 600px) {
+    min-width: 0;
+  }
 `;
 
 const Section = styled.div`
@@ -38,6 +51,12 @@ const Section = styled.div`
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.03);
   position: relative;
+  width: 100%;
+  max-width: 100vw;
+  @media (max-width: 600px) {
+    padding: 1rem;
+    font-size: 0.98rem;
+  }
 `;
 
 const Label = styled.div`
@@ -114,6 +133,10 @@ const ProfilePicWrapper = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
+  @media (max-width: 600px) {
+    width: 120px;
+    height: 120px;
+  }
 `;
 
 const ProfilePic = styled.img`

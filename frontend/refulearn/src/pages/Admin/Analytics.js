@@ -189,25 +189,6 @@ const Analytics = () => {
     <Container>
       <Title>Platform Analytics</Title>
 
-      <OverviewGrid>
-        <OverviewCard>
-          <Stat>{analyticsStats.totalUsers}</Stat>
-          <StatLabel>Total Users</StatLabel>
-        </OverviewCard>
-        <OverviewCard>
-          <Stat>{analyticsStats.activeCourses}</Stat>
-          <StatLabel>Active Courses</StatLabel>
-        </OverviewCard>
-        <OverviewCard>
-          <Stat>{analyticsStats.completedCourses}</Stat>
-          <StatLabel>Completed Courses</StatLabel>
-        </OverviewCard>
-        <OverviewCard>
-          <Stat>{analyticsStats.totalSessions}</Stat>
-          <StatLabel>Total Sessions</StatLabel>
-        </OverviewCard>
-      </OverviewGrid>
-
       <AnalyticsGrid>
         <AnalyticsCard>
           <ChartContainer>
@@ -267,6 +248,36 @@ const Analytics = () => {
                 <td>{reg.date}</td>
               </tr>
             ))}
+          </tbody>
+        </StyledTable>
+      </TableContainer>
+
+      <SectionTitle>Recent Activity</SectionTitle>
+      <TableContainer>
+        <StyledTable>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Event</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>2025-06-01 10:15</td>
+              <td>User Aisha Khan registered as Refugee</td>
+            </tr>
+            <tr>
+              <td>2025-05-31 16:40</td>
+              <td>Course "Web Dev Bootcamp" completed by 10 users</td>
+            </tr>
+            <tr>
+              <td>2025-05-30 09:20</td>
+              <td>Job "Frontend Developer" posted by Employer</td>
+            </tr>
+            <tr>
+              <td>2025-05-29 14:05</td>
+              <td>Mentor session "React Basics" scheduled</td>
+            </tr>
           </tbody>
         </StyledTable>
       </TableContainer>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { Line } from 'react-chartjs-2';
 import { NavLink } from 'react-router-dom';
@@ -12,6 +12,8 @@ import {
   Tooltip,
   Legend
 } from 'chart.js';
+import PageContainer from '../../components/PageContainer';
+import ContentWrapper from '../../components/ContentWrapper';
 
 ChartJS.register(
   CategoryScale,
@@ -230,12 +232,18 @@ const NotificationPanel = styled.div`
   max-height: 400px;
   overflow-y: auto;
   z-index: 1000;
+  animation: fadeIn 0.2s;
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
 `;
 
 const NotificationItem = styled.div`
   padding: 1rem;
   border-bottom: 1px solid #eee;
   cursor: pointer;
+  font-size: 0.95rem;
   
   &:hover {
     background: #f8f9fa;
@@ -319,6 +327,7 @@ const MentorDashboard = () => {
   const [welcomeText, setWelcomeText] = useState('');
   const [isTyping, setIsTyping] = useState(true);
   const welcomeMessage = `Welcome back, ${mentorName}!`;
+  const welcomeRef = useRef();
   useEffect(() => {
     let currentIndex = 0;
     const typingInterval = setInterval(() => {
@@ -432,148 +441,173 @@ const MentorDashboard = () => {
 
   const unreadCount = notifications.filter(n => n.unread).length;
 
+  const notificationRef = useRef();
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (notificationRef.current && !notificationRef.current.contains(event.target)) {
+        setShowNotifications(false);
+      }
+    }
+    function handleEscape(event) {
+      if (event.key === 'Escape') setShowNotifications(false);
+    }
+    if (showNotifications) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleEscape);
+    } else {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showNotifications]);
+
   return (
-    <Container>
-      <Title>
-        <span>
-          {welcomeText}
-          {isTyping && <span style={{ animation: 'blink 1s infinite' }}>|</span>}
-        </span>
-        <NotificationButton onClick={() => setShowNotifications(!showNotifications)}>
-          <i className="fas fa-bell"></i>
-          {unreadCount > 0 && <NotificationBadge>{unreadCount}</NotificationBadge>}
-        </NotificationButton>
-        {showNotifications && (
-          <NotificationPanel>
-            {notifications.map(notification => (
-              <NotificationItem
-                key={notification.id}
-                unread={notification.unread}
-                onClick={() => handleNotificationClick(notification.id)}
-              >
-                <div style={{ fontWeight: notification.unread ? 'bold' : 'normal' }}>
-                  {notification.message}
-                </div>
-                <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.25rem' }}>
-                  {notification.time}
-                </div>
-              </NotificationItem>
-            ))}
-          </NotificationPanel>
+    <ContentWrapper>
+      <PageContainer>
+        <Title>
+          <span>
+            {welcomeText}
+            {isTyping && <span style={{ animation: 'blink 1s infinite' }}>|</span>}
+          </span>
+          <NotificationButton
+            onClick={() => setShowNotifications(!showNotifications)}
+            aria-label="Show notifications"
+            tabIndex={0}
+            ref={notificationRef}
+          >
+            <i className="fas fa-bell"></i>
+            {unreadCount > 0 && <NotificationBadge>{unreadCount}</NotificationBadge>}
+            {showNotifications && (
+              <NotificationPanel>
+                {notifications.map(notification => (
+                  <NotificationItem
+                    key={notification.id}
+                    unread={notification.unread}
+                    onClick={() => handleNotificationClick(notification.id)}
+                  >
+                    <div style={{ fontWeight: notification.unread ? 'bold' : 'normal' }}>
+                      {notification.message}
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.25rem' }}>
+                      {notification.time}
+                    </div>
+                  </NotificationItem>
+                ))}
+              </NotificationPanel>
+            )}
+          </NotificationButton>
+        </Title>
+        <OverviewGrid>
+          <OverviewCard onClick={() => setShowSessionsModal(true)} style={{ cursor: 'pointer' }}>
+            <Stat>{upcomingSessions.length}</Stat>
+            <StatLabel>Total Sessions</StatLabel>
+          </OverviewCard>
+          <OverviewCard onClick={() => setShowMenteesModal(true)} style={{ cursor: 'pointer' }}>
+            <Stat>{mentees.length}</Stat>
+            <StatLabel>Active Mentees</StatLabel>
+          </OverviewCard>
+          <OverviewCard onClick={() => setShowResourcesModal(true)} style={{ cursor: 'pointer' }}>
+            <Stat>{resources.length}</Stat>
+            <StatLabel>Resources Shared</StatLabel>
+          </OverviewCard>
+        </OverviewGrid>
+
+        <SectionTitle>Analytics</SectionTitle>
+        <AnalyticsGrid>
+          <AnalyticsCard>
+            <CardTitle>Session Completion Rate</CardTitle>
+            <ChartContainer>
+              <Line data={sessionData} options={{
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: { position: 'top' },
+                  title: { display: true, text: 'Session Completion Rate' }
+                },
+                scales: { y: { beginAtZero: true, max: 100 } }
+              }} />
+            </ChartContainer>
+          </AnalyticsCard>
+        </AnalyticsGrid>
+
+        <SectionTitle>Upcoming Sessions</SectionTitle>
+        <SessionList>
+          {upcomingSessions.map((session, idx) => (
+            <SessionItemLink key={idx} to={`/sessions/${session.id}`}>
+              <span><b>{session.title}</b></span>
+              <SessionDetailsText>{session.date} • {session.time} • {session.mentee}</SessionDetailsText>
+            </SessionItemLink>
+          ))}
+        </SessionList>
+
+        <SectionTitle>Quick Actions</SectionTitle>
+        <QuickActionLink to="/sessions">Schedule Session</QuickActionLink>
+        <QuickActionLink to="/mentees">View Mentees</QuickActionLink>
+        <QuickActionLink to="/resources">Manage Resources</QuickActionLink>
+
+        <SectionTitle>Recent Resources</SectionTitle>
+        <ResourceList>
+          {resources.map((resource, idx) => (
+            <ResourceItemLink key={idx} to={`/resources/${resource.id}`}>
+              <span><b>{resource.name}</b></span>
+              <span style={{ color: '#888', fontSize: '0.95rem' }}>Resource</span>
+            </ResourceItemLink>
+          ))}
+        </ResourceList>
+
+        {showSessionsModal && (
+          <ModalOverlay>
+            <ModalContent>
+              <ModalTitle>All Sessions</ModalTitle>
+              <ul style={{ listStyle: 'none', padding: 0 }}>
+                <li><b>Career Guidance Session</b>: Alice Johnson - Tomorrow 2:00 PM</li>
+                <li><b>Technical Skills Review</b>: Bob Smith - Friday 10:00 AM</li>
+                <li><b>Interview Preparation</b>: Carlos Lee - Next Monday 3:00 PM</li>
+              </ul>
+              <StickyFooter>
+                <ActionButton color="#888" onClick={() => setShowSessionsModal(false)}>Close</ActionButton>
+              </StickyFooter>
+            </ModalContent>
+          </ModalOverlay>
         )}
-      </Title>
-      <OverviewGrid>
-        <OverviewCard onClick={() => setShowMenteesModal(true)} style={{ cursor: 'pointer' }}>
-          <Stat>{mentees.length}</Stat>
-          <StatLabel>Mentees</StatLabel>
-        </OverviewCard>
-        <OverviewCard onClick={() => setShowSessionsModal(true)} style={{ cursor: 'pointer' }}>
-          <Stat>{upcomingSessions.length}</Stat>
-          <StatLabel>Upcoming Sessions</StatLabel>
-        </OverviewCard>
-        <OverviewCard onClick={() => setShowResourcesModal(true)} style={{ cursor: 'pointer' }}>
-          <Stat>{resources.length}</Stat>
-          <StatLabel>Resources</StatLabel>
-        </OverviewCard>
-      </OverviewGrid>
 
-      <AnalyticsGrid>
-        <AnalyticsCard>
-          <h3>Session Analytics</h3>
-          <ChartContainer>
-            <Line data={sessionData} options={chartOptions} />
-          </ChartContainer>
-        </AnalyticsCard>
-        <AnalyticsCard>
-          <h3>Mentee Progress</h3>
-          <ChartContainer>
-            <Line data={progressData} options={chartOptions} />
-          </ChartContainer>
-        </AnalyticsCard>
-      </AnalyticsGrid>
-
-      <SectionTitle>Upcoming Sessions</SectionTitle>
-      <SessionList>
-        {upcomingSessions.map((session) => (
-          <SessionItemLink key={session.id} to={session.link}>
-            <span><b>{session.title}</b> with {session.mentee}</span>
-            <SessionDetailsText>{session.date} at {session.time}</SessionDetailsText>
-          </SessionItemLink>
-        ))}
-      </SessionList>
-
-      <SectionTitle>Quick Actions</SectionTitle>
-      <QuickActionLink to="/sessions">Schedule Session</QuickActionLink>
-      <QuickActionLink to="/mentees">View Mentees</QuickActionLink>
-      <QuickActionLink to="/resources">View Resources</QuickActionLink>
-      <QuickActionLink to="/peer-learning">View Peer Learning</QuickActionLink>
-
-      <SectionTitle>Resources</SectionTitle>
-      <ResourceList>
-        {resources.map((res) => (
-          <ResourceItemLink key={res.id} to={res.link}>
-            {res.name}
-          </ResourceItemLink>
-        ))}
-      </ResourceList>
-
-      {/* Mentees Modal */}
-      {showMenteesModal && (
-        <ModalOverlay>
-          <ModalContent>
-            <ModalTitle>Mentees</ModalTitle>
-            <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+        {showMenteesModal && (
+          <ModalOverlay>
+            <ModalContent>
+              <ModalTitle>Active Mentees</ModalTitle>
               <ul style={{ listStyle: 'none', padding: 0 }}>
-                {mentees.map((mentee, idx) => (
-                  <li key={idx} style={{ marginBottom: 10 }}>{mentee}</li>
-                ))}
+                <li><b>Alice Johnson</b>: Career Guidance, Technical Skills</li>
+                <li><b>Bob Smith</b>: Technical Skills, Interview Prep</li>
+                <li><b>Carlos Lee</b>: Interview Preparation, Networking</li>
               </ul>
-            </div>
-            <StickyFooter>
-              <ActionButton color="#888" onClick={() => setShowMenteesModal(false)}>Close</ActionButton>
-            </StickyFooter>
-          </ModalContent>
-        </ModalOverlay>
-      )}
-      {/* Sessions Modal */}
-      {showSessionsModal && (
-        <ModalOverlay>
-          <ModalContent>
-            <ModalTitle>Upcoming Sessions</ModalTitle>
-            <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+              <StickyFooter>
+                <ActionButton color="#888" onClick={() => setShowMenteesModal(false)}>Close</ActionButton>
+              </StickyFooter>
+            </ModalContent>
+          </ModalOverlay>
+        )}
+
+        {showResourcesModal && (
+          <ModalOverlay>
+            <ModalContent>
+              <ModalTitle>Shared Resources</ModalTitle>
               <ul style={{ listStyle: 'none', padding: 0 }}>
-                {upcomingSessions.map((session, idx) => (
-                  <li key={idx} style={{ marginBottom: 10 }}>
-                    <b>{session.title}</b> - {session.date} at {session.time}
-                  </li>
-                ))}
+                <li><b>Resume Template</b>: PDF - Shared with Alice Johnson</li>
+                <li><b>Interview Questions</b>: Document - Shared with Bob Smith</li>
+                <li><b>Networking Guide</b>: PDF - Shared with Carlos Lee</li>
               </ul>
-            </div>
-            <StickyFooter>
-              <ActionButton color="#888" onClick={() => setShowSessionsModal(false)}>Close</ActionButton>
-            </StickyFooter>
-          </ModalContent>
-        </ModalOverlay>
-      )}
-      {/* Resources Modal */}
-      {showResourcesModal && (
-        <ModalOverlay>
-          <ModalContent>
-            <ModalTitle>Resources</ModalTitle>
-            <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-              <ul style={{ listStyle: 'none', padding: 0 }}>
-                {resources.map((res, idx) => (
-                  <li key={idx} style={{ marginBottom: 10 }}>{res.name}</li>
-                ))}
-              </ul>
-            </div>
-            <StickyFooter>
-              <ActionButton color="#888" onClick={() => setShowResourcesModal(false)}>Close</ActionButton>
-            </StickyFooter>
-          </ModalContent>
-        </ModalOverlay>
-      )}
-    </Container>
+              <StickyFooter>
+                <ActionButton color="#888" onClick={() => setShowResourcesModal(false)}>Close</ActionButton>
+              </StickyFooter>
+            </ModalContent>
+          </ModalOverlay>
+        )}
+      </PageContainer>
+    </ContentWrapper>
   );
 };
 

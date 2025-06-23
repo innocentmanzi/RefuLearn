@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
+import db from '../../pouchdb';
 
 const Container = styled.div`
   padding: 2rem;
@@ -262,9 +263,10 @@ const RatingStar = styled.button`
 `;
 
 const SessionManagement = () => {
+  const [sessions, setSessions] = useState([]);
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
-  const [selectedDate, setSelectedDate] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(new Date());
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [scheduleForm, setScheduleForm] = useState({
     date: '',
@@ -281,50 +283,23 @@ const SessionManagement = () => {
   const mentees = ['Alice Johnson', 'Bob Smith', 'Carlos Lee'];
   const sessionTypes = ['One-on-One', 'Group', 'Workshop'];
 
-  const sessions = [
-    {
-      id: 1,
-      mentee: 'Alice Johnson',
-      date: '2025-06-10',
-      time: '10:00 AM',
-      duration: '60 minutes',
-      type: 'One-on-One',
-      status: 'upcoming',
-      notes: [
-        {
-          id: 1,
-          date: '2025-06-09',
-          content: 'Prepared materials for JavaScript fundamentals review'
-        }
-      ],
-      feedback: null
-    },
-    {
-      id: 2,
-      mentee: 'Bob Smith',
-      date: '2025-06-12',
-      time: '2:00 PM',
-      duration: '45 minutes',
-      type: 'Group',
-      status: 'completed',
-      notes: [
-        {
-          id: 1,
-          date: '2025-06-12',
-          content: 'Covered array methods and callbacks'
-        },
-        {
-          id: 2,
-          date: '2025-06-12',
-          content: 'Assigned practice exercises for next session'
-        }
-      ],
-      feedback: {
-        rating: 5,
-        comment: 'Great session! Very helpful explanations.'
+  useEffect(() => {
+    const fetchSessions = async () => {
+      try {
+        const result = await db.allDocs({
+          include_docs: true,
+          startkey: 'session_',
+          endkey: 'session_\\ufff0'
+        });
+        const fetchedSessions = result.rows.map(row => row.doc);
+        setSessions(fetchedSessions);
+      } catch (error) {
+        console.error("Error fetching sessions:", error);
       }
-    }
-  ];
+    };
+
+    fetchSessions();
+  }, []);
 
   // Generate calendar days
   const daysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();

@@ -16,6 +16,10 @@ const Table = styled.table`
   width: 100%;
   border-collapse: collapse;
   margin-bottom: 2rem;
+
+  @media (max-width: 900px) {
+    display: none;
+  }
 `;
 
 const Th = styled.th`
@@ -146,21 +150,70 @@ const Select = styled.select`
   font-size: 1rem;
 `;
 
+const CoursesGrid = styled.div`
+  display: none;
+  @media (max-width: 900px) {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+`;
+
+const CourseCard = styled.div`
+  background: #fff;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+`;
+
+const CourseInfo = styled.div`
+  flex: 1;
+`;
+
+const CourseTitle = styled.h3`
+  margin: 0 0 0.25rem 0;
+  color: ${({ theme }) => theme.colors.primary};
+`;
+
+const CourseDescription = styled.p`
+  margin: 0;
+  color: #555;
+`;
+
+const CardActions = styled.div`
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+`;
+
 const initialCourses = [
   { id: 1, title: 'Intro to Programming', description: 'Learn the basics of programming.' },
   { id: 2, title: 'Web Development', description: 'Build modern web applications.' },
   { id: 3, title: 'Data Analysis', description: 'Analyze and visualize data.' },
 ];
 
+// Hook to detect mobile screen
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 900);
+  React.useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 900);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  return isMobile;
+}
+
 const ManageCourses = () => {
   const [courses, setCourses] = useState(initialCourses);
-  const [showModal, setShowModal] = useState(false);
-  const [modalMode, setModalMode] = useState('add'); // 'add' or 'edit'
-  const [currentCourse, setCurrentCourse] = useState({ id: null, title: '', description: '' });
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 900);
   const [showCourseBuilder, setShowCourseBuilder] = useState(false);
-  const [videoFiles, setVideoFiles] = useState([]); // For uploaded video files
-  const [resourceFiles, setResourceFiles] = useState([]); // For uploaded resource files
-  const [builderCourse, setBuilderCourse] = useState({
+  const [modalMode, setModalMode] = useState('add'); // 'add' or 'edit'
+
+  const getInitialCourseState = () => ({
     id: null,
     title: '',
     description: '',
@@ -173,62 +226,48 @@ const ManageCourses = () => {
     resources: [],
     resourceUploads: [],
     modules: [],
+    quiz: [],
+    assessments: [],
+    qaEnabled: true,
   });
 
-  const openAddModal = () => {
-    setModalMode('add');
-    setCurrentCourse({ id: null, title: '', description: '' });
-    setShowModal(true);
-  };
+  const [builderCourse, setBuilderCourse] = useState(getInitialCourseState());
 
-  const openEditModal = (course) => {
-    setModalMode('edit');
-    setCurrentCourse(course);
-    setShowModal(true);
+  const openCourseBuilder = (mode, course = null) => {
+    setModalMode(mode);
+    if (mode === 'add') {
+      setBuilderCourse(getInitialCourseState());
+    } else {
+      setBuilderCourse({
+        ...getInitialCourseState(),
+        ...course,
+      });
+    }
+    setShowCourseBuilder(true);
   };
 
   const closeModal = () => {
-    setShowModal(false);
+    setShowCourseBuilder(false);
   };
 
   const handleInputChange = (e) => {
-    setCurrentCourse({ ...currentCourse, [e.target.name]: e.target.value });
+    setBuilderCourse({ ...builderCourse, [e.target.name]: e.target.value });
   };
 
   const handleSave = () => {
     if (modalMode === 'add') {
       setCourses([
         ...courses,
-        { ...currentCourse, id: Date.now() },
+        { ...builderCourse, id: Date.now() },
       ]);
     } else {
-      setCourses(courses.map(c => c.id === currentCourse.id ? currentCourse : c));
+      setCourses(courses.map(c => c.id === builderCourse.id ? builderCourse : c));
     }
     closeModal();
   };
 
   const handleDelete = (id) => {
     setCourses(courses.filter(c => c.id !== id));
-  };
-
-  const openCourseBuilder = (course) => {
-    setBuilderCourse({
-      ...course,
-      videoLinks: Array.isArray(course.videoLinks) ? course.videoLinks : [],
-      videoUploads: Array.isArray(course.videoUploads) ? course.videoUploads : [],
-      resources: Array.isArray(course.resources) ? course.resources : [],
-      resourceUploads: Array.isArray(course.resourceUploads) ? course.resourceUploads : [],
-      modules: Array.isArray(course.modules) ? course.modules : [],
-      category: course.category || '',
-      level: course.level || '',
-      prerequisites: course.prerequisites || '',
-      duration: course.duration || '',
-    });
-    setShowCourseBuilder(true);
-  };
-
-  const closeCourseBuilder = () => {
-    setShowCourseBuilder(false);
   };
 
   const handleBuilderChange = (e) => {
@@ -268,19 +307,57 @@ const ManageCourses = () => {
   };
 
   const handleAddModule = () => {
-    setBuilderCourse({ ...builderCourse, modules: [...builderCourse.modules, { title: '', content: '' }] });
+    const newModule = { title: '', content: '', resources: [], video: null };
+    setBuilderCourse({ ...builderCourse, modules: [...builderCourse.modules, newModule] });
   };
 
   const handleModuleChange = (idx, field, value) => {
     const updated = [...builderCourse.modules];
-    updated[idx][field] = value;
+    updated[idx] = { ...updated[idx], [field]: value };
     setBuilderCourse({ ...builderCourse, modules: updated });
   };
 
   const handleRemoveModule = (idx) => {
-    const updated = [...builderCourse.modules];
-    updated.splice(idx, 1);
+    const updated = builderCourse.modules.filter((_, i) => i !== idx);
     setBuilderCourse({ ...builderCourse, modules: updated });
+  };
+
+  const handleAddQuestion = () => {
+    const newQuestion = { text: '', options: ['', '', '', ''], correctAnswer: 0 };
+    setBuilderCourse({ ...builderCourse, quiz: [...builderCourse.quiz, newQuestion] });
+  };
+
+  const handleQuestionChange = (qIdx, field, value) => {
+    const updated = [...builderCourse.quiz];
+    updated[qIdx] = { ...updated[qIdx], [field]: value };
+    setBuilderCourse({ ...builderCourse, quiz: updated });
+  };
+
+  const handleOptionChange = (qIdx, oIdx, value) => {
+    const updated = [...builderCourse.quiz];
+    updated[qIdx].options[oIdx] = value;
+    setBuilderCourse({ ...builderCourse, quiz: updated });
+  };
+
+  const handleRemoveQuestion = (qIdx) => {
+    const updated = builderCourse.quiz.filter((_, i) => i !== qIdx);
+    setBuilderCourse({ ...builderCourse, quiz: updated });
+  };
+
+  const handleAddAssessment = () => {
+    const newAssessment = { title: '', description: '', dueDate: '' };
+    setBuilderCourse({ ...builderCourse, assessments: [...builderCourse.assessments, newAssessment] });
+  };
+
+  const handleAssessmentChange = (idx, field, value) => {
+    const updated = [...builderCourse.assessments];
+    updated[idx] = { ...updated[idx], [field]: value };
+    setBuilderCourse({ ...builderCourse, assessments: updated });
+  };
+
+  const handleRemoveAssessment = (idx) => {
+    const updated = builderCourse.assessments.filter((_, i) => i !== idx);
+    setBuilderCourse({ ...builderCourse, assessments: updated });
   };
 
   const handleSaveCourseBuilder = () => {
@@ -303,7 +380,6 @@ const ManageCourses = () => {
         ...builderCourse,
         videoUploads: [...builderCourse.videoUploads, e.target.files[0].name],
       });
-      setVideoFiles([...videoFiles, e.target.files[0]]);
     }
   };
 
@@ -311,9 +387,6 @@ const ManageCourses = () => {
     const updated = [...builderCourse.videoUploads];
     updated.splice(idx, 1);
     setBuilderCourse({ ...builderCourse, videoUploads: updated });
-    const updatedFiles = [...videoFiles];
-    updatedFiles.splice(idx, 1);
-    setVideoFiles(updatedFiles);
   };
 
   const handleResourceFileUpload = (e) => {
@@ -322,7 +395,6 @@ const ManageCourses = () => {
         ...builderCourse,
         resourceUploads: [...builderCourse.resourceUploads, e.target.files[0].name],
       });
-      setResourceFiles([...resourceFiles, e.target.files[0]]);
     }
   };
 
@@ -330,166 +402,178 @@ const ManageCourses = () => {
     const updated = [...builderCourse.resourceUploads];
     updated.splice(idx, 1);
     setBuilderCourse({ ...builderCourse, resourceUploads: updated });
-    const updatedFiles = [...resourceFiles];
-    updatedFiles.splice(idx, 1);
-    setResourceFiles(updatedFiles);
   };
 
   return (
     <Container>
       <Title>Manage Courses</Title>
-      <AddButton onClick={openAddModal}>+ Add New Course</AddButton>
-      <Table>
-        <thead>
-          <tr>
-            <Th>Title</Th>
-            <Th>Description</Th>
-            <Th>Actions</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {courses.map(course => (
-            <tr key={course.id}>
-              <Td>{course.title}</Td>
-              <Td>{course.description}</Td>
-              <Td>
-                <ActionButton onClick={() => openEditModal(course)}>Edit</ActionButton>
-                <ActionButton color="#3498db" onClick={() => openCourseBuilder(course)}>View/Edit</ActionButton>
-                <ActionButton color="#e74c3c" onClick={() => handleDelete(course.id)}>Delete</ActionButton>
-              </Td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
+      <AddButton onClick={() => openCourseBuilder('add')}>+ Add New Course</AddButton>
 
-      {showModal && (
-        <ModalOverlay>
-          <ModalContent>
-            <ModalTitle>{modalMode === 'add' ? 'Add New Course' : 'Edit Course'}</ModalTitle>
-            <Input
-              name="title"
-              placeholder="Course Title"
-              value={currentCourse.title}
-              onChange={handleInputChange}
-            />
-            <Input
-              name="description"
-              placeholder="Course Description"
-              value={currentCourse.description}
-              onChange={handleInputChange}
-            />
-            <StickyFooter>
-              <ActionButton onClick={handleSave}>{modalMode === 'add' ? 'Add' : 'Save'}</ActionButton>
-              <ActionButton color="#888" onClick={closeModal}>Cancel</ActionButton>
-            </StickyFooter>
-          </ModalContent>
-        </ModalOverlay>
+      {isMobile ? (
+        <CoursesGrid>
+          {courses.map(course => (
+            <CourseCard key={course.id}>
+              <CourseInfo>
+                <CourseTitle>{course.title}</CourseTitle>
+                <CourseDescription>{course.description}</CourseDescription>
+              </CourseInfo>
+              <CardActions>
+                <ActionButton onClick={() => openCourseBuilder('edit', course)}>View/Edit</ActionButton>
+                <ActionButton color="#dc3545" onClick={() => handleDelete(course.id)}>Delete</ActionButton>
+              </CardActions>
+            </CourseCard>
+          ))}
+        </CoursesGrid>
+      ) : (
+        <Table>
+          <thead>
+            <tr>
+              <Th>Title</Th>
+              <Th>Description</Th>
+              <Th>Actions</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {courses.map(course => (
+              <tr key={course.id}>
+                <Td>{course.title}</Td>
+                <Td>{course.description}</Td>
+                <Td>
+                  <ActionButton onClick={() => openCourseBuilder('edit', course)}>View/Edit</ActionButton>
+                  <ActionButton color="#dc3545" onClick={() => handleDelete(course.id)}>Delete</ActionButton>
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
       )}
 
       {showCourseBuilder && (
         <ModalOverlay>
           <ModalContent style={{ maxWidth: 600 }}>
-            <ModalTitle>Course Builder</ModalTitle>
-            <Input
-              name="title"
-              placeholder="Course Title"
-              value={builderCourse.title}
-              onChange={handleBuilderChange}
-            />
-            <Input
-              name="description"
-              placeholder="Course Description"
-              value={builderCourse.description}
-              onChange={handleBuilderChange}
-            />
-            <Select name="category" value={builderCourse.category} onChange={handleBuilderSelect}>
-              <option value="">Select Category</option>
-              <option value="programming">Programming</option>
-              <option value="design">Design</option>
-              <option value="business">Business</option>
-              <option value="language">Language</option>
-              <option value="other">Other</option>
-            </Select>
-            <Select name="level" value={builderCourse.level} onChange={handleBuilderSelect}>
-              <option value="">Select Level</option>
-              <option value="beginner">Beginner</option>
-              <option value="intermediate">Intermediate</option>
-              <option value="advanced">Advanced</option>
-            </Select>
-            <Input
-              name="prerequisites"
-              placeholder="Prerequisites (comma separated)"
-              value={builderCourse.prerequisites}
-              onChange={handleBuilderChange}
-            />
-            <Input
-              name="duration"
-              placeholder="Duration (e.g. 6 weeks, 10 hours)"
-              value={builderCourse.duration}
-              onChange={handleBuilderChange}
-            />
-            <Label>Video Links</Label>
-            {(builderCourse.videoLinks || []).map((link, idx) => (
-              <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <ResourceInput
-                  value={link}
-                  placeholder="YouTube/Vimeo link or video URL"
-                  onChange={e => handleVideoLinkChange(idx, e.target.value)}
-                />
-                <ActionButton color="#e74c3c" onClick={() => handleRemoveVideoLink(idx)}>Remove</ActionButton>
-              </div>
-            ))}
-            <ActionButton color="#27ae60" onClick={handleAddVideoLink}>+ Add Video Link</ActionButton>
-            <Label style={{ marginTop: 16 }}>Upload Video Files</Label>
-            <input type="file" accept="video/*" onChange={handleVideoFileUpload} />
-            {(builderCourse.videoUploads || []).map((file, idx) => (
-              <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <span>{file}</span>
-                <ActionButton color="#e74c3c" onClick={() => handleRemoveVideoUpload(idx)}>Remove</ActionButton>
-              </div>
-            ))}
-            <Label style={{ marginTop: 16 }}>Resources</Label>
-            {(builderCourse.resources || []).map((res, idx) => (
-              <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <ResourceInput
-                  value={res}
-                  placeholder="Resource link or file name"
-                  onChange={e => handleResourceChange(idx, e.target.value)}
-                />
-                <ActionButton color="#e74c3c" onClick={() => handleRemoveResource(idx)}>Remove</ActionButton>
-              </div>
-            ))}
-            <ActionButton color="#27ae60" onClick={handleAddResource}>+ Add Resource Link</ActionButton>
-            <Label style={{ marginTop: 16 }}>Upload Resource Files</Label>
-            <input type="file" accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.zip,.rar" onChange={handleResourceFileUpload} />
-            {(builderCourse.resourceUploads || []).map((file, idx) => (
-              <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <span>{file}</span>
-                <ActionButton color="#e74c3c" onClick={() => handleRemoveResourceUpload(idx)}>Remove</ActionButton>
-              </div>
-            ))}
-            <Label style={{ marginTop: 16 }}>Modules/Lessons</Label>
-            {(builderCourse.modules || []).map((mod, idx) => (
-              <ModuleBox key={idx}>
-                <Input
-                  value={mod.title}
-                  placeholder="Module/Lesson Title"
-                  onChange={e => handleModuleChange(idx, 'title', e.target.value)}
-                />
-                <TextArea
-                  value={mod.content}
-                  placeholder="Module/Lesson Content"
-                  onChange={e => handleModuleChange(idx, 'content', e.target.value)}
-                />
-                <ActionButton color="#e74c3c" onClick={() => handleRemoveModule(idx)}>Remove Module</ActionButton>
-              </ModuleBox>
-            ))}
-            <ActionButton color="#27ae60" onClick={handleAddModule}>+ Add Module/Lesson</ActionButton>
+            <ModalTitle>{modalMode === 'add' ? 'Create New Course' : 'Edit Course'}</ModalTitle>
+
+            {/* Basic Info Section */}
+            <ModuleBox>
+              <Label>Course Overview</Label>
+              <Input
+                name="title"
+                placeholder="Course Title"
+                value={builderCourse.title}
+                onChange={handleBuilderChange}
+              />
+              <Input
+                name="description"
+                placeholder="Course Description"
+                value={builderCourse.description}
+                onChange={handleBuilderChange}
+              />
+              <Select name="category" value={builderCourse.category} onChange={handleBuilderSelect}>
+                <option value="">Select Category</option>
+                <option value="programming">Programming</option>
+                <option value="design">Design</option>
+                <option value="business">Business</option>
+                <option value="language">Language</option>
+                <option value="other">Other</option>
+              </Select>
+              <Select name="level" value={builderCourse.level} onChange={handleBuilderSelect}>
+                <option value="">Select Level</option>
+                <option value="beginner">Beginner</option>
+                <option value="intermediate">Intermediate</option>
+                <option value="advanced">Advanced</option>
+              </Select>
+              <Input
+                name="prerequisites"
+                placeholder="Prerequisites (comma separated)"
+                value={builderCourse.prerequisites}
+                onChange={handleBuilderChange}
+              />
+              <Input
+                name="duration"
+                placeholder="Duration (e.g. 6 weeks, 10 hours)"
+                value={builderCourse.duration}
+                onChange={handleBuilderChange}
+              />
+            </ModuleBox>
+
+            {/* Modules Section */}
+            <ModuleBox>
+              <Label>Modules / Lessons</Label>
+              {(builderCourse.modules || []).map((mod, idx) => (
+                <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  <Input
+                    value={mod.title}
+                    placeholder="Module/Lesson Title"
+                    onChange={e => handleModuleChange(idx, 'title', e.target.value)}
+                  />
+                  <TextArea
+                    value={mod.content}
+                    placeholder="Module/Lesson Content"
+                    onChange={e => handleModuleChange(idx, 'content', e.target.value)}
+                  />
+                  <ActionButton color="#e74c3c" onClick={() => handleRemoveModule(idx)}>Remove Module</ActionButton>
+                </div>
+              ))}
+              <ActionButton color="#27ae60" onClick={handleAddModule}>+ Add Module/Lesson</ActionButton>
+            </ModuleBox>
+
+            {/* Quiz Section */}
+            <ModuleBox>
+              <Label>Course Quiz</Label>
+              {(builderCourse.quiz || []).map((q, qIdx) => (
+                <div key={qIdx} style={{ border: '1px solid #ddd', padding: '1rem', borderRadius: '8px', marginBottom: '1rem' }}>
+                  <Label>Question {qIdx + 1}</Label>
+                  <TextArea value={q.text} onChange={(e) => handleQuestionChange(qIdx, 'text', e.target.value)} placeholder="Question text" />
+                  <Label>Options</Label>
+                  {q.options.map((opt, oIdx) => (
+                    <Input key={oIdx} value={opt} onChange={(e) => handleOptionChange(qIdx, oIdx, e.target.value)} placeholder={`Option ${oIdx + 1}`} />
+                  ))}
+                  <Label>Correct Answer</Label>
+                  <Select value={q.correctAnswer} onChange={(e) => handleQuestionChange(qIdx, 'correctAnswer', parseInt(e.target.value))}>
+                    {q.options.map((opt, oIdx) => (
+                      <option key={oIdx} value={oIdx}>{`Option ${oIdx + 1}`}</option>
+                    ))}
+                  </Select>
+                  <ActionButton color="#e74c3c" onClick={() => handleRemoveQuestion(qIdx)} style={{marginTop: '0.5rem'}}>Remove Question</ActionButton>
+                </div>
+              ))}
+              <ActionButton color="#27ae60" onClick={handleAddQuestion}>+ Add Question</ActionButton>
+            </ModuleBox>
+
+            {/* Assessments Section */}
+            <ModuleBox>
+              <Label>Assessments</Label>
+                {(builderCourse.assessments || []).map((assessment, idx) => (
+                <div key={idx} style={{ border: '1px solid #ddd', padding: '1rem', borderRadius: '8px', marginBottom: '1rem' }}>
+                    <Label>Assessment {idx + 1}</Label>
+                    <Input value={assessment.title} onChange={(e) => handleAssessmentChange(idx, 'title', e.target.value)} placeholder="Assessment Title" />
+                    <TextArea value={assessment.description} onChange={(e) => handleAssessmentChange(idx, 'description', e.target.value)} placeholder="Description" />
+                    <Input type="date" value={assessment.dueDate} onChange={(e) => handleAssessmentChange(idx, 'dueDate', e.target.value)} />
+                    <ActionButton color="#e74c3c" onClick={() => handleRemoveAssessment(idx)} style={{marginTop: '0.5rem'}}>Remove Assessment</ActionButton>
+                </div>
+                ))}
+              <ActionButton color="#27ae60" onClick={handleAddAssessment}>+ Add Assessment</ActionButton>
+            </ModuleBox>
+
+            {/* Settings Section */}
+            <ModuleBox>
+                <Label>Course Settings</Label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <input
+                        type="checkbox"
+                        id="qaEnabled"
+                        checked={builderCourse.qaEnabled}
+                        onChange={(e) => setBuilderCourse({ ...builderCourse, qaEnabled: e.target.checked })}
+                    />
+                    <label htmlFor="qaEnabled">Enable Student Q&A Forum</label>
+                </div>
+            </ModuleBox>
+
             <StickyFooter>
               <ActionButton onClick={handleSaveCourseBuilder} disabled={!builderCourse.title || !builderCourse.description}>
                 Save Course
               </ActionButton>
-              <ActionButton color="#888" onClick={closeCourseBuilder}>Cancel</ActionButton>
+              <ActionButton color="#888" onClick={closeModal}>Cancel</ActionButton>
             </StickyFooter>
           </ModalContent>
         </ModalOverlay>

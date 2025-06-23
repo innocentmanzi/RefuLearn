@@ -1,7 +1,7 @@
 import React from 'react';
 import styled from 'styled-components';
 import { Line, Bar } from 'react-chartjs-2';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -12,6 +12,8 @@ import {
   Tooltip,
   Legend
 } from 'chart.js';
+import PageContainer from '../../components/PageContainer';
+import ContentWrapper from '../../components/ContentWrapper';
 
 ChartJS.register(
   CategoryScale,
@@ -27,6 +29,10 @@ const Container = styled.div`
   padding: 2rem;
   background: ${({ theme }) => theme.colors.white};
   min-height: 100vh;
+  max-width: 100vw;
+  @media (max-width: 900px) {
+    padding: 1rem;
+  }
 `;
 
 const Title = styled.h1`
@@ -39,6 +45,10 @@ const OverviewGrid = styled.div`
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 1.5rem;
   margin-bottom: 2rem;
+  @media (max-width: 600px) {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
 `;
 
 const OverviewCard = styled.div`
@@ -77,6 +87,10 @@ const DashboardGrid = styled.div`
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 1.5rem;
   margin-top: 1.5rem;
+  @media (max-width: 900px) {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
 `;
 
 const Card = styled.div`
@@ -86,9 +100,11 @@ const Card = styled.div`
   box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   transition: transform 0.2s, box-shadow 0.2s;
   cursor: pointer;
-  &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  width: 100%;
+  max-width: 100vw;
+  @media (max-width: 600px) {
+    padding: 1rem;
+    font-size: 0.98rem;
   }
 `;
 
@@ -101,6 +117,11 @@ const CardTitle = styled.h3`
 const ChartContainer = styled.div`
   margin-top: 1rem;
   height: 200px;
+  width: 100%;
+  overflow-x: auto;
+  @media (max-width: 600px) {
+    height: 160px;
+  }
 `;
 
 const ApplicantList = styled.ul`
@@ -138,19 +159,39 @@ const QuickActionLink = styled(NavLink)`
 `;
 
 const EmployerDashboard = () => {
+  const navigate = useNavigate();
   // Example stats (replace with real data fetching in a real app)
   const stats = {
     jobsPosted: 8,
     activeJobs: 3,
-    applicants: 27,
+    closedJobs: 5, // Example value
   };
 
+  // Example scholarships (replace with backend data)
+  const scholarships = [
+    { title: 'Tech for Refugees Scholarship', provider: 'TechOrg', location: 'Online', daysRemaining: 14, link: 'https://example.com/tech-scholarship', description: 'Scholarship for refugees interested in technology.' },
+    { title: 'Global Education Fund', provider: 'GlobalEd', location: 'Online', daysRemaining: 20, link: 'https://example.com/global-ed', description: 'Support for refugees pursuing higher education.' },
+  ];
+
+  // Example recent applicants (replace with backend data)
   const recentApplicants = [
     { name: 'Alice Johnson', job: 'Frontend Developer' },
     { name: 'Bob Smith', job: 'Data Analyst' },
     { name: 'Carlos Lee', job: 'Project Manager' },
     { name: 'Dina Patel', job: 'UI/UX Designer' },
   ];
+
+  // Example analytics for jobs posted in the last month
+  const jobPostingLastMonthData = {
+    labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+    datasets: [
+      {
+        label: 'Jobs Posted',
+        data: [1, 0, 1, 1], // Example data
+        backgroundColor: '#28a745',
+      },
+    ],
+  };
 
   const applicationTrendsData = {
     labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
@@ -197,65 +238,84 @@ const EmployerDashboard = () => {
   };
 
   return (
-    <Container>
-      <Title>Employer Dashboard</Title>
-      <OverviewGrid>
-        <OverviewCard>
-          <Stat>{stats.jobsPosted}</Stat>
-          <StatLabel>Jobs Posted</StatLabel>
-        </OverviewCard>
-        <OverviewCard>
-          <Stat>{stats.activeJobs}</Stat>
-          <StatLabel>Active Jobs</StatLabel>
-        </OverviewCard>
-        <OverviewCard>
-          <Stat>{stats.applicants}</Stat>
-          <StatLabel>Total Applicants</StatLabel>
-        </OverviewCard>
-      </OverviewGrid>
+    <ContentWrapper>
+      <PageContainer>
+        <Title>Employer Dashboard</Title>
+        <OverviewGrid>
+          <OverviewCard style={{ cursor: 'pointer' }} onClick={() => navigate('/jobs?filter=lastMonth')}>
+            <Stat>{stats.jobsPosted}</Stat>
+            <StatLabel>Jobs Posted</StatLabel>
+          </OverviewCard>
+          <OverviewCard style={{ cursor: 'pointer' }} onClick={() => navigate('/jobs?filter=active')}>
+            <Stat>{stats.activeJobs}</Stat>
+            <StatLabel>Active Jobs</StatLabel>
+          </OverviewCard>
+          <OverviewCard style={{ cursor: 'pointer' }} onClick={() => navigate('/jobs?filter=closed')}>
+            <Stat>{stats.closedJobs}</Stat>
+            <StatLabel>Closed Jobs</StatLabel>
+          </OverviewCard>
+          <OverviewCard style={{ cursor: 'pointer' }} onClick={() => navigate('/scholarships')}>
+            <Stat style={{ fontSize: '1.2rem', marginBottom: 8 }}>Scholarship Opportunities</Stat>
+          </OverviewCard>
+        </OverviewGrid>
 
-      <SectionTitle>Applications Analytics</SectionTitle>
-      <DashboardGrid>
-        <Card>
-          <CardTitle>Application Trends</CardTitle>
-          <ChartContainer>
-            <Line data={applicationTrendsData} options={{
-              ...chartOptions,
-              plugins: {
-                ...chartOptions.plugins,
-                title: { display: true, text: 'Application Trends' }
-              }
-            }} />
-          </ChartContainer>
-        </Card>
-        <Card>
-          <CardTitle>Job Posting Activity</CardTitle>
-          <ChartContainer>
-            <Bar data={jobPostingActivityData} options={{
-              ...chartOptions,
-              plugins: {
-                ...chartOptions.plugins,
-                title: { display: true, text: 'Job Posting Activity' }
-              }
-            }} />
-          </ChartContainer>
-        </Card>
-      </DashboardGrid>
+        <SectionTitle>Applications Analytics</SectionTitle>
+        <DashboardGrid>
+          <Card>
+            <CardTitle>Job Posting Activity (Last Month)</CardTitle>
+            <ChartContainer>
+              <Bar data={jobPostingLastMonthData} options={{
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: { position: 'top' },
+                  title: { display: true, text: 'Jobs Posted (Last Month)' }
+                },
+                scales: { y: { beginAtZero: true } }
+              }} />
+            </ChartContainer>
+          </Card>
+          <Card>
+            <CardTitle>Application Trends</CardTitle>
+            <ChartContainer>
+              <Line data={applicationTrendsData} options={{
+                ...chartOptions,
+                plugins: {
+                  ...chartOptions.plugins,
+                  title: { display: true, text: 'Application Trends' }
+                }
+              }} />
+            </ChartContainer>
+          </Card>
+          <Card>
+            <CardTitle>Job Posting Activity</CardTitle>
+            <ChartContainer>
+              <Bar data={jobPostingActivityData} options={{
+                ...chartOptions,
+                plugins: {
+                  ...chartOptions.plugins,
+                  title: { display: true, text: 'Job Posting Activity' }
+                }
+              }} />
+            </ChartContainer>
+          </Card>
+        </DashboardGrid>
 
-      <SectionTitle>Quick Actions</SectionTitle>
-      <QuickActionLink to="/post-jobs">Post New Job</QuickActionLink>
-      <QuickActionLink to="/applicants">View Applicants</QuickActionLink>
+        <SectionTitle>Quick Actions</SectionTitle>
+        <QuickActionLink to="/post-jobs">Post New Job</QuickActionLink>
+        <QuickActionLink to="/applicants">View Applicants</QuickActionLink>
 
-      <SectionTitle>Recent Applicants</SectionTitle>
-      <ApplicantList>
-        {recentApplicants.map((app, idx) => (
-          <ApplicantItem key={idx}>
-            <span>{app.name}</span>
-            <span style={{ color: '#888', fontSize: '0.95rem' }}>{app.job}</span>
-          </ApplicantItem>
-        ))}
-      </ApplicantList>
-    </Container>
+        <SectionTitle>Recent Applicants</SectionTitle>
+        <ApplicantList>
+          {recentApplicants.map((app, idx) => (
+            <ApplicantItem key={idx}>
+              <span>{app.name}</span>
+              <span style={{ color: '#888', fontSize: '0.95rem' }}>{app.job}</span>
+            </ApplicantItem>
+          ))}
+        </ApplicantList>
+      </PageContainer>
+    </ContentWrapper>
   );
 };
 

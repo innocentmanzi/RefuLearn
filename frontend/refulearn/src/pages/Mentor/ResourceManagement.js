@@ -17,6 +17,12 @@ const Header = styled.div`
   justify-content: space-between;
   align-items: center;
   margin-bottom: 2rem;
+
+  @media (max-width: 768px) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1rem;
+  }
 `;
 
 const SearchBar = styled.input`
@@ -26,6 +32,10 @@ const SearchBar = styled.input`
   border: 1px solid #ddd;
   border-radius: 8px;
   font-size: 1rem;
+
+  @media (max-width: 768px) {
+    max-width: 100%;
+  }
   
   &:focus {
     outline: none;
@@ -282,27 +292,9 @@ const ActionButtons = styled.div`
 const ResourceManagement = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('all');
-  const [newResource, setNewResource] = useState({
-    name: '',
-    category: '',
-    description: '',
-    type: 'file',
-    file: null,
-    url: ''
-  });
-
-  const categories = [
-    'all',
-    'documents',
-    'presentations',
-    'videos',
-    'links',
-    'other'
-  ];
-
-  // Sample resources data with enhanced information
-  const resources = [
+  const [resources, setResources] = useState([
     {
       id: 1,
       name: 'JavaScript Fundamentals Guide',
@@ -351,6 +343,24 @@ const ResourceManagement = () => {
       uploadDate: '2025-06-12',
       url: 'https://example.com/python-cheatsheet.docx'
     }
+  ]);
+  const [newResource, setNewResource] = useState({
+    name: '',
+    category: '',
+    description: '',
+    type: 'file',
+    file: null,
+    url: ''
+  });
+  const [editingResource, setEditingResource] = useState(null);
+
+  const categories = [
+    'all',
+    'documents',
+    'presentations',
+    'videos',
+    'links',
+    'other'
   ];
 
   const filteredResources = resources.filter(resource =>
@@ -378,24 +388,33 @@ const ResourceManagement = () => {
   };
 
   const handleDownload = (resource) => {
-    console.log('Downloading:', resource.name);
-    // Implement actual download logic here
-    alert(`Downloading ${resource.name}`);
+    if (resource.url) {
+      window.open(resource.url, '_blank');
+    } else {
+      alert('No downloadable file or link available.');
+    }
   };
 
   const handleEdit = (resource) => {
-    console.log('Editing:', resource.name);
-    // Implement actual edit logic here, possibly open another modal with pre-filled data
-    alert(`Editing ${resource.name}`);
+    setEditingResource(resource);
+    setShowEditModal(true);
+  };
+
+  const handleEditSave = () => {
+    setResources(resources.map(r => r.id === editingResource.id ? editingResource : r));
+    setShowEditModal(false);
+    setEditingResource(null);
+  };
+
+  const handleEditChange = (e) => {
+    const { name, value } = e.target;
+    setEditingResource({ ...editingResource, [name]: value });
   };
 
   const handleDelete = (resource) => {
-    console.log('Deleting:', resource.name);
-    // Implement actual delete logic here
     const confirmDelete = window.confirm(`Are you sure you want to delete "${resource.name}"?`);
     if (confirmDelete) {
-      // Perform deletion
-      alert(`"${resource.name}" deleted.`);
+      setResources(prev => prev.filter(r => r.id !== resource.id));
     }
   };
 
@@ -484,7 +503,6 @@ const ResourceManagement = () => {
             )}
             
             <ActionButtons>
-              <ActionButton onClick={() => handleDownload(resource)}>Download</ActionButton>
               <ActionButton variant="edit" onClick={() => handleEdit(resource)}>Edit</ActionButton>
               <ActionButton variant="delete" onClick={() => handleDelete(resource)}>Delete</ActionButton>
             </ActionButtons>
@@ -538,22 +556,21 @@ const ResourceManagement = () => {
                 placeholder="Enter resource description"
               />
             </FormGroup>
-            {newResource.type === 'file' && (
+            {newResource.type === 'file' ? (
               <FormGroup>
                 <Label>File</Label>
                 <Input
                   type="file"
-                  onChange={(e) => setNewResource({...newResource, file: e.target.files[0]})}
+                  onChange={(e) => setNewResource({...newResource, file: e.target.files[0], url: ''})}
                 />
               </FormGroup>
-            )}
-            {(newResource.type === 'video' || newResource.type === 'link') && (
+            ) : (
               <FormGroup>
                 <Label>URL</Label>
                 <Input
                   type="text"
                   value={newResource.url}
-                  onChange={(e) => setNewResource({...newResource, url: e.target.value})}
+                  onChange={(e) => setNewResource({...newResource, url: e.target.value, file: null})}
                   placeholder="Enter URL"
                 />
               </FormGroup>
@@ -564,6 +581,86 @@ const ResourceManagement = () => {
                 onClick={() => setShowUploadModal(false)}
                 style={{ background: '#666' }}
               >
+                Cancel
+              </Button>
+            </div>
+          </ModalContent>
+        </Modal>
+      )}
+
+      {showEditModal && editingResource && (
+        <Modal>
+          <ModalContent>
+            <h3>Edit Resource</h3>
+            <FormGroup>
+              <Label>Resource Name</Label>
+              <Input
+                type="text"
+                name="name"
+                value={editingResource.name}
+                onChange={handleEditChange}
+                placeholder="Enter resource name"
+              />
+            </FormGroup>
+            <FormGroup>
+              <Label>Resource Type</Label>
+              <Select
+                name="type"
+                value={editingResource.type}
+                onChange={handleEditChange}
+              >
+                <option value="file">File</option>
+                <option value="video">Video</option>
+                <option value="link">Link</option>
+              </Select>
+            </FormGroup>
+            <FormGroup>
+              <Label>Category</Label>
+              <Select
+                name="category"
+                value={editingResource.category}
+                onChange={handleEditChange}
+              >
+                <option value="">Select category</option>
+                {categories.filter(cat => cat !== 'all').map(category => (
+                  <option key={category} value={category}>
+                    {category.charAt(0).toUpperCase() + category.slice(1)}
+                  </option>
+                ))}
+              </Select>
+            </FormGroup>
+            <FormGroup>
+              <Label>Description</Label>
+              <TextArea
+                name="description"
+                value={editingResource.description}
+                onChange={handleEditChange}
+                placeholder="Enter resource description"
+              />
+            </FormGroup>
+            {editingResource.type === 'file' ? (
+              <FormGroup>
+                <Label>File</Label>
+                <Input
+                  type="file"
+                  onChange={(e) => setEditingResource({...editingResource, file: e.target.files[0], url: ''})}
+                />
+              </FormGroup>
+            ) : (
+              <FormGroup>
+                <Label>URL</Label>
+                <Input
+                  type="text"
+                  name="url"
+                  value={editingResource.url}
+                  onChange={handleEditChange}
+                  placeholder="Enter URL"
+                />
+              </FormGroup>
+            )}
+            <div style={{ marginTop: '1rem' }}>
+              <Button onClick={handleEditSave}>Save</Button>
+              <Button onClick={() => { setShowEditModal(false); setEditingResource(null); }} style={{ background: '#666' }}>
                 Cancel
               </Button>
             </div>

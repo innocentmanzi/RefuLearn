@@ -141,10 +141,12 @@ const Tag = styled.span`
 const ProgressChart = styled.div`
   margin-top: 1rem;
   height: 200px;
+  min-width: 0;
 `;
 
 const GoalList = styled.div`
   margin-top: 1.5rem;
+  min-width: 0;
 `;
 
 const GoalItem = styled.div`
@@ -216,6 +218,10 @@ const ModalContent = styled.div`
   border-radius: 8px;
   width: 80%;
   max-width: 600px;
+  max-height: 80vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 `;
 
 const ModalHeader = styled.div`
@@ -323,6 +329,11 @@ const Button = styled.button`
   }
 `;
 
+const GoalStatusModal = styled(ModalContent)`
+  max-width: 400px;
+  min-width: 250px;
+`;
+
 const MenteeProfiles = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddGoalModal, setShowAddGoalModal] = useState(false);
@@ -333,6 +344,8 @@ const MenteeProfiles = () => {
     deadline: '',
     priority: 'medium'
   });
+  const [showGoalStatusModal, setShowGoalStatusModal] = useState(false);
+  const [selectedGoal, setSelectedGoal] = useState(null);
 
   // Sample mentees data with enhanced information
   const mentees = [
@@ -453,6 +466,23 @@ const MenteeProfiles = () => {
     });
   };
 
+  // Mock: Find all mentees with the selected goal (by title)
+  const getGoalStatusData = (goalTitle) => {
+    const completed = [];
+    const inProgress = [];
+    mentees.forEach(mentee => {
+      const goal = mentee.goals.find(g => g.title === goalTitle);
+      if (goal) {
+        if (goal.completed) {
+          completed.push({ name: mentee.name, progress: mentee.progress });
+        } else {
+          inProgress.push({ name: mentee.name, progress: mentee.progress });
+        }
+      }
+    });
+    return { completed, inProgress };
+  };
+
   return (
     <Container>
       <Title>Mentee Profiles</Title>
@@ -542,7 +572,10 @@ const MenteeProfiles = () => {
                 <GoalItem
                   key={goal.id}
                   completed={goal.completed}
-                  onClick={() => handleGoalToggle(goal.id)}
+                  onClick={() => {
+                    setSelectedGoal(goal);
+                    setShowGoalStatusModal(true);
+                  }}
                 >
                   <GoalInfo>
                     <GoalTitle>{goal.title}</GoalTitle>
@@ -614,6 +647,58 @@ const MenteeProfiles = () => {
               </Button>
             </div>
           </ModalContent>
+        </Modal>
+      )}
+
+      {showGoalStatusModal && selectedGoal && (
+        <Modal>
+          <GoalStatusModal>
+            <ModalHeader>
+              <h3>Goal: {selectedGoal.title}</h3>
+              <CloseButton onClick={() => setShowGoalStatusModal(false)}>×</CloseButton>
+            </ModalHeader>
+            {(() => {
+              const { completed, inProgress } = getGoalStatusData(selectedGoal.title);
+              // Helper to get mentee by name for avatar
+              const getMenteeByName = (name) => mentees.find(m => m.name === name);
+              return (
+                <>
+                  <div style={{ marginBottom: 12 }}><b>Completed:</b></div>
+                  {completed.length === 0 ? <div style={{ color: '#888', marginBottom: 8 }}>None</div> : (
+                    <ul style={{ listStyle: 'none', padding: 0, marginBottom: 12 }}>
+                      {completed.map((m, idx) => {
+                        const mentee = getMenteeByName(m.name);
+                        return (
+                          <li key={idx} style={{ marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Avatar style={{ width: 32, height: 32, fontSize: '1rem', marginRight: 0 }}>
+                              {mentee ? mentee.name.split(' ').map(n => n[0]).join('') : '?'}
+                            </Avatar>
+                            <span>{m.name}</span> <span style={{ color: '#28a745', fontSize: '0.9em' }}>({m.progress}%)</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                  <div style={{ marginBottom: 12 }}><b>In Progress:</b></div>
+                  {inProgress.length === 0 ? <div style={{ color: '#888' }}>None</div> : (
+                    <ul style={{ listStyle: 'none', padding: 0 }}>
+                      {inProgress.map((m, idx) => {
+                        const mentee = getMenteeByName(m.name);
+                        return (
+                          <li key={idx} style={{ marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Avatar style={{ width: 32, height: 32, fontSize: '1rem', marginRight: 0 }}>
+                              {mentee ? mentee.name.split(' ').map(n => n[0]).join('') : '?'}
+                            </Avatar>
+                            <span>{m.name}</span> <span style={{ color: '#ff9800', fontSize: '0.9em' }}>({m.progress}%)</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </>
+              );
+            })()}
+          </GoalStatusModal>
         </Modal>
       )}
     </Container>

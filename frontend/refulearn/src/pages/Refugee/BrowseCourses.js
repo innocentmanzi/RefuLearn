@@ -1,11 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
+import db from '../../pouchdb';
+import ContentWrapper from '../../components/ContentWrapper';
 
 const Container = styled.div`
   padding: 2rem;
   background: ${({ theme }) => theme.colors.white};
   min-height: 100vh;
+  max-width: 100vw;
+  @media (max-width: 900px) {
+    padding: 1rem;
+  }
 `;
 
 const Header = styled.div`
@@ -17,19 +23,6 @@ const Header = styled.div`
 
 const Title = styled.h1`
   color: ${({ theme }) => theme.colors.primary};
-`;
-
-const SearchBar = styled.input`
-  padding: 0.8rem 1.2rem;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  font-size: 1rem;
-  width: 300px;
-  
-  &:focus {
-    outline: none;
-    border-color: ${({ theme }) => theme.colors.primary};
-  }
 `;
 
 const FilterSection = styled.div`
@@ -47,7 +40,6 @@ const FilterButton = styled.button`
   padding: 0.5rem 1rem;
   cursor: pointer;
   transition: all 0.2s;
-  
   &:hover {
     background: ${({ theme }) => theme.colors.primary};
     color: white;
@@ -58,6 +50,11 @@ const CourseGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 1.5rem;
+  width: 100%;
+  @media (max-width: 900px) {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
 `;
 
 const CourseCard = styled.div`
@@ -67,7 +64,12 @@ const CourseCard = styled.div`
   box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   transition: transform 0.2s;
   cursor: pointer;
-  
+  width: 100%;
+  max-width: 100vw;
+  @media (max-width: 600px) {
+    padding: 0.5rem;
+    font-size: 0.98rem;
+  }
   &:hover {
     transform: translateY(-4px);
   }
@@ -131,165 +133,142 @@ const EnrollButton = styled.button`
   margin-top: 1rem;
   cursor: pointer;
   transition: background 0.2s;
-  
   &:hover {
     background: ${({ theme }) => theme.colors.secondary};
   }
 `;
 
-const CardsGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 1rem;
-  margin-bottom: 2rem;
-`;
-
-const Card = styled.div`
-  background: #fff;
-  border-radius: 8px;
-  padding: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-  text-align: center;
-  cursor: pointer;
-  transition: transform 0.2s;
-
-  &:hover {
-    transform: translateY(-2px);
+const allCourses = [
+  {
+    id: 1,
+    title: 'Basic English Communication',
+    description: 'Learn essential English communication skills for daily life and work.',
+    level: 'Beginner',
+    duration: '8 weeks',
+    students: 1200,
+    image: 'https://images.unsplash.com/photo-1546410531-bb4caa6b424d?auto=format&fit=crop&w=500&q=60'
+  },
+  {
+    id: 2,
+    title: 'Digital Skills Fundamentals',
+    description: 'Master basic computer skills and digital literacy for the modern workplace.',
+    level: 'Beginner',
+    duration: '6 weeks',
+    students: 850,
+    image: 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&w=500&q=60'
+  },
+  {
+    id: 3,
+    title: 'Job Search Strategies',
+    description: 'Learn effective job search techniques and resume building skills.',
+    level: 'Intermediate',
+    duration: '4 weeks',
+    students: 950,
+    image: 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&w=500&q=60'
+  },
+  {
+    id: 4,
+    title: 'Professional Networking',
+    description: 'Build your professional network and learn effective networking strategies.',
+    level: 'Intermediate',
+    duration: '5 weeks',
+    students: 700,
+    image: 'https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=500&q=60'
+  },
+  {
+    id: 5,
+    title: 'Advanced Programming',
+    description: 'Deep dive into advanced programming concepts and best practices.',
+    level: 'Advanced',
+    duration: '10 weeks',
+    students: 1000,
+    image: 'https://images.unsplash.com/photo-1461749280684-dccba630e2f6?auto=format&fit=crop&w=500&q=60'
+  },
+  {
+    id: 6,
+    title: 'Leadership Skills',
+    description: 'Develop leadership skills for professional and personal growth.',
+    level: 'Advanced',
+    duration: '7 weeks',
+    students: 980,
+    image: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=500&q=60'
   }
-`;
-
-const CardTitle = styled.h4`
-  margin: 0;
-  color: ${({ theme }) => theme.colors.primary};
-  font-size: 1rem;
-`;
+];
 
 const BrowseCourses = () => {
   const navigate = useNavigate();
-  const [searchQuery, setSearchQuery] = useState('');
+  const [enrolled, setEnrolled] = useState([]);
   const [activeFilter, setActiveFilter] = useState('all');
-  
-  const [courses] = useState([
-    {
-      id: 1,
-      title: 'Basic English Communication',
-      description: 'Learn essential English communication skills for daily life and work.',
-      level: 'Beginner',
-      duration: '8 weeks',
-      students: 1200,
-      image: 'https://images.unsplash.com/photo-1546410531-bb4caa6b424d?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=60'
-    },
-    {
-      id: 2,
-      title: 'Digital Skills Fundamentals',
-      description: 'Master basic computer skills and digital literacy for the modern workplace.',
-      level: 'Beginner',
-      duration: '6 weeks',
-      students: 850,
-      image: 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=60'
-    },
-    {
-      id: 3,
-      title: 'Job Search Strategies',
-      description: 'Learn effective job search techniques and resume building skills.',
-      level: 'Intermediate',
-      duration: '4 weeks',
-      students: 650,
-      image: 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=60'
-    },
-    {
-      id: 4,
-      title: 'Professional Networking',
-      description: 'Build your professional network and learn effective networking strategies.',
-      level: 'Intermediate',
-      duration: '5 weeks',
-      students: 450,
-      image: 'https://images.unsplash.com/photo-1552664730-d307ca884978?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=60'
-    },
-    {
-      id: 5,
-      title: 'Financial Literacy Basics',
-      description: 'Understand essential financial concepts for managing money.',
-      level: 'Beginner',
-      duration: '3 weeks',
-      students: 700,
-      image: 'https://images.unsplash.com/photo-1593620175862-b9b7c552c9f6?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=60'
-    },
-    {
-      id: 6,
-      title: 'Cultural Adaptation',
-      description: 'Learn about cultural differences and adaptation strategies.',
-      level: 'Beginner',
-      duration: '4 weeks',
-      students: 900,
-      image: 'https://images.unsplash.com/photo-1512438436238-b1395949b00e?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=60'
-    }
-  ]);
+  const [search, setSearch] = useState('');
 
-  const filteredCourses = courses.filter(course => {
-    const matchesSearch = course.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         course.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesFilter = activeFilter === 'all' || course.level.toLowerCase() === activeFilter.toLowerCase();
-    return matchesSearch && matchesFilter;
-  });
+  useEffect(() => {
+    db.allDocs({ include_docs: true, startkey: 'enrolled_', endkey: 'enrolled_\ufff0' })
+      .then(result => setEnrolled(result.rows.map(row => row.doc.courseId)));
+  }, []);
+
+  const handleEnroll = (course) => {
+    db.put({ _id: `enrolled_${course.id}`, courseId: course.id });
+    setEnrolled([...enrolled, course.id]);
+  };
+
+  const handleViewCourse = (course) => {
+    navigate(`/courses/full/${course.id}`, { state: course });
+  };
+
+  const filteredCourses =
+    (activeFilter === 'all'
+      ? allCourses
+      : allCourses.filter(course => course.level.toLowerCase() === activeFilter.toLowerCase())
+    ).filter(course =>
+      course.title.toLowerCase().includes(search.toLowerCase()) ||
+      course.description.toLowerCase().includes(search.toLowerCase())
+    );
 
   return (
-    <Container>
-      <Header>
-        <Title>Browse Courses</Title>
-        <SearchBar
-          placeholder="Search courses..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-      </Header>
-
-      <FilterSection>
-        <FilterButton
-          active={activeFilter === 'all'}
-          onClick={() => setActiveFilter('all')}
-        >
-          All Courses
-        </FilterButton>
-        <FilterButton
-          active={activeFilter === 'beginner'}
-          onClick={() => setActiveFilter('beginner')}
-        >
-          Beginner
-        </FilterButton>
-        <FilterButton
-          active={activeFilter === 'intermediate'}
-          onClick={() => setActiveFilter('intermediate')}
-        >
-          Intermediate
-        </FilterButton>
-        <FilterButton
-          active={activeFilter === 'advanced'}
-          onClick={() => setActiveFilter('advanced')}
-        >
-          Advanced
-        </FilterButton>
-      </FilterSection>
-
-      <CourseGrid>
-        {filteredCourses.map(course => (
-          <CourseCard key={course.id} onClick={() => navigate(`/courses/${course.id}`)}>
-            <CourseImage image={course.image}>
-              <CourseLevel level={course.level}>{course.level}</CourseLevel>
-            </CourseImage>
-            <CourseContent>
-              <CourseTitle>{course.title}</CourseTitle>
-              <CourseDescription>{course.description}</CourseDescription>
-              <CourseMeta>
-                <span>{course.duration}</span>
-                <span>{course.students} students</span>
-              </CourseMeta>
-              <EnrollButton>Enroll Now</EnrollButton>
-            </CourseContent>
-          </CourseCard>
-        ))}
-      </CourseGrid>
-    </Container>
+    <ContentWrapper>
+      <Container>
+        <Header>
+          <Title>Browse Courses</Title>
+        </Header>
+        <div style={{ marginBottom: 20 }}>
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search courses..."
+            style={{ width: 320, padding: '10px 16px', borderRadius: 8, border: '1px solid #ccc', fontSize: 16 }}
+          />
+        </div>
+        <FilterSection>
+          <FilterButton active={activeFilter === 'all'} onClick={() => setActiveFilter('all')}>All</FilterButton>
+          <FilterButton active={activeFilter === 'beginner'} onClick={() => setActiveFilter('beginner')}>Beginner</FilterButton>
+          <FilterButton active={activeFilter === 'intermediate'} onClick={() => setActiveFilter('intermediate')}>Intermediate</FilterButton>
+          <FilterButton active={activeFilter === 'advanced'} onClick={() => setActiveFilter('advanced')}>Advanced</FilterButton>
+        </FilterSection>
+        <CourseGrid>
+          {filteredCourses.map(course => (
+            <CourseCard key={course.id}>
+              <CourseImage image={course.image}>
+                <CourseLevel level={course.level}>{course.level}</CourseLevel>
+              </CourseImage>
+              <CourseContent>
+                <CourseTitle>{course.title}</CourseTitle>
+                <CourseDescription>{course.description}</CourseDescription>
+                <CourseMeta>
+                  <span>{course.duration}</span>
+                  <span>{course.students}+ students</span>
+                </CourseMeta>
+                {enrolled.includes(course.id) ? (
+                  <EnrollButton onClick={() => handleViewCourse(course)} style={{ background: '#3498db' }}>View Course</EnrollButton>
+                ) : (
+                  <EnrollButton onClick={() => handleEnroll(course)} style={{ background: '#27ae60' }}>Enroll</EnrollButton>
+                )}
+              </CourseContent>
+            </CourseCard>
+          ))}
+        </CourseGrid>
+      </Container>
+    </ContentWrapper>
   );
 };
 

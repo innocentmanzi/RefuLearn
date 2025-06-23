@@ -1,18 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
-
-const Container = styled.div`
-  padding: 2rem;
-  background: ${({ theme }) => theme.colors.white};
-  min-height: 100vh;
-`;
+import db from '../../pouchdb';
+import ContentWrapper from '../../components/ContentWrapper';
+import PageContainer from '../../components/PageContainer';
 
 const DashboardGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 1.5rem;
   margin-top: 2rem;
+  width: 100%;
+  box-sizing: border-box;
+  @media (max-width: 900px) {
+    grid-template-columns: 1fr;
+    gap: 1.2rem;
+    margin-top: 1.2rem;
+    max-width: 420px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  @media (max-width: 600px) {
+    gap: 1rem;
+    margin-top: 1rem;
+  }
 `;
 
 const Card = styled.div`
@@ -21,17 +32,25 @@ const Card = styled.div`
   padding: 1.5rem;
   box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   transition: transform 0.2s, box-shadow 0.2s;
-  cursor: pointer;
-  
-  &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  width: 100%;
+  max-width: 100%;
+  overflow-wrap: break-word;
+
+  @media (max-width: 900px) {
+    max-width: 420px;
+    margin-left: auto;
+    margin-right: auto;
   }
 `;
 
 const Title = styled.h1`
   color: ${({ theme }) => theme.colors.primary};
   margin-bottom: 0.5rem;
+  
+  @keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+  }
 `;
 
 const SubTitle = styled.h2`
@@ -114,13 +133,6 @@ const OverviewText = styled.span`
   font-size: 1.1rem;
 `;
 
-const WelcomeMessage = styled.p`
-  color: #666;
-  font-size: 1.1rem;
-  margin-bottom: 1.5rem;
-  min-height: 2rem;
-`;
-
 const CourseList = styled.div`
   margin-top: 1rem;
 `;
@@ -137,14 +149,48 @@ const CourseItem = styled.div`
   }
 `;
 
+const defaultRecommendedCourses = [
+  { _id: 'course_1', id: 1, title: 'Basic English Communication', progress: 60 },
+  { _id: 'course_2', id: 2, title: 'Digital Skills Fundamentals', progress: 30 },
+  { _id: 'course_3', id: 3, title: 'Job Search Strategies', progress: 0 }
+];
+
+const RecommendedCourses = ({ courses, onCourseClick }) => (
+  <Card style={{ marginTop: '2rem' }}>
+    <SubTitle>Recommended Courses</SubTitle>
+    <CourseList>
+      {courses.map(course => (
+        <CourseItem key={course.id} onClick={() => onCourseClick(course)}>
+          <div>
+            <div style={{ fontWeight: 'bold' }}>{course.title}</div>
+            <ProgressBar style={{ margin: '0.5rem 0' }}>
+              <Progress $value={course.progress} />
+            </ProgressBar>
+          </div>
+          <div>{course.progress}%</div>
+        </CourseItem>
+      ))}
+    </CourseList>
+  </Card>
+);
+
 const RefugeeDashboard = () => {
   const navigate = useNavigate();
-  const [isFirstLogin, setIsFirstLogin] = useState(false);
+  const [isFirstLogin] = useState(false);
   const [userName] = useState('Innocent');
   const [welcomeText, setWelcomeText] = useState('');
   const [overviewText, setOverviewText] = useState('');
   const [isTyping, setIsTyping] = useState(true);
   const [isTypingOverview, setIsTypingOverview] = useState(false);
+  const [recommendedCourses, setRecommendedCourses] = useState([]);
+
+  // Responsive: handle sidebar logout and redirect
+  const handleLogout = () => {
+    // Clear user data (customize as needed)
+    localStorage.clear();
+    sessionStorage.clear();
+    navigate('/login');
+  };
 
   const welcomeMessage = isFirstLogin 
     ? `Welcome ${userName}!`
@@ -185,6 +231,19 @@ const RefugeeDashboard = () => {
     return () => clearInterval(typingInterval);
   }, [isTypingOverview]);
 
+  useEffect(() => {
+    db.allDocs({ include_docs: true, startkey: 'course_', endkey: 'course_\ufff0' })
+      .then(result => {
+        if (result.rows.length === 0) {
+          // Initialize with defaults
+          defaultRecommendedCourses.forEach(course => db.put(course));
+          setRecommendedCourses(defaultRecommendedCourses);
+        } else {
+          setRecommendedCourses(result.rows.map(row => row.doc));
+        }
+      });
+  }, []);
+
   const [stats] = useState({
     completedCourses: 3,
     totalCourses: 10,
@@ -195,92 +254,73 @@ const RefugeeDashboard = () => {
     jobApplications: 2
   });
 
-  const [recommendedCourses] = useState([
-    { id: 1, title: 'Basic English Communication', progress: 60 },
-    { id: 2, title: 'Digital Skills Fundamentals', progress: 30 },
-    { id: 3, title: 'Job Search Strategies', progress: 0 }
-  ]);
+  const handleCourseClick = (course) => {
+    navigate(`/courses/${course.id}`, { state: course });
+  };
 
   return (
-    <Container>
-      <Title>
-        <WelcomeText>
-          {welcomeText}
-          {isTyping && <span style={{ animation: 'blink 1s infinite' }}>|</span>}
-        </WelcomeText>
-      </Title>
+    <ContentWrapper>
+      <PageContainer>
+        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+          <Title>
+            <span>
+              {welcomeText}
+              {isTyping && <span style={{ animation: 'blink 1s infinite' }}>|</span>}
+            </span>
+          </Title>
+          <OverviewText>
+            {overviewText}
+            {isTypingOverview && <span style={{ animation: 'blink 1s infinite' }}>|</span>}
+          </OverviewText>
+        </div>
+        <DashboardGrid>
+          <ProgressCard onClick={() => navigate('/learning-path')}>
+            <SubTitle>Learning Path Progress</SubTitle>
+            <Stat>{stats.learningPathProgress}%</Stat>
+            <ProgressBar>
+              <Progress $value={stats.learningPathProgress} />
+            </ProgressBar>
+            <StatLabel>Continue your learning journey</StatLabel>
+          </ProgressCard>
 
-      <WelcomeMessage>
-        <OverviewText>
-          {overviewText}
-          {isTypingOverview && <span style={{ animation: 'blink 1s infinite' }}>|</span>}
-        </OverviewText>
-      </WelcomeMessage>
-      
-      <DashboardGrid>
-        <ProgressCard onClick={() => navigate('/learning-path')}>
-          <SubTitle>Learning Path Progress</SubTitle>
-          <Stat>{stats.learningPathProgress}%</Stat>
-          <ProgressBar>
-            <Progress $value={stats.learningPathProgress} />
-          </ProgressBar>
-          <StatLabel>Continue your learning journey</StatLabel>
-        </ProgressCard>
+          <ProgressCard onClick={() => navigate('/courses')}>
+            <SubTitle>Course Progress</SubTitle>
+            <Stat>{stats.completedCourses}/{stats.totalCourses}</Stat>
+            <StatLabel>Courses Completed</StatLabel>
+            <QuickAction>Browse Courses</QuickAction>
+          </ProgressCard>
 
-        <ProgressCard onClick={() => navigate('/courses')}>
-          <SubTitle>Course Progress</SubTitle>
-          <Stat>{stats.completedCourses}/{stats.totalCourses}</Stat>
-          <StatLabel>Courses Completed</StatLabel>
-          <QuickAction>Browse Courses</QuickAction>
-        </ProgressCard>
+          <ProgressCard onClick={() => navigate('/assessments')}>
+            <SubTitle>Assessments</SubTitle>
+            <Stat>{stats.assessmentsCompleted}</Stat>
+            <StatLabel>Completed Assessments</StatLabel>
+            <QuickAction>Take Assessment</QuickAction>
+          </ProgressCard>
 
-        <ProgressCard onClick={() => navigate('/assessments')}>
-          <SubTitle>Assessments</SubTitle>
-          <Stat>{stats.assessmentsCompleted}</Stat>
-          <StatLabel>Completed Assessments</StatLabel>
-          <QuickAction>Take Assessment</QuickAction>
-        </ProgressCard>
+          <ProgressCard onClick={() => navigate('/certificates')}>
+            <SubTitle>Certificates</SubTitle>
+            <Stat>{stats.certificates}</Stat>
+            <StatLabel>Certificates Earned</StatLabel>
+            <QuickAction>View Certificates</QuickAction>
+          </ProgressCard>
 
-        <ProgressCard onClick={() => navigate('/certificates')}>
-          <SubTitle>Certificates</SubTitle>
-          <Stat>{stats.certificates}</Stat>
-          <StatLabel>Certificates Earned</StatLabel>
-          <QuickAction>View Certificates</QuickAction>
-        </ProgressCard>
+          <ProgressCard onClick={() => navigate('/peer-learning')}>
+            <SubTitle>Peer Learning</SubTitle>
+            <Stat>{stats.peerLearningSessions}</Stat>
+            <StatLabel>Learning Sessions</StatLabel>
+            <QuickAction>Join Session</QuickAction>
+          </ProgressCard>
 
-        <ProgressCard onClick={() => navigate('/peer-learning')}>
-          <SubTitle>Peer Learning</SubTitle>
-          <Stat>{stats.peerLearningSessions}</Stat>
-          <StatLabel>Learning Sessions</StatLabel>
-          <QuickAction>Join Session</QuickAction>
-        </ProgressCard>
-
-        <ProgressCard onClick={() => navigate('/jobs')}>
-          <SubTitle>Job Applications</SubTitle>
-          <Stat>{stats.jobApplications}</Stat>
-          <StatLabel>Applications Submitted</StatLabel>
-          <QuickAction>Browse Jobs</QuickAction>
-        </ProgressCard>
-
-      </DashboardGrid>
-
-      <Card style={{ marginTop: '2rem' }}>
-        <SubTitle>Recommended Courses</SubTitle>
-        <CourseList>
-          {recommendedCourses.map(course => (
-            <CourseItem key={course.id} onClick={() => navigate(`/courses/${course.id}`)}>
-              <div>
-                <div style={{ fontWeight: 'bold' }}>{course.title}</div>
-                <ProgressBar style={{ margin: '0.5rem 0' }}>
-                  <Progress $value={course.progress} />
-                </ProgressBar>
-              </div>
-              <div>{course.progress}%</div>
-            </CourseItem>
-          ))}
-        </CourseList>
-      </Card>
-    </Container>
+          <ProgressCard onClick={() => navigate('/jobs')}>
+            <SubTitle>Job Applications</SubTitle>
+            <Stat>{stats.jobApplications}</Stat>
+            <StatLabel>Applications Submitted</StatLabel>
+            <QuickAction>Browse Jobs</QuickAction>
+          </ProgressCard>
+        </DashboardGrid>
+        <RecommendedCourses courses={recommendedCourses} onCourseClick={handleCourseClick} />
+      </PageContainer>
+    </ContentWrapper>
   );
 };
 

@@ -13,6 +13,8 @@ import {
   Tooltip,
   Legend
 } from 'chart.js';
+import PageContainer from '../../components/PageContainer';
+import ContentWrapper from '../../components/ContentWrapper';
 
 ChartJS.register(
   CategoryScale,
@@ -198,54 +200,56 @@ const AdminDashboard = () => {
   };
 
   return (
-    <Container>
-      <Title>Admin Dashboard</Title>
-      <OverviewGrid>
-        <OverviewCard>
-          <Stat>{stats.users}</Stat>
-          <StatLabel>Total Users</StatLabel>
-        </OverviewCard>
-        <OverviewCard>
-          <Stat>{stats.activeUsers}</Stat>
-          <StatLabel>Active Users</StatLabel>
-        </OverviewCard>
-        <OverviewCard>
-          <Stat>{stats.courses}</Stat>
-          <StatLabel>Courses</StatLabel>
-        </OverviewCard>
-        <OverviewCard>
-          <Stat>{stats.jobs}</Stat>
-          <StatLabel>Jobs Posted</StatLabel>
-        </OverviewCard>
-      </OverviewGrid>
+    <ContentWrapper>
+      <PageContainer>
+        <Title>Admin Dashboard</Title>
+        <OverviewGrid>
+          <OverviewCard>
+            <Stat>{stats.users}</Stat>
+            <StatLabel>Total Users</StatLabel>
+          </OverviewCard>
+          <OverviewCard>
+            <Stat>{stats.activeUsers}</Stat>
+            <StatLabel>Active Users</StatLabel>
+          </OverviewCard>
+          <OverviewCard>
+            <Stat>{stats.courses}</Stat>
+            <StatLabel>Courses</StatLabel>
+          </OverviewCard>
+          <OverviewCard>
+            <Stat>{stats.jobs}</Stat>
+            <StatLabel>Jobs Posted</StatLabel>
+          </OverviewCard>
+        </OverviewGrid>
 
-      <SectionTitle>Platform Analytics</SectionTitle>
-      <DashboardGrid>
-        <Card>
-          <CardTitle>New User Registrations</CardTitle>
-          <ChartContainer>
-            <Line data={usersData} options={{ ...chartOptions, plugins: { ...chartOptions.plugins, title: { display: false } } }} />
-          </ChartContainer>
-        </Card>
-        <Card>
-          <CardTitle>Daily Platform Activity</CardTitle>
-          <ChartContainer>
-            <Bar data={activityData} options={{ ...chartOptions, plugins: { ...chartOptions.plugins, title: { display: false } } }} />
-          </ChartContainer>
-        </Card>
-      </DashboardGrid>
+        <SectionTitle>Platform Analytics</SectionTitle>
+        <DashboardGrid>
+          <Card>
+            <CardTitle>New User Registrations</CardTitle>
+            <ChartContainer>
+              <Line data={usersData} options={{ ...chartOptions, plugins: { ...chartOptions.plugins, title: { display: false } } }} />
+            </ChartContainer>
+          </Card>
+          <Card>
+            <CardTitle>Daily Platform Activity</CardTitle>
+            <ChartContainer>
+              <Bar data={activityData} options={{ ...chartOptions, plugins: { ...chartOptions.plugins, title: { display: false } } }} />
+            </ChartContainer>
+          </Card>
+        </DashboardGrid>
 
-      <SectionTitle>Quick Actions</SectionTitle>
-      <QuickActionLink to="/analytics">View Analytics</QuickActionLink>
-      <QuickActionLink to="/manage-users">Manage Users</QuickActionLink>
+        <SectionTitle>Quick Actions</SectionTitle>
+        <QuickActionLink to="/analytics">View Analytics</QuickActionLink>
+        <QuickActionLink to="/manage-users">Manage Users</QuickActionLink>
 
-      <SectionTitle>Recent Activity</SectionTitle>
-      <RecentList>
-        {recentActivity.map((item, idx) => (
-          <RecentItem key={idx}>{item}</RecentItem>
-        ))}
-      </RecentList>
-    </Container>
+        <SectionTitle>Recent Activity</SectionTitle>
+        <RecentList>
+          {recentActivity.map((item, idx) => (
+            <RecentItem key={idx}>{item}</RecentItem>
+          ))}
+        </RecentList>
+      </PageContainer>
+    </ContentWrapper>
   );
 };
 

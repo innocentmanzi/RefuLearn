@@ -3,8 +3,12 @@ import styled from 'styled-components';
 
 const Container = styled.div`
   padding: 2rem;
-  background: ${({ theme }) => theme.colors.white};
+  background: #f4f6fa;
   min-height: 100vh;
+  max-width: 100vw;
+  @media (max-width: 900px) {
+    padding: 1rem;
+  }
 `;
 
 const Title = styled.h1`
@@ -67,6 +71,15 @@ const Button = styled.button`
 
   &:hover {
     background: ${({ theme }) => theme.colors.secondary};
+  }
+`;
+
+const FormRow = styled.div`
+  display: flex;
+  gap: 1.5rem;
+  @media (max-width: 900px) {
+    flex-direction: column;
+    gap: 1rem;
   }
 `;
 

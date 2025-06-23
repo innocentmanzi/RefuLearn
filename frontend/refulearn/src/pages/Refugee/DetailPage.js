@@ -3,12 +3,13 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 
 const Container = styled.div`
-  max-width: 600px;
-  margin: 2rem auto;
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.07);
-  padding: 2rem 1.5rem;
+  padding: 2rem;
+  background: ${({ theme }) => theme.colors.white};
+  min-height: 100vh;
+  max-width: 100vw;
+  @media (max-width: 900px) {
+    padding: 1rem;
+  }
 `;
 
 const Title = styled.h1`
@@ -35,7 +36,16 @@ const Badge = styled.span`
 `;
 
 const Section = styled.div`
-  margin-bottom: 1.2rem;
+  margin-bottom: 2rem;
+  background: #f8f9fa;
+  border-radius: 12px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 100vw;
+  @media (max-width: 600px) {
+    padding: 1rem;
+    font-size: 0.98rem;
+  }
 `;
 
 const BackButton = styled.button`

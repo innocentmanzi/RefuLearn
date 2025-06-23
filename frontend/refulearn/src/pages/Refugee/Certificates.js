@@ -1,11 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import styled from 'styled-components';
-import { useNavigate } from 'react-router-dom';
+import { FaLinkedin, FaFacebook, FaTwitter, FaInstagram } from 'react-icons/fa';
+import ContentWrapper from '../../components/ContentWrapper';
 
 const Container = styled.div`
   padding: 2rem;
   background: ${({ theme }) => theme.colors.white};
   min-height: 100vh;
+  max-width: 100vw;
+  @media (max-width: 900px) {
+    padding: 1rem;
+  }
 `;
 
 const Header = styled.div`
@@ -19,75 +25,27 @@ const Title = styled.h1`
   color: ${({ theme }) => theme.colors.primary};
 `;
 
-const StatsContainer = styled.div`
+const CertificateGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 1.5rem;
-  margin-bottom: 2rem;
-`;
-
-const StatCard = styled.div`
-  background: white;
-  border-radius: 12px;
-  padding: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-  text-align: center;
-`;
-
-const StatValue = styled.div`
-  font-size: 2rem;
-  font-weight: bold;
-  color: ${({ theme }) => theme.colors.primary};
-  margin-bottom: 0.5rem;
-`;
-
-const StatLabel = styled.div`
-  color: #666;
-  font-size: 0.9rem;
-`;
-
-const CardsGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 1rem;
-  margin-bottom: 2rem;
-`;
-
-const Card = styled.div`
-  background: #fff;
-  border-radius: 8px;
-  padding: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-  text-align: center;
-  cursor: pointer;
-  transition: transform 0.2s;
-
-  &:hover {
-    transform: translateY(-2px);
+  width: 100%;
+  @media (max-width: 600px) {
+    grid-template-columns: 1fr;
+    gap: 1rem;
   }
 `;
 
-const CardTitle = styled.h4`
-  margin: 0;
-  color: ${({ theme }) => theme.colors.primary};
-  font-size: 1rem;
-`;
-
-const CertificateGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 1.5rem;
-`;
-
 const CertificateCard = styled.div`
-  background: white;
+  background: #fff;
   border-radius: 12px;
-  overflow: hidden;
   box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-  transition: transform 0.2s;
-  
-  &:hover {
-    transform: translateY(-4px);
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 100vw;
+  @media (max-width: 600px) {
+    padding: 1rem;
+    font-size: 0.98rem;
   }
 `;
 
@@ -158,9 +116,15 @@ const ShareButton = styled(ActionButton)`
   }
 `;
 
+const shareOptions = [
+  { name: 'LinkedIn', icon: <FaLinkedin color="#0077b5" size={20} style={{ marginRight: 8 }} /> },
+  { name: 'Facebook', icon: <FaFacebook color="#1877f3" size={20} style={{ marginRight: 8 }} /> },
+  { name: 'Twitter', icon: <FaTwitter color="#1da1f2" size={20} style={{ marginRight: 8 }} /> },
+  { name: 'Instagram', icon: <FaInstagram color="#e1306c" size={20} style={{ marginRight: 8 }} /> },
+];
+
 const Certificates = () => {
-  const navigate = useNavigate();
-  const [certificates] = useState([
+  const [certificates, setCertificates] = useState([
     {
       id: 1,
       title: 'English Communication Certificate',
@@ -216,90 +180,137 @@ const Certificates = () => {
       instructor: 'Ms. Maria Rodriguez'
     }
   ]);
+  const [shareDropdown, setShareDropdown] = useState(null); // certificateId or null
+  const dropdownRef = useRef();
+  const buttonRefs = useRef({});
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
 
-  const certificateCategories = [
-    { id: 1, name: 'Language' },
-    { id: 2, name: 'Digital Skills' },
-    { id: 3, name: 'Job Readiness' },
-    { id: 4, name: 'Professional Dev' },
-    { id: 5, name: 'Finance' },
-    { id: 6, name: 'Culture' },
-  ];
+  // Click-away handler for dropdown
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setShareDropdown(null);
+      }
+    }
+    if (shareDropdown !== null) {
+      document.addEventListener('mousedown', handleClickOutside);
+    } else {
+      document.removeEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [shareDropdown]);
 
-  const [stats] = useState({
-    totalCertificates: certificates.length,
-    averageScore: certificates.filter(cert => cert.score !== null).reduce((acc, cert) => acc + cert.score, 0) / certificates.filter(cert => cert.score !== null).length || 0,
-    coursesWithCertificates: new Set(certificates.map(cert => cert.courseId)).size
-  });
+  // Position dropdown near the button
+  useEffect(() => {
+    if (shareDropdown !== null && buttonRefs.current[shareDropdown]) {
+      const rect = buttonRefs.current[shareDropdown].getBoundingClientRect();
+      setDropdownPos({
+        top: rect.bottom + window.scrollY + 4,
+        left: rect.left + window.scrollX
+      });
+    }
+  }, [shareDropdown]);
 
   const handleDownload = (certificateId) => {
-    // Implement certificate download functionality
-    console.log(`Downloading certificate ${certificateId}`);
+    const cert = certificates.find(c => c.id === certificateId);
+    const blob = new Blob([
+      `Certificate of Achievement\n\nTitle: ${cert.title}\nDescription: ${cert.description}\nIssued: ${cert.issueDate}\nInstructor: ${cert.instructor}\n${cert.score !== null ? `Score: ${cert.score}%` : ''}`
+    ], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${cert.title.replace(/\s+/g, '_')}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
-  const handleShare = (certificateId) => {
-    // Implement certificate sharing functionality
-    console.log(`Sharing certificate ${certificateId}`);
+  const handleShare = (certificateId, platform) => {
+    const cert = certificates.find(c => c.id === certificateId);
+    const shareText = encodeURIComponent(`I just earned the ${cert.title} on RefuLearn! 🎉 #achievement #certificate`);
+    const shareUrl = encodeURIComponent(window.location.origin + '/certificates');
+    let url = '';
+    if (platform === 'LinkedIn') {
+      url = `https://www.linkedin.com/sharing/share-offsite/?url=${shareUrl}&summary=${shareText}`;
+    } else if (platform === 'Facebook') {
+      url = `https://www.facebook.com/sharer/sharer.php?u=${shareUrl}&quote=${shareText}`;
+    } else if (platform === 'Twitter') {
+      url = `https://twitter.com/intent/tweet?url=${shareUrl}&text=${shareText}`;
+    } else if (platform === 'Instagram') {
+      url = `https://www.instagram.com/`;
+    }
+    if (url) window.open(url, '_blank');
+    setShareDropdown(null);
   };
 
   return (
-    <Container>
-      <Header>
-        <Title>Your Certificates</Title>
-      </Header>
-
-      <StatsContainer>
-        <StatCard>
-          <StatValue>{stats.totalCertificates}</StatValue>
-          <StatLabel>Total Certificates</StatLabel>
-        </StatCard>
-        <StatCard>
-          <StatValue>{stats.averageScore.toFixed(1)}%</StatValue>
-          <StatLabel>Average Score</StatLabel>
-        </StatCard>
-        <StatCard>
-          <StatValue>{stats.coursesWithCertificates}</StatValue>
-          <StatLabel>Courses Completed</StatLabel>
-        </StatCard>
-      </StatsContainer>
-
-      <CardsGrid>
-        {certificateCategories.map(category => (
-          <Card key={category.id} onClick={() => console.log(`Clicked on certificate category: ${category.name}`)}>
-            <CardTitle>{category.name}</CardTitle>
-          </Card>
-        ))}
-      </CardsGrid>
-
-      <CertificateGrid>
-        {certificates.map(certificate => (
-          <CertificateCard key={certificate.id}>
-            <CertificateHeader>
-              <CertificateTitle>{certificate.title}</CertificateTitle>
-              <CertificateDate>
-                Issued on {new Date(certificate.issueDate).toLocaleDateString()}
-              </CertificateDate>
-            </CertificateHeader>
-            <CertificateContent>
-              <CertificateDescription>
-                {certificate.description}
-              </CertificateDescription>
-              <CertificateMeta>
-                {certificate.score !== null && <span>Score: {certificate.score}%</span>}
-                <span>Instructor: {certificate.instructor}</span>
-              </CertificateMeta>
-              <DownloadButton onClick={() => handleDownload(certificate.id)}>
-                Download Certificate
-              </DownloadButton>
-              <ShareButton onClick={() => handleShare(certificate.id)}>
-                Share Certificate
-              </ShareButton>
-            </CertificateContent>
-          </CertificateCard>
-        ))}
-      </CertificateGrid>
-    </Container>
+    <ContentWrapper>
+      <Container>
+        <Header>
+          <Title>Your Certificates</Title>
+        </Header>
+        <CertificateGrid>
+          {certificates.map(certificate => (
+            <CertificateCard key={certificate.id}>
+              <CertificateHeader>
+                <CertificateTitle>{certificate.title}</CertificateTitle>
+                <CertificateDate>
+                  Issued on {new Date(certificate.issueDate).toLocaleDateString()}
+                </CertificateDate>
+              </CertificateHeader>
+              <CertificateContent>
+                <CertificateDescription>
+                  {certificate.description}
+                </CertificateDescription>
+                <CertificateMeta>
+                  {certificate.score !== null && <span>Score: {certificate.score}%</span>}
+                  <span>Instructor: {certificate.instructor}</span>
+                </CertificateMeta>
+                <DownloadButton onClick={() => handleDownload(certificate.id)}>
+                  Download Certificate
+                </DownloadButton>
+                <div style={{ position: 'relative', zIndex: 1000 }}>
+                  <ShareButton
+                    ref={el => (buttonRefs.current[certificate.id] = el)}
+                    onClick={() => setShareDropdown(shareDropdown === certificate.id ? null : certificate.id)}
+                  >
+                    Share Certificate
+                  </ShareButton>
+                </div>
+              </CertificateContent>
+            </CertificateCard>
+          ))}
+        </CertificateGrid>
+        {shareDropdown !== null && ReactDOM.createPortal(
+          <div
+            ref={dropdownRef}
+            style={{
+              position: 'absolute',
+              top: dropdownPos.top,
+              left: dropdownPos.left,
+              background: '#fff',
+              border: '1px solid #eee',
+              borderRadius: 8,
+              boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
+              zIndex: 3000,
+              minWidth: 200,
+              padding: 4,
+            }}
+          >
+            {shareOptions.map(opt => (
+              <button
+                key={opt.name}
+                style={{ display: 'block', width: '100%', padding: '12px 18px', background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer', fontSize: 16 }}
+                onClick={() => handleShare(shareDropdown, opt.name)}
+              >
+                {opt.icon} Share on {opt.name}
+              </button>
+            ))}
+          </div>,
+          document.body
+        )}
+      </Container>
+    </ContentWrapper>
   );
 };
 
-export default Certificates; 
+export default Certificates;

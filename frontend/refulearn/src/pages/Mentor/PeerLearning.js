@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import styled from 'styled-components';
+import { Line } from 'react-chartjs-2';
+import { useNavigate } from 'react-router-dom';
 
 const Container = styled.div`
   padding: 2rem;
@@ -163,9 +165,9 @@ const MemberRole = styled.div`
 `;
 
 const ActionButton = styled.button`
-  background: ${({ variant }) => 
-    variant === 'delete' ? '#dc3545' : 
-    variant === 'edit' ? '#6c757d' : 
+  background: ${({ $variant }) => 
+    $variant === 'delete' ? '#dc3545' : 
+    $variant === 'edit' ? '#6c757d' : 
     '#28a745'};
   color: white;
   border: none;
@@ -254,19 +256,6 @@ const Button = styled.button`
   }
 `;
 
-const ScheduleSection = styled.div`
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid #eee;
-`;
-
-const ScheduleGrid = styled.div`
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
-  margin-top: 0.5rem;
-`;
-
 const ActivityCard = styled.div`
   background: white;
   border-radius: 12px;
@@ -341,7 +330,7 @@ const ProgressBar = styled.div`
 `;
 
 const ProgressFill = styled.div`
-  width: ${({ progress }) => progress}%;
+  width: ${({ $progress }) => $progress}%;
   height: 100%;
   background: ${({ theme }) => theme.colors.primary};
   border-radius: 4px;
@@ -354,54 +343,9 @@ const ProgressText = styled.div`
   text-align: right;
 `;
 
-const PeerProgressList = styled.div`
-  margin-top: 1rem;
-`;
-
-const PeerProgressItem = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid #eee;
-  
-  &:last-child {
-    border-bottom: none;
-  }
-`;
-
-const PeerName = styled.span`
-  font-weight: 500;
-`;
-
-const PeerStatus = styled.span`
-  font-size: 0.9rem;
-  color: ${({ status }) => 
-    status === 'completed' ? '#28a745' : 
-    status === 'in-progress' ? '#ffc107' : 
-    '#6c757d'};
-`;
-
 const SectionTitle = styled.h2`
   color: ${({ theme }) => theme.colors.primary};
   margin-bottom: 1.5rem;
-`;
-
-const ModalTitle = styled.h2`
-  color: ${({ theme }) => theme.colors.primary};
-  margin-bottom: 1.5rem;
-`;
-
-const ActivityDetailsModal = styled(Modal)`
-  // Inherits from Modal
-`;
-
-const ActivityDetailsContent = styled(ModalContent)`
-  max-width: 800px;
-`;
-
-const ActivityDetails = styled.div`
-  margin-top: 1rem;
 `;
 
 const ActivitySection = styled.div`
@@ -428,26 +372,64 @@ const EmptyState = styled.div`
   }
 `;
 
-const PeerLearning = () => {
-  const [activeTab, setActiveTab] = useState('all');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showActivityModal, setShowActivityModal] = useState(false);
-  const [showProgressModal, setShowProgressModal] = useState(false);
-  const [selectedActivity, setSelectedActivity] = useState(null);
-  const [newGroup, setNewGroup] = useState({
-    name: '',
-    description: '',
-    maxMembers: 5,
-    schedule: {
-      day: '',
-      time: '',
-      frequency: 'weekly'
-    }
-  });
+const GroupActions = styled.div`
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+`;
 
-  // Sample groups data
-  const groups = [
+const ActivityActions = styled.div`
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+`;
+
+const ProgressChartContainer = styled.div`
+  background: #fff;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  margin-bottom: 2rem;
+`;
+
+const TopHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2.5rem;
+
+  @media (max-width: 768px) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1.5rem;
+  }
+`;
+
+// Add filter buttons for group status
+const FilterBar = styled.div`
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+`;
+const FilterButton = styled.button`
+  background: ${({ $active, theme }) => $active ? theme.colors.primary : '#f0f0f0'};
+  color: ${({ $active, theme }) => $active ? '#fff' : '#333'};
+  border: none;
+  padding: 0.5rem 1.2rem;
+  border-radius: 6px;
+  font-size: 1rem;
+  cursor: pointer;
+  font-weight: 500;
+  &:hover { background: ${({ theme }) => theme.colors.secondary}; color: #fff; }
+`;
+
+const PeerLearning = () => {
+  console.log('Mentor PeerLearning.js loaded!');
+  const [activeTab, setActiveTab] = useState('groups');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showGroupModal, setShowGroupModal] = useState(false);
+  const [modalMode, setModalMode] = useState('create'); // 'create' or 'edit'
+  const [groups, setGroups] = useState([
     {
       id: 1,
       name: 'JavaScript Fundamentals',
@@ -459,7 +441,8 @@ const PeerLearning = () => {
         { id: 3, name: 'Carlos Lee', role: 'Member' }
       ],
       schedule: 'Every Monday, 2:00 PM',
-      maxMembers: 5
+      maxMembers: 5,
+      description: 'Peer group for learning JavaScript basics.'
     },
     {
       id: 2,
@@ -471,7 +454,8 @@ const PeerLearning = () => {
         { id: 5, name: 'Fatima Noor', role: 'Member' }
       ],
       schedule: 'Every Wednesday, 4:00 PM',
-      maxMembers: 6
+      maxMembers: 6,
+      description: 'Group for practicing DSA problems.'
     },
     {
       id: 3,
@@ -484,356 +468,749 @@ const PeerLearning = () => {
         { id: 8, name: 'Mohammed Ali', role: 'Member' }
       ],
       schedule: 'Completed',
-      maxMembers: 8
+      maxMembers: 8,
+      description: 'Bootcamp for full-stack web development.'
     }
-  ];
+  ]);
+  const [currentGroup, setCurrentGroup] = useState({
+    id: null,
+    name: '',
+    description: '',
+    topic: '',
+    schedule: '',
+    maxMembers: 5,
+    members: [],
+    status: 'active',
+    activities: [],
+    discussionTopics: []
+  });
+  const [showActivityModal, setShowActivityModal] = useState(false);
+  const [activityModalMode, setActivityModalMode] = useState('create');
+  const [currentActivity, setCurrentActivity] = useState({
+    id: null,
+    title: '',
+    description: '',
+    groupId: '',
+    status: 'not-started',
+    progress: 0,
+    dueDate: '',
+    type: 'activity' // 'activity' or 'discussion'
+  });
+  const [groupFilter, setGroupFilter] = useState('all');
+  const [selectedGroupId, setSelectedGroupId] = useState(null);
 
-  // Sample activities data
-  const activities = [
-    {
-      id: 1,
-      title: 'JavaScript Fundamentals Review',
-      description: 'Group review session covering basic JavaScript concepts',
-      status: 'in-progress',
-      progress: 65,
-      currentActivities: [
-        {
-          peer: 'Bob Smith',
-          activity: 'Review array methods',
-          startedAt: '2025-06-12'
-        },
-        {
-          peer: 'Carlos Lee',
-          activity: 'Practice DOM manipulation',
-          startedAt: '2025-06-13'
-        }
-      ],
-      incompleteProgress: [
-        {
-          peer: 'Bob Smith',
-          activity: 'Review array methods',
-          startedAt: '2025-06-12',
-          progress: 40
-        },
-        {
-          peer: 'Carlos Lee',
-          activity: 'Practice DOM manipulation',
-          startedAt: '2025-06-13',
-          progress: 25
-        }
-      ]
-    },
-    {
-      id: 2,
-      title: 'React Hooks Workshop',
-      description: 'Hands-on workshop on React Hooks and their applications',
+  const navigate = useNavigate();
+
+  // Helper to get the selected group
+  const selectedGroup = groups.find(g => g.id === selectedGroupId);
+
+  // Handlers
+  const openCreateModal = () => {
+    setModalMode('create');
+    setCurrentGroup({ 
+      id: null, 
+      name: '', 
+      description: '', 
+      topic: '', 
+      schedule: '', 
+      maxMembers: 5, 
+      members: [], 
+      status: 'active',
+      activities: [],
+      discussionTopics: []
+    });
+    setShowGroupModal(true);
+  };
+  const openEditModal = (group) => {
+    setModalMode('edit');
+    setCurrentGroup({
+      ...group,
+      activities: group.activities || [],
+      discussionTopics: group.discussionTopics || []
+    });
+    setShowGroupModal(true);
+  };
+  const closeGroupModal = () => {
+    setShowGroupModal(false);
+  };
+  const handleGroupChange = (e) => {
+    setCurrentGroup({ ...currentGroup, [e.target.name]: e.target.value });
+  };
+  const handleAddActivity = () => {
+    const newActivity = {
+      id: Date.now(),
+      title: '',
+      description: '',
+      type: 'activity',
       status: 'not-started',
       progress: 0,
-      currentActivities: [],
-      incompleteProgress: []
+      dueDate: ''
+    };
+    setCurrentGroup({
+      ...currentGroup,
+      activities: [...currentGroup.activities, newActivity]
+    });
+  };
+  const handleAddDiscussionTopic = () => {
+    const newTopic = {
+      id: Date.now(),
+      title: '',
+      description: '',
+      type: 'discussion',
+      status: 'not-started',
+      progress: 0,
+      dueDate: ''
+    };
+    setCurrentGroup({
+      ...currentGroup,
+      discussionTopics: [...currentGroup.discussionTopics, newTopic]
+    });
+  };
+  const handleActivityChange = (index, field, value, type = 'activities') => {
+    const updatedItems = [...currentGroup[type]];
+    updatedItems[index] = { ...updatedItems[index], [field]: value };
+    setCurrentGroup({
+      ...currentGroup,
+      [type]: updatedItems
+    });
+  };
+  const handleRemoveActivity = (index, type = 'activities') => {
+    const updatedItems = currentGroup[type].filter((_, i) => i !== index);
+    setCurrentGroup({
+      ...currentGroup,
+      [type]: updatedItems
+    });
+  };
+  const handleSaveGroup = () => {
+    if (modalMode === 'create') {
+      setGroups([...groups, { 
+        ...currentGroup, 
+        id: Date.now(), 
+        members: [],
+        activities: currentGroup.activities || [],
+        discussionTopics: currentGroup.discussionTopics || []
+      }]);
+    } else {
+      setGroups(groups.map(g => g.id === currentGroup.id ? {
+        ...currentGroup,
+        activities: currentGroup.activities || [],
+        discussionTopics: currentGroup.discussionTopics || []
+      } : g));
     }
-  ];
+    setShowGroupModal(false);
+  };
+  const handleDeleteGroup = (id) => {
+    if (window.confirm('Are you sure you want to delete this group?')) {
+      setGroups(groups.filter(g => g.id !== id));
+    }
+  };
 
-  const filteredGroups = groups.filter(group =>
-    group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    group.topic.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const handleActivityClick = (activity) => {
-    console.log('Activity clicked:', activity);
-    setSelectedActivity(activity);
+  // Activity handlers (per group)
+  const openCreateActivityModal = (groupId) => {
+    setSelectedGroupId(groupId);
+    setActivityModalMode('create');
+    setCurrentActivity({ id: null, title: '', description: '', status: 'not-started', progress: 0, dueDate: '', type: 'activity' });
     setShowActivityModal(true);
   };
-
-  const handleProgressClick = (activity) => {
-    console.log('Progress clicked:', activity);
-    setSelectedActivity(activity);
-    setShowProgressModal(true);
+  const openEditActivityModal = (groupId, activity) => {
+    setSelectedGroupId(groupId);
+    setActivityModalMode('edit');
+    setCurrentActivity(activity);
+    setShowActivityModal(true);
+  };
+  const closeActivityModal = () => {
+    setShowActivityModal(false);
+  };
+  const handleSaveActivity = () => {
+    setGroups(groups.map(g => {
+      if (g.id !== selectedGroupId) return g;
+      const activities = g.activities || [];
+      if (activityModalMode === 'create') {
+        return { ...g, activities: [...activities, { ...currentActivity, id: Date.now() }] };
+      } else {
+        return { ...g, activities: activities.map(a => a.id === currentActivity.id ? currentActivity : a) };
+      }
+    }));
+    setShowActivityModal(false);
+  };
+  const handleDeleteActivity = (groupId, activityId) => {
+    if (window.confirm('Are you sure you want to delete this activity?')) {
+      setGroups(groups.map(g => {
+        if (g.id !== groupId) return g;
+        return { ...g, activities: (g.activities || []).filter(a => a.id !== activityId) };
+      }));
+    }
   };
 
-  const handleCreateGroup = () => {
-    // Here you would typically make an API call to create the group
-    console.log('Creating group:', newGroup);
-    setShowCreateModal(false);
-    setNewGroup({
-      name: '',
-      description: '',
-      maxMembers: 5,
-      schedule: {
-        day: '',
-        time: '',
-        frequency: 'weekly'
+  // Filtered groups
+  const filteredGroups = groups.filter(g => {
+    if (groupFilter === 'all') return true;
+    if (groupFilter === 'progress') return g.status === 'active' || g.status === 'upcoming';
+    if (groupFilter === 'completed') return g.status === 'completed';
+    return true;
+  }).filter(g =>
+    g.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    g.topic.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // Progress chart data
+  const groupProgressData = {
+    labels: groups.map(g => g.name),
+    datasets: [
+      {
+        label: 'Group Progress (%)',
+        data: groups.map(g => {
+          const groupActivities = g.activities || [];
+          if (groupActivities.length === 0) return 0;
+          return Math.round(groupActivities.reduce((sum, a) => sum + a.progress, 0) / groupActivities.length);
+        }),
+        borderColor: '#007bff',
+        backgroundColor: 'rgba(0,123,255,0.1)',
+        tension: 0.4
       }
-    });
+    ]
   };
 
   return (
     <Container>
-      <Title>Peer Learning Management</Title>
-      
+      <TopHeader>
+        <Title>Peer Learning & Mentorship</Title>
+        <CreateButton onClick={openCreateModal}>+ Create Group</CreateButton>
+      </TopHeader>
+      {/* Only show filter bar in Groups tab */}
+      {activeTab === 'groups' && (
+        <FilterBar>
+          <FilterButton $active={groupFilter === 'all'} onClick={() => setGroupFilter('all')}>All</FilterButton>
+          <FilterButton $active={groupFilter === 'progress'} onClick={() => setGroupFilter('progress')}>In Progress</FilterButton>
+          <FilterButton $active={groupFilter === 'completed'} onClick={() => setGroupFilter('completed')}>Completed</FilterButton>
+        </FilterBar>
+      )}
       <Header>
         <SearchBar
-          placeholder="Search groups or activities..."
+          placeholder="Search groups..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
-        <CreateButton onClick={() => setShowCreateModal(true)}>
-          Create Group
-        </CreateButton>
       </Header>
-
       <Tabs>
-        <Tab 
-          active={activeTab === 'groups'} 
-          onClick={() => setActiveTab('groups')}
-        >
-          Learning Groups
-        </Tab>
-        <Tab 
-          active={activeTab === 'activities'} 
-          onClick={() => setActiveTab('activities')}
-        >
-          Activities
-        </Tab>
-        <Tab 
-          active={activeTab === 'progress'} 
-          onClick={() => setActiveTab('progress')}
-        >
-          Progress
-        </Tab>
+        <Tab active={activeTab === 'groups'} onClick={() => setActiveTab('groups')}>Groups</Tab>
+        <Tab active={activeTab === 'activities'} onClick={() => setActiveTab('activities')}>Activities</Tab>
+        <Tab active={activeTab === 'progress'} onClick={() => setActiveTab('progress')}>Progress</Tab>
       </Tabs>
-      
-      <GroupGrid>
-        {filteredGroups.map(group => (
-          <GroupCard key={group.id}>
-            <GroupHeader>
-              <GroupInfo>
-                <GroupName>{group.name}</GroupName>
-                <GroupMeta>{group.topic} • {group.schedule}</GroupMeta>
-              </GroupInfo>
-              <GroupStatus status={group.status}>
-                {group.status.charAt(0).toUpperCase() + group.status.slice(1)}
-              </GroupStatus>
-            </GroupHeader>
+      {/* Groups Tab */}
+      {activeTab === 'groups' && (
+        <GroupGrid>
+          {filteredGroups.map(group => (
+            <GroupCard key={group.id}>
+              <GroupHeader>
+                <GroupInfo>
+                  <GroupName>{group.name}</GroupName>
+                  <GroupMeta>{group.topic} • {group.schedule}</GroupMeta>
+                </GroupInfo>
+                <GroupStatus status={group.status}>
+                  {group.status.charAt(0).toUpperCase() + group.status.slice(1)}
+                </GroupStatus>
+              </GroupHeader>
+              <div style={{ color: '#666', marginBottom: 8 }}>{group.description}</div>
+              
+              {/* Activities and Discussion Topics Summary */}
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: '1fr 1fr', 
+                gap: '1rem', 
+                marginBottom: '1rem',
+                padding: '0.75rem',
+                background: '#f8f9fa',
+                borderRadius: '6px'
+              }}>
+                <div>
+                  <div style={{ fontSize: '0.9rem', color: '#666', marginBottom: '0.25rem' }}>
+                    Activities ({group.activities?.length || 0})
+                  </div>
+                  {group.activities && group.activities.length > 0 ? (
+                    <div style={{ fontSize: '0.8rem', color: '#888' }}>
+                      {group.activities.filter(a => a.status === 'completed').length} completed
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '0.8rem', color: '#ccc' }}>No activities</div>
+                  )}
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.9rem', color: '#666', marginBottom: '0.25rem' }}>
+                    Discussion Topics ({group.discussionTopics?.length || 0})
+                  </div>
+                  {group.discussionTopics && group.discussionTopics.length > 0 ? (
+                    <div style={{ fontSize: '0.8rem', color: '#888' }}>
+                      {group.discussionTopics.filter(t => t.status === 'completed').length} completed
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '0.8rem', color: '#ccc' }}>No topics</div>
+                  )}
+                </div>
+              </div>
+
+              <MemberList>
+                {group.members.map(member => (
+                  <MemberItem key={member.id}>
+                    <MemberAvatar>
+                      {member.name.split(' ').map(n => n[0]).join('')}
+                    </MemberAvatar>
+                    <MemberInfo>
+                      <MemberName>{member.name}</MemberName>
+                      <MemberRole>{member.role}</MemberRole>
+                    </MemberInfo>
+                  </MemberItem>
+                ))}
+              </MemberList>
+              <GroupActions>
+                <ActionButton onClick={() => navigate(`/peer-learning/group/${group.id}`, { state: { group } })}>View Details</ActionButton>
+                <ActionButton $variant="edit" onClick={() => openEditModal(group)}>Edit</ActionButton>
+                <ActionButton $variant="delete" onClick={() => handleDeleteGroup(group.id)}>Delete</ActionButton>
+              </GroupActions>
+            </GroupCard>
+          ))}
+        </GroupGrid>
+      )}
+      {/* Group Modal */}
+      {showGroupModal && (
+        <Modal>
+          <ModalContent style={{ maxWidth: '800px', maxHeight: '90vh' }}>
+            <h3>{modalMode === 'create' ? 'Create Group' : 'Edit Group'}</h3>
             
-            <MemberList>
-              {group.members.map(member => (
-                <MemberItem key={member.id}>
-                  <MemberAvatar>
-                    {member.name.split(' ').map(n => n[0]).join('')}
-                  </MemberAvatar>
-                  <MemberInfo>
-                    <MemberName>{member.name}</MemberName>
-                    <MemberRole>{member.role}</MemberRole>
-                  </MemberInfo>
-                </MemberItem>
+            {/* Basic Group Information */}
+            <div style={{ marginBottom: '2rem' }}>
+              <h4 style={{ color: '#007bff', marginBottom: '1rem' }}>Basic Information</h4>
+              <FormGroup>
+                <Label>Group Name</Label>
+                <Input
+                  name="name"
+                  value={currentGroup.name}
+                  onChange={handleGroupChange}
+                  placeholder="Enter group name"
+                />
+              </FormGroup>
+              <FormGroup>
+                <Label>Description</Label>
+                <TextArea
+                  name="description"
+                  value={currentGroup.description}
+                  onChange={handleGroupChange}
+                  placeholder="Enter group description"
+                />
+              </FormGroup>
+              <FormGroup>
+                <Label>Topic</Label>
+                <Input
+                  name="topic"
+                  value={currentGroup.topic}
+                  onChange={handleGroupChange}
+                  placeholder="Enter topic"
+                />
+              </FormGroup>
+              <FormGroup>
+                <Label>Schedule</Label>
+                <Input
+                  name="schedule"
+                  value={currentGroup.schedule}
+                  onChange={handleGroupChange}
+                  placeholder="e.g. Every Monday, 2:00 PM"
+                />
+              </FormGroup>
+              <FormGroup>
+                <Label>Max Members</Label>
+                <Input
+                  name="maxMembers"
+                  type="number"
+                  min={2}
+                  max={50}
+                  value={currentGroup.maxMembers}
+                  onChange={handleGroupChange}
+                />
+              </FormGroup>
+            </div>
+
+            {/* Group Activities Section */}
+            <div style={{ marginBottom: '2rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h4 style={{ color: '#007bff', margin: 0 }}>Group Activities</h4>
+                <Button 
+                  onClick={handleAddActivity}
+                  style={{ background: '#28a745', fontSize: '0.9rem', padding: '0.5rem 1rem' }}
+                >
+                  + Add Activity
+                </Button>
+              </div>
+              {currentGroup.activities && currentGroup.activities.length > 0 ? (
+                currentGroup.activities.map((activity, index) => (
+                  <div key={activity.id} style={{ 
+                    border: '1px solid #ddd', 
+                    borderRadius: '8px', 
+                    padding: '1rem', 
+                    marginBottom: '1rem',
+                    background: '#f9f9f9'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                      <h5 style={{ margin: 0, color: '#333' }}>Activity {index + 1}</h5>
+                      <Button 
+                        onClick={() => handleRemoveActivity(index, 'activities')}
+                        style={{ background: '#dc3545', fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                    <FormGroup>
+                      <Label>Activity Title</Label>
+                      <Input
+                        value={activity.title}
+                        onChange={(e) => handleActivityChange(index, 'title', e.target.value, 'activities')}
+                        placeholder="Enter activity title"
+                      />
+                    </FormGroup>
+                    <FormGroup>
+                      <Label>Description</Label>
+                      <TextArea
+                        value={activity.description}
+                        onChange={(e) => handleActivityChange(index, 'description', e.target.value, 'activities')}
+                        placeholder="Enter activity description"
+                        style={{ minHeight: '80px' }}
+                      />
+                    </FormGroup>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                      <FormGroup>
+                        <Label>Due Date</Label>
+                        <Input
+                          type="date"
+                          value={activity.dueDate}
+                          onChange={(e) => handleActivityChange(index, 'dueDate', e.target.value, 'activities')}
+                        />
+                      </FormGroup>
+                      <FormGroup>
+                        <Label>Status</Label>
+                        <Select
+                          value={activity.status}
+                          onChange={(e) => handleActivityChange(index, 'status', e.target.value, 'activities')}
+                        >
+                          <option value="not-started">Not Started</option>
+                          <option value="in-progress">In Progress</option>
+                          <option value="completed">Completed</option>
+                        </Select>
+                      </FormGroup>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div style={{ 
+                  textAlign: 'center', 
+                  padding: '2rem', 
+                  color: '#666', 
+                  border: '2px dashed #ddd', 
+                  borderRadius: '8px' 
+                }}>
+                  No activities added yet. Click "Add Activity" to get started.
+                </div>
+              )}
+            </div>
+
+            {/* Discussion Topics Section */}
+            <div style={{ marginBottom: '2rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h4 style={{ color: '#007bff', margin: 0 }}>Discussion Topics</h4>
+                <Button 
+                  onClick={handleAddDiscussionTopic}
+                  style={{ background: '#17a2b8', fontSize: '0.9rem', padding: '0.5rem 1rem' }}
+                >
+                  + Add Topic
+                </Button>
+              </div>
+              {currentGroup.discussionTopics && currentGroup.discussionTopics.length > 0 ? (
+                currentGroup.discussionTopics.map((topic, index) => (
+                  <div key={topic.id} style={{ 
+                    border: '1px solid #ddd', 
+                    borderRadius: '8px', 
+                    padding: '1rem', 
+                    marginBottom: '1rem',
+                    background: '#f0f8ff'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                      <h5 style={{ margin: 0, color: '#333' }}>Discussion Topic {index + 1}</h5>
+                      <Button 
+                        onClick={() => handleRemoveActivity(index, 'discussionTopics')}
+                        style={{ background: '#dc3545', fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                    <FormGroup>
+                      <Label>Topic Title</Label>
+                      <Input
+                        value={topic.title}
+                        onChange={(e) => handleActivityChange(index, 'title', e.target.value, 'discussionTopics')}
+                        placeholder="Enter discussion topic title"
+                      />
+                    </FormGroup>
+                    <FormGroup>
+                      <Label>Description</Label>
+                      <TextArea
+                        value={topic.description}
+                        onChange={(e) => handleActivityChange(index, 'description', e.target.value, 'discussionTopics')}
+                        placeholder="Enter discussion topic description"
+                        style={{ minHeight: '80px' }}
+                      />
+                    </FormGroup>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                      <FormGroup>
+                        <Label>Due Date</Label>
+                        <Input
+                          type="date"
+                          value={topic.dueDate}
+                          onChange={(e) => handleActivityChange(index, 'dueDate', e.target.value, 'discussionTopics')}
+                        />
+                      </FormGroup>
+                      <FormGroup>
+                        <Label>Status</Label>
+                        <Select
+                          value={topic.status}
+                          onChange={(e) => handleActivityChange(index, 'status', e.target.value, 'discussionTopics')}
+                        >
+                          <option value="not-started">Not Started</option>
+                          <option value="in-progress">In Progress</option>
+                          <option value="completed">Completed</option>
+                        </Select>
+                      </FormGroup>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div style={{ 
+                  textAlign: 'center', 
+                  padding: '2rem', 
+                  color: '#666', 
+                  border: '2px dashed #ddd', 
+                  borderRadius: '8px' 
+                }}>
+                  No discussion topics added yet. Click "Add Topic" to get started.
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem' }}>
+              <Button onClick={handleSaveGroup}>{modalMode === 'create' ? 'Create Group' : 'Save Changes'}</Button>
+              <Button onClick={closeGroupModal} style={{ background: '#666' }}>Cancel</Button>
+            </div>
+          </ModalContent>
+        </Modal>
+      )}
+      {/* Activities Tab */}
+      {activeTab === 'activities' && (
+        <>
+          <div style={{ marginBottom: 16 }}>
+            <Select
+              value={selectedGroupId || ''}
+              onChange={e => setSelectedGroupId(Number(e.target.value))}
+              style={{ minWidth: 200, marginRight: 16 }}
+            >
+              <option value="">Select group</option>
+              {groups.map(g => (
+                <option key={g.id} value={g.id}>{g.name}</option>
               ))}
-            </MemberList>
-            
-            <div style={{ marginTop: '1rem' }}>
-              <ActionButton>View Details</ActionButton>
-              <ActionButton variant="edit">Edit</ActionButton>
-              <ActionButton variant="delete">Delete</ActionButton>
-            </div>
-          </GroupCard>
-        ))}
-      </GroupGrid>
-
-      <SectionTitle>Group Activities</SectionTitle>
-      <ActivitySection>
-        {activities.map(activity => (
-          <ActivityCard key={activity.id} onClick={() => handleActivityClick(activity)}>
-            <ActivityHeader>
-              <ActivityTitle>{activity.title}</ActivityTitle>
-              <ActivityStatus status={activity.status}>
-                {activity.status === 'completed' ? 'Completed' : 
-                 activity.status === 'in-progress' ? 'In Progress' : 
-                 'Not Started'}
-              </ActivityStatus>
-            </ActivityHeader>
-            
-            <p>{activity.description}</p>
-            
-            <ProgressSection onClick={(e) => {
-              e.stopPropagation();
-              handleProgressClick(activity);
-            }}>
-              <ProgressHeader>
-                <ProgressTitle>Overall Progress</ProgressTitle>
-                <ProgressText>{activity.progress}% Complete</ProgressText>
-              </ProgressHeader>
-              <ProgressBar>
-                <ProgressFill progress={activity.progress} />
-              </ProgressBar>
-            </ProgressSection>
-          </ActivityCard>
-        ))}
-      </ActivitySection>
-
-      {/* Activity Details Modal - Shows current activities */}
-      {showActivityModal && selectedActivity && (
-        <Modal>
-          <ModalContent>
-            <h2>Current Activities - {selectedActivity.title}</h2>
-            
-            {selectedActivity.currentActivities.length > 0 ? (
-              <div>
-                {selectedActivity.currentActivities.map((item, index) => (
-                  <div key={index} style={{ 
-                    marginBottom: '1rem', 
-                    padding: '1rem',
-                    background: '#f8f9fa',
-                    borderRadius: '8px'
-                  }}>
-                    <h3>{item.peer}</h3>
-                    <p><strong>Currently Working On:</strong> {item.activity}</p>
-                    <p><strong>Started:</strong> {item.startedAt}</p>
-                  </div>
-                ))}
+            </Select>
+            {selectedGroupId && (
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <CreateButton onClick={() => openCreateActivityModal(selectedGroupId)}>+ Create Activity</CreateButton>
               </div>
-            ) : (
-              <EmptyState>
-                <i className="fas fa-tasks"></i>
-                <h3>No Active Activities</h3>
-                <p>No peers are currently working on this activity.</p>
-              </EmptyState>
             )}
-
-            <div style={{ marginTop: '1rem' }}>
-              <Button onClick={() => setShowActivityModal(false)}>Close</Button>
-            </div>
-          </ModalContent>
-        </Modal>
-      )}
-
-      {/* Progress Details Modal - Shows incomplete progress */}
-      {showProgressModal && selectedActivity && (
-        <Modal>
-          <ModalContent>
-            <h2>Incomplete Progress - {selectedActivity.title}</h2>
-            
-            {selectedActivity.incompleteProgress.length > 0 ? (
-              <div>
-                {selectedActivity.incompleteProgress.map((item, index) => (
-                  <div key={index} style={{ 
-                    marginBottom: '1rem', 
-                    padding: '1rem',
-                    background: '#f8f9fa',
-                    borderRadius: '8px'
+          </div>
+          {selectedGroup ? (
+            <>
+              {/* Activities Section */}
+              <div style={{ marginBottom: '2rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <h3 style={{ color: '#007bff', margin: 0 }}>Group Activities</h3>
+                  <span style={{ fontSize: '0.9rem', color: '#666' }}>
+                    {selectedGroup.activities?.length || 0} activities
+                  </span>
+                </div>
+                {selectedGroup.activities && selectedGroup.activities.length > 0 ? (
+                  <GroupGrid>
+                    {selectedGroup.activities.map(activity => (
+                      <ActivityCard key={activity.id}>
+                        <ActivityHeader>
+                          <ActivityTitle>{activity.title}</ActivityTitle>
+                          <ActivityStatus status={activity.status}>
+                            {activity.status.charAt(0).toUpperCase() + activity.status.slice(1)}
+                          </ActivityStatus>
+                        </ActivityHeader>
+                        <div style={{ color: '#666', marginBottom: 8 }}>{activity.description}</div>
+                        <div style={{ fontSize: '0.95rem', color: '#888', marginBottom: 8 }}>
+                          Due: {activity.dueDate}
+                        </div>
+                        <ProgressBar>
+                          <ProgressFill $progress={activity.progress} />
+                        </ProgressBar>
+                        <ProgressText>{activity.progress}% Complete</ProgressText>
+                        <ActivityActions>
+                          <ActionButton $variant="edit" onClick={() => openEditActivityModal(selectedGroupId, activity)}>Edit</ActionButton>
+                          <ActionButton $variant="delete" onClick={() => handleDeleteActivity(selectedGroupId, activity.id)}>Delete</ActionButton>
+                        </ActivityActions>
+                      </ActivityCard>
+                    ))}
+                  </GroupGrid>
+                ) : (
+                  <div style={{ 
+                    textAlign: 'center', 
+                    padding: '2rem', 
+                    color: '#666', 
+                    border: '2px dashed #ddd', 
+                    borderRadius: '8px',
+                    background: '#f9f9f9'
                   }}>
-                    <h3>{item.peer}</h3>
-                    <p><strong>Activity:</strong> {item.activity}</p>
-                    <p><strong>Started:</strong> {item.startedAt}</p>
-                    <p><strong>Progress:</strong> {item.progress}%</p>
+                    No activities created yet. Create activities in the group settings.
+                  </div>
+                )}
+              </div>
+
+              {/* Discussion Topics Section */}
+              <div style={{ marginBottom: '2rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <h3 style={{ color: '#17a2b8', margin: 0 }}>Discussion Topics</h3>
+                  <span style={{ fontSize: '0.9rem', color: '#666' }}>
+                    {selectedGroup.discussionTopics?.length || 0} topics
+                  </span>
+                </div>
+                {selectedGroup.discussionTopics && selectedGroup.discussionTopics.length > 0 ? (
+                  <GroupGrid>
+                    {selectedGroup.discussionTopics.map(topic => (
+                      <ActivityCard key={topic.id} style={{ borderLeft: '4px solid #17a2b8' }}>
+                        <ActivityHeader>
+                          <ActivityTitle style={{ color: '#17a2b8' }}>{topic.title}</ActivityTitle>
+                          <ActivityStatus status={topic.status}>
+                            {topic.status.charAt(0).toUpperCase() + topic.status.slice(1)}
+                          </ActivityStatus>
+                        </ActivityHeader>
+                        <div style={{ color: '#666', marginBottom: 8 }}>{topic.description}</div>
+                        <div style={{ fontSize: '0.95rem', color: '#888', marginBottom: 8 }}>
+                          Due: {topic.dueDate}
+                        </div>
+                        <ProgressBar>
+                          <ProgressFill $progress={topic.progress} />
+                        </ProgressBar>
+                        <ProgressText>{topic.progress}% Complete</ProgressText>
+                        <ActivityActions>
+                          <ActionButton $variant="edit" onClick={() => openEditActivityModal(selectedGroupId, topic)}>Edit</ActionButton>
+                          <ActionButton $variant="delete" onClick={() => handleDeleteActivity(selectedGroupId, topic.id)}>Delete</ActionButton>
+                        </ActivityActions>
+                      </ActivityCard>
+                    ))}
+                  </GroupGrid>
+                ) : (
+                  <div style={{ 
+                    textAlign: 'center', 
+                    padding: '2rem', 
+                    color: '#666', 
+                    border: '2px dashed #ddd', 
+                    borderRadius: '8px',
+                    background: '#f0f8ff'
+                  }}>
+                    No discussion topics created yet. Create topics in the group settings.
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div style={{ color: '#888', marginTop: 32 }}>Select a group to manage activities and discussion topics.</div>
+          )}
+          {/* Activity Modal */}
+          {showActivityModal && (
+            <Modal>
+              <ModalContent>
+                <h3>{activityModalMode === 'create' ? 'Create Activity' : 'Edit Activity'}</h3>
+                <FormGroup>
+                  <Label>Title</Label>
+                  <Input
+                    name="title"
+                    value={currentActivity.title}
+                    onChange={(e) => handleActivityChange(null, 'title', e.target.value)}
+                    placeholder="Enter activity title"
+                  />
+                </FormGroup>
+                <FormGroup>
+                  <Label>Description</Label>
+                  <TextArea
+                    name="description"
+                    value={currentActivity.description}
+                    onChange={(e) => handleActivityChange(null, 'description', e.target.value)}
+                    placeholder="Enter activity description"
+                  />
+                </FormGroup>
+                <FormGroup>
+                  <Label>Due Date</Label>
+                  <Input
+                    name="dueDate"
+                    type="date"
+                    value={currentActivity.dueDate}
+                    onChange={(e) => handleActivityChange(null, 'dueDate', e.target.value)}
+                  />
+                </FormGroup>
+                <div style={{ marginTop: '1rem' }}>
+                  <Button onClick={handleSaveActivity}>{activityModalMode === 'create' ? 'Create' : 'Save'}</Button>
+                  <Button onClick={closeActivityModal} style={{ background: '#666' }}>Cancel</Button>
+                </div>
+              </ModalContent>
+            </Modal>
+          )}
+        </>
+      )}
+      {/* Progress Tab */}
+      {activeTab === 'progress' && (
+        <>
+          <ProgressChartContainer>
+            <h3>Group Progress Overview</h3>
+            <Line data={groupProgressData} options={{
+              responsive: true,
+              plugins: { legend: { display: false } },
+              scales: { y: { beginAtZero: true, max: 100 } }
+            }} />
+          </ProgressChartContainer>
+          <GroupGrid>
+            {groups.map(group => {
+              const groupActivities = group.activities || [];
+              const avgProgress = groupActivities.length === 0 ? 0 : Math.round(groupActivities.reduce((sum, a) => sum + a.progress, 0) / groupActivities.length);
+              return (
+                <GroupCard key={group.id}>
+                  <GroupHeader>
+                    <GroupInfo>
+                      <GroupName>{group.name}</GroupName>
+                      <GroupMeta>{group.topic} • {group.schedule}</GroupMeta>
+                    </GroupInfo>
+                    <GroupStatus status={group.status}>
+                      {group.status.charAt(0).toUpperCase() + group.status.slice(1)}
+                    </GroupStatus>
+                  </GroupHeader>
+                  <div style={{ color: '#666', marginBottom: 8 }}>{group.description}</div>
+                  <div style={{ margin: '1rem 0' }}>
                     <ProgressBar>
-                      <ProgressFill progress={item.progress} />
+                      <ProgressFill $progress={avgProgress} />
                     </ProgressBar>
+                    <ProgressText>{avgProgress}% Average Progress</ProgressText>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <EmptyState>
-                <i className="fas fa-check-circle"></i>
-                <h3>No Incomplete Progress</h3>
-                <p>All started activities have been completed.</p>
-              </EmptyState>
-            )}
-
-            <div style={{ marginTop: '1rem' }}>
-              <Button onClick={() => setShowProgressModal(false)}>Close</Button>
-            </div>
-          </ModalContent>
-        </Modal>
-      )}
-
-      {/* Create Group Modal */}
-      {showCreateModal && (
-        <Modal>
-          <ModalContent>
-            <h2>Create New Group</h2>
-            <FormGroup>
-              <Label>Group Name</Label>
-              <Input
-                type="text"
-                name="name"
-                value={newGroup.name}
-                onChange={(e) => setNewGroup({...newGroup, name: e.target.value})}
-                placeholder="Enter group name"
-              />
-            </FormGroup>
-            <FormGroup>
-              <Label>Description</Label>
-              <TextArea
-                name="description"
-                value={newGroup.description}
-                onChange={(e) => setNewGroup({...newGroup, description: e.target.value})}
-                placeholder="Enter group description"
-              />
-            </FormGroup>
-            <FormGroup>
-              <Label>Maximum Members</Label>
-              <Input
-                type="number"
-                name="maxMembers"
-                value={newGroup.maxMembers}
-                onChange={(e) => setNewGroup({...newGroup, maxMembers: parseInt(e.target.value)})}
-                min="2"
-                max="10"
-              />
-            </FormGroup>
-            <FormGroup>
-              <Label>Schedule</Label>
-              <Select
-                name="day"
-                value={newGroup.schedule.day}
-                onChange={(e) => setNewGroup({
-                  ...newGroup,
-                  schedule: {...newGroup.schedule, day: e.target.value}
-                })}
-              >
-                <option value="">Select day</option>
-                <option value="monday">Monday</option>
-                <option value="tuesday">Tuesday</option>
-                <option value="wednesday">Wednesday</option>
-                <option value="thursday">Thursday</option>
-                <option value="friday">Friday</option>
-                <option value="saturday">Saturday</option>
-                <option value="sunday">Sunday</option>
-              </Select>
-            </FormGroup>
-            <FormGroup>
-              <Label>Time</Label>
-              <Input
-                type="time"
-                name="time"
-                value={newGroup.schedule.time}
-                onChange={(e) => setNewGroup({
-                  ...newGroup,
-                  schedule: {...newGroup.schedule, time: e.target.value}
-                })}
-              />
-            </FormGroup>
-            <FormGroup>
-              <Label>Frequency</Label>
-              <Select
-                name="frequency"
-                value={newGroup.schedule.frequency}
-                onChange={(e) => setNewGroup({
-                  ...newGroup,
-                  schedule: {...newGroup.schedule, frequency: e.target.value}
-                })}
-              >
-                <option value="weekly">Weekly</option>
-                <option value="biweekly">Bi-weekly</option>
-                <option value="monthly">Monthly</option>
-              </Select>
-            </FormGroup>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
-              <Button onClick={() => setShowCreateModal(false)} style={{ background: '#6c757d' }}>Cancel</Button>
-              <Button onClick={handleCreateGroup}>Create Group</Button>
-            </div>
-          </ModalContent>
-        </Modal>
+                  <MemberList>
+                    {group.members.map(member => (
+                      <MemberItem key={member.id}>
+                        <MemberAvatar>
+                          {member.name.split(' ').map(n => n[0]).join('')}
+                        </MemberAvatar>
+                        <MemberInfo>
+                          <MemberName>{member.name}</MemberName>
+                          <MemberRole>{member.role}</MemberRole>
+                        </MemberInfo>
+                      </MemberItem>
+                    ))}
+                  </MemberList>
+                </GroupCard>
+              );
+            })}
+          </GroupGrid>
+        </>
       )}
     </Container>
   );

@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import PageContainer from '../../components/PageContainer';
+import ContentWrapper from '../../components/ContentWrapper';
 
 const Container = styled.div`
   padding: 2rem;
@@ -256,180 +258,227 @@ const InstructorDashboard = () => {
     { from: 'Carlos Lee', message: 'I submitted my homework.', sentAt: '2025-06-07 18:00' },
     { from: 'Dina Patel', message: 'Thank you for the feedback!', sentAt: '2025-06-07 17:45' },
   ]);
+  const [showCoursesModal, setShowCoursesModal] = useState(false);
+  const [showStudentsModal, setShowStudentsModal] = useState(false);
+  const [showAssessmentsModal, setShowAssessmentsModal] = useState(false);
 
   return (
-    <Container>
-      <Title>
-        <span>
-          {welcomeText}
-          {isTyping && <span style={{ animation: 'blink 1s infinite' }}>|</span>}
-        </span>
-      </Title>
-      <OverviewGrid>
-        <OverviewCard>
-          <Stat>{coursesManaged}</Stat>
-          <StatLabel>Courses Managed</StatLabel>
-        </OverviewCard>
-        <OverviewCard>
-          <Stat>{totalStudents}</Stat>
-          <StatLabel>Students</StatLabel>
-        </OverviewCard>
-        <OverviewCard>
-          <Stat>{totalAssessments}</Stat>
-          <StatLabel>Assessments</StatLabel>
-        </OverviewCard>
-      </OverviewGrid>
+    <ContentWrapper>
+      <PageContainer>
+        <Title>
+          <span>
+            {welcomeText}
+            {isTyping && <span style={{ animation: 'blink 1s infinite' }}>|</span>}
+          </span>
+        </Title>
+        <OverviewGrid>
+          <OverviewCard onClick={() => setShowCoursesModal(true)} style={{ cursor: 'pointer' }}>
+            <Stat>{coursesManaged}</Stat>
+            <StatLabel>Courses Managed</StatLabel>
+          </OverviewCard>
+          <OverviewCard onClick={() => setShowStudentsModal(true)} style={{ cursor: 'pointer' }}>
+            <Stat>{totalStudents}</Stat>
+            <StatLabel>Students</StatLabel>
+          </OverviewCard>
+          <OverviewCard onClick={() => setShowAssessmentsModal(true)} style={{ cursor: 'pointer' }}>
+            <Stat>{totalAssessments}</Stat>
+            <StatLabel>Assessments</StatLabel>
+          </OverviewCard>
+        </OverviewGrid>
+        <SectionTitle>Student Progress</SectionTitle>
+        <ResponsiveContainer width="100%" height={250}>
+          <BarChart data={progressData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="name" />
+            <YAxis domain={[0, 100]} />
+            <Tooltip />
+            <Bar dataKey="progress" fill="#8884d8" />
+          </BarChart>
+        </ResponsiveContainer>
+        <StudentList>
+          {studentProgress.map((student, idx) => (
+            <StudentItem key={idx}>
+              <span>{student.name}</span>
+              <span style={{ color: '#888', fontSize: '0.95rem' }}>{student.progress}</span>
+            </StudentItem>
+          ))}
+        </StudentList>
+        <SectionTitle>Quick Actions</SectionTitle>
+        <QuickAction onClick={() => navigate('/manage-courses')}>Create Course</QuickAction>
+        <QuickAction onClick={() => navigate('/assessments')}>Create Assessment</QuickAction>
+        <SectionTitle>Recent Activity</SectionTitle>
+        <DashboardGrid>
+          <Card onClick={() => setShowSubmissionsList(true)} style={{ cursor: 'pointer' }}>
+            <CardTitle>New Submission</CardTitle>
+            <p>Student "Alice Johnson" submitted an assignment.</p>
+          </Card>
+          <Card onClick={() => setShowMessagesList(true)} style={{ cursor: 'pointer' }}>
+            <CardTitle>Message</CardTitle>
+            <p>Message from student "Bob Smith".</p>
+          </Card>
+        </DashboardGrid>
 
-      <SectionTitle>Student Progress</SectionTitle>
-      <ResponsiveContainer width="100%" height={250}>
-        <BarChart data={progressData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="name" />
-          <YAxis domain={[0, 100]} />
-          <Tooltip />
-          <Bar dataKey="progress" fill="#8884d8" />
-        </BarChart>
-      </ResponsiveContainer>
-      <StudentList>
-        {studentProgress.map((student, idx) => (
-          <StudentItem key={idx}>
-            <span>{student.name}</span>
-            <span style={{ color: '#888', fontSize: '0.95rem' }}>{student.progress}</span>
-          </StudentItem>
-        ))}
-      </StudentList>
-
-      <SectionTitle>Quick Actions</SectionTitle>
-      <QuickAction onClick={() => navigate('/manage-courses')}>Create Course</QuickAction>
-      <QuickAction onClick={() => navigate('/assessments')}>Manage Assessments</QuickAction>
-
-      <SectionTitle>Recent Activity</SectionTitle>
-      <DashboardGrid>
-        <Card onClick={() => setShowSubmissionsList(true)} style={{ cursor: 'pointer' }}>
-          <CardTitle>New Submission</CardTitle>
-          <p>Student "Alice Johnson" submitted an assignment.</p>
-        </Card>
-        <Card onClick={() => setShowMessagesList(true)} style={{ cursor: 'pointer' }}>
-          <CardTitle>Message</CardTitle>
-          <p>Message from student "Bob Smith".</p>
-        </Card>
-      </DashboardGrid>
-
-      {showSubmissionsList && (
-        <ModalOverlay>
-          <ModalContent>
-            <ModalTitle>All Student Submissions</ModalTitle>
-            <ul style={{ listStyle: 'none', padding: 0 }}>
-              {studentSubmissions.map((sub, idx) => (
-                <li key={idx} style={{ marginBottom: 12, borderBottom: '1px solid #eee', paddingBottom: 8 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span><b>{sub.name}</b> - {sub.assignment}</span>
-                    <ActionButton onClick={() => { setSelectedStudent(sub); setShowSubmissionsList(false); }}>View & Grade</ActionButton>
-                  </div>
-                  <div style={{ fontSize: '0.95rem', color: '#888' }}>Submitted: {sub.submittedAt} | File: {sub.file} | Grade: {sub.grade ? sub.grade : 'Pending'}</div>
-                </li>
-              ))}
-            </ul>
-            <StickyFooter>
-              <ActionButton color="#888" onClick={() => setShowSubmissionsList(false)}>Close</ActionButton>
-            </StickyFooter>
-          </ModalContent>
-        </ModalOverlay>
-      )}
-      {selectedStudent && (
-        <ModalOverlay>
-          <ModalContent>
-            <ModalTitle>Submission: {selectedStudent.name}</ModalTitle>
-            <div><b>Assignment:</b> {selectedStudent.assignment}</div>
-            <div><b>Submitted At:</b> {selectedStudent.submittedAt}</div>
-            <div><b>File:</b> {selectedStudent.file}</div>
-            <div><b>Grade:</b> {selectedStudent.grade ? selectedStudent.grade : 'Pending'}</div>
-            <div style={{ margin: '1rem 0', background: '#f7f7f7', padding: '1rem', borderRadius: 8 }}>
-              <b>Student's Work:</b>
-              <div style={{ marginTop: 8 }}>
-                {/* Mocked original answer or file preview */}
-                {selectedStudent.file.endsWith('.pdf') ? (
-                  <a href={`#/${selectedStudent.file}`} target="_blank" rel="noopener noreferrer">View PDF: {selectedStudent.file}</a>
-                ) : (
-                  <div>Answer: Lorem ipsum dolor sit amet, student answer goes here.</div>
-                )}
+        {showSubmissionsList && (
+          <ModalOverlay>
+            <ModalContent>
+              <ModalTitle>All Student Submissions</ModalTitle>
+              <ul style={{ listStyle: 'none', padding: 0 }}>
+                {studentSubmissions.map((sub, idx) => (
+                  <li key={idx} style={{ marginBottom: 12, borderBottom: '1px solid #eee', paddingBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span><b>{sub.name}</b> - {sub.assignment}</span>
+                      <ActionButton onClick={() => { setSelectedStudent(sub); setShowSubmissionsList(false); }}>View & Grade</ActionButton>
+                    </div>
+                    <div style={{ fontSize: '0.95rem', color: '#888' }}>Submitted: {sub.submittedAt} | File: {sub.file} | Grade: {sub.grade ? sub.grade : 'Pending'}</div>
+                  </li>
+                ))}
+              </ul>
+              <StickyFooter>
+                <ActionButton color="#888" onClick={() => setShowSubmissionsList(false)}>Close</ActionButton>
+              </StickyFooter>
+            </ModalContent>
+          </ModalOverlay>
+        )}
+        {selectedStudent && (
+          <ModalOverlay>
+            <ModalContent>
+              <ModalTitle>Submission: {selectedStudent.name}</ModalTitle>
+              <div><b>Assignment:</b> {selectedStudent.assignment}</div>
+              <div><b>Submitted At:</b> {selectedStudent.submittedAt}</div>
+              <div><b>File:</b> {selectedStudent.file}</div>
+              <div><b>Grade:</b> {selectedStudent.grade ? selectedStudent.grade : 'Pending'}</div>
+              <div style={{ margin: '1rem 0', background: '#f7f7f7', padding: '1rem', borderRadius: 8 }}>
+                <b>Student's Work:</b>
+                <div style={{ marginTop: 8 }}>
+                  {/* Mocked original answer or file preview */}
+                  {selectedStudent.file.endsWith('.pdf') ? (
+                    <a href={`#/${selectedStudent.file}`} target="_blank" rel="noopener noreferrer">View PDF: {selectedStudent.file}</a>
+                  ) : (
+                    <div>Answer: Lorem ipsum dolor sit amet, student answer goes here.</div>
+                  )}
+                </div>
               </div>
-            </div>
-            <div style={{ marginTop: '1rem' }}>
-              <label>Enter Grade:</label>
+              <div style={{ marginTop: '1rem' }}>
+                <label>Enter Grade:</label>
+                <Input
+                  placeholder="e.g. 85 or B+"
+                  value={grade}
+                  onChange={e => setGrade(e.target.value)}
+                />
+                <label>Feedback:</label>
+                <TextArea
+                  placeholder="Write feedback for the student..."
+                  value={feedback}
+                  onChange={e => setFeedback(e.target.value)}
+                />
+              </div>
+              <StickyFooter>
+                <ActionButton
+                  onClick={() => {
+                    setStudentSubmissions(subs => subs.map(s =>
+                      s.name === selectedStudent.name ? { ...s, grade, feedback } : s
+                    ));
+                    setProgressData(data => data.map(d =>
+                      d.name === selectedStudent.name.split(' ')[0] ? { ...d, progress: Math.min(100, Number(grade) || d.progress) } : d
+                    ));
+                    setSelectedStudent(null);
+                    setGrade('');
+                    setFeedback('');
+                  }}
+                  disabled={!grade || !feedback}
+                >
+                  Release Grade
+                </ActionButton>
+                <ActionButton color="#888" onClick={() => { setSelectedStudent(null); setGrade(''); setFeedback(''); }}>Close</ActionButton>
+              </StickyFooter>
+            </ModalContent>
+          </ModalOverlay>
+        )}
+        {showMessagesList && (
+          <ModalOverlay>
+            <ModalContent>
+              <ModalTitle>All Student Messages</ModalTitle>
+              <ul style={{ listStyle: 'none', padding: 0 }}>
+                {messages.map((msg, idx) => (
+                  <li key={idx} style={{ marginBottom: 12, borderBottom: '1px solid #eee', paddingBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span><b>{msg.from}</b>: {msg.message}</span>
+                      <ActionButton onClick={() => { setSelectedMessage(msg); setShowMessagesList(false); }}>Reply</ActionButton>
+                    </div>
+                    <div style={{ fontSize: '0.95rem', color: '#888' }}>Sent: {msg.sentAt}</div>
+                  </li>
+                ))}
+              </ul>
+              <StickyFooter>
+                <ActionButton color="#888" onClick={() => setShowMessagesList(false)}>Close</ActionButton>
+              </StickyFooter>
+            </ModalContent>
+          </ModalOverlay>
+        )}
+        {selectedMessage && (
+          <ModalOverlay>
+            <ModalContent>
+              <ModalTitle>Message from {selectedMessage.from}</ModalTitle>
+              <div style={{ marginBottom: '1rem' }}>{selectedMessage.message}</div>
               <Input
-                placeholder="e.g. 85 or B+"
-                value={grade}
-                onChange={e => setGrade(e.target.value)}
+                placeholder="Type your reply..."
+                value={reply}
+                onChange={e => setReply(e.target.value)}
               />
-              <label>Feedback:</label>
-              <TextArea
-                placeholder="Write feedback for the student..."
-                value={feedback}
-                onChange={e => setFeedback(e.target.value)}
-              />
-            </div>
-            <StickyFooter>
-              <ActionButton
-                onClick={() => {
-                  setStudentSubmissions(subs => subs.map(s =>
-                    s.name === selectedStudent.name ? { ...s, grade, feedback } : s
-                  ));
-                  setProgressData(data => data.map(d =>
-                    d.name === selectedStudent.name.split(' ')[0] ? { ...d, progress: Math.min(100, Number(grade) || d.progress) } : d
-                  ));
-                  setSelectedStudent(null);
-                  setGrade('');
-                  setFeedback('');
-                }}
-                disabled={!grade || !feedback}
-              >
-                Release Grade
-              </ActionButton>
-              <ActionButton color="#888" onClick={() => { setSelectedStudent(null); setGrade(''); setFeedback(''); }}>Close</ActionButton>
-            </StickyFooter>
-          </ModalContent>
-        </ModalOverlay>
-      )}
-      {showMessagesList && (
-        <ModalOverlay>
-          <ModalContent>
-            <ModalTitle>All Student Messages</ModalTitle>
-            <ul style={{ listStyle: 'none', padding: 0 }}>
-              {messages.map((msg, idx) => (
-                <li key={idx} style={{ marginBottom: 12, borderBottom: '1px solid #eee', paddingBottom: 8 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span><b>{msg.from}</b>: {msg.message}</span>
-                    <ActionButton onClick={() => { setSelectedMessage(msg); setShowMessagesList(false); }}>Reply</ActionButton>
-                  </div>
-                  <div style={{ fontSize: '0.95rem', color: '#888' }}>Sent: {msg.sentAt}</div>
-                </li>
-              ))}
-            </ul>
-            <StickyFooter>
-              <ActionButton color="#888" onClick={() => setShowMessagesList(false)}>Close</ActionButton>
-            </StickyFooter>
-          </ModalContent>
-        </ModalOverlay>
-      )}
-      {selectedMessage && (
-        <ModalOverlay>
-          <ModalContent>
-            <ModalTitle>Message from {selectedMessage.from}</ModalTitle>
-            <div style={{ marginBottom: '1rem' }}>{selectedMessage.message}</div>
-            <Input
-              placeholder="Type your reply..."
-              value={reply}
-              onChange={e => setReply(e.target.value)}
-            />
-            <StickyFooter>
-              <ActionButton onClick={() => { setReply(''); setSelectedMessage(null); }}>Send Reply</ActionButton>
-              <ActionButton color="#888" onClick={() => setSelectedMessage(null)}>Close</ActionButton>
-            </StickyFooter>
-          </ModalContent>
-        </ModalOverlay>
-      )}
-    </Container>
+              <StickyFooter>
+                <ActionButton onClick={() => { setReply(''); setSelectedMessage(null); }}>Send Reply</ActionButton>
+                <ActionButton color="#888" onClick={() => setSelectedMessage(null)}>Close</ActionButton>
+              </StickyFooter>
+            </ModalContent>
+          </ModalOverlay>
+        )}
+        {showCoursesModal && (
+          <ModalOverlay>
+            <ModalContent>
+              <ModalTitle>Courses & Enrolled Students</ModalTitle>
+              <ul style={{ listStyle: 'none', padding: 0 }}>
+                <li><b>Digital Skills</b>: Alice Johnson, Bob Smith, Carlos Lee, Dina Patel</li>
+                <li><b>English Communication</b>: Alice Johnson, Bob Smith, Carlos Lee, Dina Patel</li>
+                <li><b>Job Search Skills</b>: Alice Johnson, Bob Smith, Carlos Lee, Dina Patel</li>
+              </ul>
+              <StickyFooter>
+                <ActionButton color="#888" onClick={() => setShowCoursesModal(false)}>Close</ActionButton>
+              </StickyFooter>
+            </ModalContent>
+          </ModalOverlay>
+        )}
+        {showStudentsModal && (
+          <ModalOverlay>
+            <ModalContent>
+              <ModalTitle>Student Details</ModalTitle>
+              <ul style={{ listStyle: 'none', padding: 0 }}>
+                <li><b>Alice Johnson</b>: Digital Skills (85%), English Communication (92%), Job Search Skills (78%)</li>
+                <li><b>Bob Smith</b>: Digital Skills (72%), English Communication (88%), Job Search Skills (85%)</li>
+                <li><b>Carlos Lee</b>: Digital Skills (90%), English Communication (75%), Job Search Skills (82%)</li>
+                <li><b>Dina Patel</b>: Digital Skills (88%), English Communication (95%), Job Search Skills (91%)</li>
+              </ul>
+              <StickyFooter>
+                <ActionButton color="#888" onClick={() => setShowStudentsModal(false)}>Close</ActionButton>
+              </StickyFooter>
+            </ModalContent>
+          </ModalOverlay>
+        )}
+        {showAssessmentsModal && (
+          <ModalOverlay>
+            <ModalContent>
+              <ModalTitle>Assessments & Assigned Students</ModalTitle>
+              <ul style={{ listStyle: 'none', padding: 0 }}>
+                <li><b>Module 1 Homework</b>: Alice Johnson, Bob Smith, Carlos Lee, Dina Patel</li>
+                <li><b>Module 2 Quiz</b>: Alice Johnson, Bob Smith, Carlos Lee, Dina Patel</li>
+              </ul>
+              <StickyFooter>
+                <ActionButton color="#888" onClick={() => setShowAssessmentsModal(false)}>Close</ActionButton>
+              </StickyFooter>
+            </ModalContent>
+          </ModalOverlay>
+        )}
+      </PageContainer>
+    </ContentWrapper>
   );
 };
 

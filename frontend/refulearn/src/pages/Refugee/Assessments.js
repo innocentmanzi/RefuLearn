@@ -1,329 +1,250 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
-
-const Container = styled.div`
-  padding: 2rem;
-  background: ${({ theme }) => theme.colors.white};
-  min-height: 100vh;
-`;
-
-const Header = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 2rem;
-`;
+import db from '../../pouchdb';
+import Sidebar from '../../components/Sidebar';
 
 const Title = styled.h1`
   color: ${({ theme }) => theme.colors.primary};
+  margin-bottom: 1.5rem;
 `;
 
-const FilterSection = styled.div`
-  display: flex;
-  gap: 1rem;
-  margin-bottom: 2rem;
-  flex-wrap: wrap;
-`;
-
-const FilterButton = styled.button`
-  background: ${({ active, theme }) => active ? theme.colors.primary : '#f5f5f5'};
-  color: ${({ active }) => active ? 'white' : '#333'};
-  border: none;
-  border-radius: 20px;
-  padding: 0.5rem 1rem;
-  cursor: pointer;
-  transition: all 0.2s;
-  
-  &:hover {
-    background: ${({ theme }) => theme.colors.primary};
-    color: white;
-  }
-`;
-
-const CardsGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 1rem;
-  margin-bottom: 2rem;
-`;
-
-const Card = styled.div`
-  background: #fff;
-  border-radius: 8px;
-  padding: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-  text-align: center;
-  cursor: pointer;
-  transition: transform 0.2s;
-
-  &:hover {
-    transform: translateY(-2px);
-  }
-`;
-
-const CardTitle = styled.h4`
-  margin: 0;
-  color: ${({ theme }) => theme.colors.primary};
-  font-size: 1rem;
-`;
-
-const AssessmentGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 1.5rem;
-`;
-
-const AssessmentCard = styled.div`
-  background: white;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-  transition: transform 0.2s;
-  
-  &:hover {
-    transform: translateY(-4px);
-  }
-`;
-
-const AssessmentHeader = styled.div`
-  padding: 1.5rem;
-  background: ${({ theme }) => theme.colors.primary};
-  color: white;
-`;
-
-const AssessmentTitle = styled.h3`
-  margin: 0 0 0.5rem 0;
-  color: white;
-`;
-
-const AssessmentMeta = styled.div`
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.9rem;
-  opacity: 0.9;
-`;
-
-const AssessmentContent = styled.div`
-  padding: 1.5rem;
-`;
-
-const AssessmentDescription = styled.p`
-  color: #666;
-  margin: 0 0 1rem 0;
-  font-size: 0.9rem;
-`;
-
-const ProgressBar = styled.div`
+const TableWrapper = styled.div`
   width: 100%;
-  height: 8px;
-  background: #f0f0f0;
-  border-radius: 4px;
-  margin: 0.5rem 0;
+  max-width: 1200px;
+  margin: 0 auto 2rem auto;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  min-width: unset;
+  max-width: unset;
+  box-sizing: border-box;
 `;
 
-const Progress = styled.div`
-  width: ${props => props.$value}%;\n  height: 100%;\n  background: ${({ theme }) => theme.colors.primary};\n  border-radius: 4px;\n  transition: width 0.3s ease;\n`;
+const Table = styled.table`
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 2rem;
+  min-width: unset;
+  max-width: unset;
+  box-sizing: border-box;
+  @media (max-width: 900px) {
+    font-size: 0.95rem;
+  }
+`;
+
+const Th = styled.th`
+  background: ${({ theme }) => theme.colors.primary};
+  color: #fff;
+  padding: 0.8rem;
+  text-align: left;
+  @media (max-width: 900px) {
+    padding: 0.5rem;
+    font-size: 0.95rem;
+  }
+`;
+
+const Td = styled.td`
+  padding: 0.8rem;
+  border-bottom: 1px solid #eee;
+  @media (max-width: 900px) {
+    padding: 0.5rem;
+    font-size: 0.95rem;
+  }
+`;
 
 const ActionButton = styled.button`
   background: ${({ theme }) => theme.colors.primary};
-  color: white;
+  color: #fff;
   border: none;
-  border-radius: 8px;
-  padding: 0.8rem 1.2rem;
-  width: 100%;
-  margin-top: 1rem;
+  border-radius: 6px;
+  padding: 0.4rem 1rem;
   cursor: pointer;
+  font-size: 1rem;
   transition: background 0.2s;
-  
   &:hover {
     background: ${({ theme }) => theme.colors.secondary};
   }
 `;
 
-const StatusBadge = styled.span`
-  display: inline-block;
-  padding: 0.3rem 0.8rem;
-  border-radius: 12px;
-  font-size: 0.8rem;
-  font-weight: 500;
-  background: ${({ $status }) => 
-    $status === 'completed' ? '#4CAF50' :
-    $status === 'in-progress' ? '#FFC107' :
-    '#F4436'
-  };
-  color: white;
+const AssessmentsGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1.5rem;
+  margin-top: 2rem;
+  width: 100%;
+  box-sizing: border-box;
+  @media (max-width: 900px) {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
 `;
+
+const AssessmentCard = styled.div`
+  background: #fff;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  transition: transform 0.2s, box-shadow 0.2s;
+  width: 100%;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  @media (max-width: 600px) {
+    padding: 1rem;
+    font-size: 0.98rem;
+  }
+`;
+
+const getAvailability = (dueDate, endDate) => {
+  const now = new Date();
+  const due = new Date(dueDate);
+  const end = new Date(endDate);
+  if (now > end) return 'Closed';
+  let status = '';
+  if (now < due) status = 'Open (Before Due Date)';
+  else if (now >= due && now <= end) status = 'Open (After Due Date)';
+  // Countdown to end date
+  const diff = end - now;
+  const mins = Math.floor((diff / (1000 * 60)) % 60);
+  const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  let countdown = '';
+  if (days > 0) countdown += `${days}d `;
+  if (hours > 0) countdown += `${hours}h `;
+  countdown += `${mins}m left`;
+  return `${status} (Ends: ${endDate}, ${countdown})`;
+};
+
+const assessmentsData = [
+  {
+    id: 1,
+    title: 'English Communication Assessment',
+    description: 'Test your English communication skills and get personalized feedback.',
+    dueDate: '2025-07-01',
+    endDate: '2025-08-01',
+    courseId: 1
+  },
+  {
+    id: 2,
+    title: 'Digital Skills Assessment',
+    description: 'Evaluate your proficiency in basic computer and digital skills.',
+    dueDate: '2025-07-05',
+    endDate: '2025-08-10',
+    courseId: 2
+  },
+  {
+    id: 3,
+    title: 'Job Search Readiness',
+    description: 'Assess your job search skills and get recommendations for improvement.',
+    dueDate: '2024-07-10',
+    endDate: '2024-07-20',
+    courseId: 3
+  },
+  {
+    id: 4,
+    title: 'Professional Networking Quiz',
+    description: 'Test your knowledge of effective professional networking.',
+    dueDate: '2024-07-12',
+    endDate: '2024-07-22',
+    courseId: 4
+  }
+];
+
+// Add a hook to detect mobile
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 900);
+  React.useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 900);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  return isMobile;
+}
 
 const Assessments = () => {
   const navigate = useNavigate();
-  const [activeFilter, setActiveFilter] = useState('all');
-  
-  const [assessments] = useState([
-    {
-      id: 1,
-      title: 'English Communication Assessment',
-      description: 'Test your English communication skills and get personalized feedback.',
-      duration: '45 minutes',
-      questions: 30,
-      status: 'completed',
-      score: 85,
-      courseId: 1
-    },
-    {
-      id: 2,
-      title: 'Digital Skills Assessment',
-      description: 'Evaluate your proficiency in basic computer and digital skills.',
-      duration: '60 minutes',
-      questions: 40,
-      status: 'in-progress',
-      progress: 60,
-      courseId: 2
-    },
-    {
-      id: 3,
-      title: 'Job Search Readiness',
-      description: 'Assess your job search skills and get recommendations for improvement.',
-      duration: '30 minutes',
-      questions: 25,
-      status: 'not-started',
-      courseId: 3
-    },
-    {
-      id: 4,
-      title: 'Professional Networking Quiz',
-      description: 'Test your knowledge of effective professional networking.',
-      duration: '20 minutes',
-      questions: 15,
-      status: 'completed',
-      score: 95,
-      courseId: 4
-    },
-    {
-      id: 5,
-      title: 'Financial Literacy Test',
-      description: 'Evaluate your understanding of basic financial concepts.',
-      duration: '35 minutes',
-      questions: 20,
-      status: 'not-started',
-      courseId: 5
-    },
-    {
-      id: 6,
-      title: 'Cultural Awareness Assessment',
-      description: 'Assess your understanding of cultural differences and adaptation.',
-      duration: '30 minutes',
-      questions: 25,
-      status: 'in-progress',
-      progress: 40,
-      courseId: 6
-    }
-  ]);
+  const [assessments] = useState(assessmentsData);
+  const [submissionStatus, setSubmissionStatus] = useState({});
+  const isMobile = useIsMobile();
 
-  const assessmentCategories = [
-    { id: 1, name: 'Language' },
-    { id: 2, name: 'Digital Skills' },
-    { id: 3, name: 'Job Readiness' },
-    { id: 4, name: 'Professional Dev' },
-    { id: 5, name: 'Math & Logic' },
-    { id: 6, name: 'Other' },
-  ];
-
-  const filteredAssessments = assessments.filter(assessment => {
-    if (activeFilter === 'all') return true;
-    return assessment.status === activeFilter;
-  });
-
-  const getStatusText = (status) => {
-    switch (status) {
-      case 'completed': return 'Completed';
-      case 'in-progress': return 'In Progress';
-      case 'not-started': return 'Not Started';
-      default: return status;
-    }
-  };
+  useEffect(() => {
+    // Fetch submission status for each assessment
+    const fetchStatus = async () => {
+      const status = {};
+      for (const assessment of assessments) {
+        // Find the latest result for this assessment
+        const prefix = `assessmentresult_currentUser_${assessment.id}_`;
+        const result = await db.allDocs({
+          include_docs: true,
+          startkey: prefix,
+          endkey: prefix + '\ufff0'
+        });
+        if (result.rows.length > 0) {
+          // Get the latest by timestamp
+          const latest = result.rows.map(r => r.doc).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+          status[assessment.id] = {
+            submitted: true,
+            minutesLeft: latest.timeLeft !== undefined ? Math.ceil(latest.timeLeft / 60) : null
+          };
+        } else {
+          status[assessment.id] = { submitted: false };
+        }
+      }
+      setSubmissionStatus(status);
+    };
+    fetchStatus();
+  }, [assessments]);
 
   return (
-    <Container>
-      <Header>
-        <Title>Assessments</Title>
-      </Header>
-
-      <FilterSection>
-        <FilterButton
-          active={activeFilter === 'all'}
-          onClick={() => setActiveFilter('all')}
-        >
-          All Assessments
-        </FilterButton>
-        <FilterButton
-          active={activeFilter === 'not-started'}
-          onClick={() => setActiveFilter('not-started')}
-        >
-          Not Started
-        </FilterButton>
-        <FilterButton
-          active={activeFilter === 'in-progress'}
-          onClick={() => setActiveFilter('in-progress')}
-        >
-          In Progress
-        </FilterButton>
-        <FilterButton
-          active={activeFilter === 'completed'}
-          onClick={() => setActiveFilter('completed')}
-        >
-          Completed
-        </FilterButton>
-      </FilterSection>
-
-      <CardsGrid>
-        {assessmentCategories.map(category => (
-          <Card key={category.id} onClick={() => console.log(`Clicked on assessment category: ${category.name}`)}>
-            <CardTitle>{category.name}</CardTitle>
-          </Card>
-        ))}
-      </CardsGrid>
-
-      <AssessmentGrid>
-        {filteredAssessments.map(assessment => (
-          <AssessmentCard key={assessment.id}>
-            <AssessmentHeader>
-              <AssessmentTitle>{assessment.title}</AssessmentTitle>
-              <AssessmentMeta>
-                <span>{assessment.duration}</span>
-                <span>{assessment.questions} questions</span>
-              </AssessmentMeta>
-            </AssessmentHeader>
-            <AssessmentContent>
-              <AssessmentDescription>{assessment.description}</AssessmentDescription>
-              <StatusBadge $status={assessment.status}>
-                {getStatusText(assessment.status)}
-              </StatusBadge>
-              {assessment.status === 'completed' && (
-                <div style={{ marginTop: '1rem' }}>
-                  <div style={{ color: '#666', fontSize: '0.9rem' }}>Score: {assessment.score}%</div>
-                </div>
+    <Sidebar role="refugee">
+      <Title>Assessments</Title>
+      {isMobile ? (
+        <AssessmentsGrid>
+          {assessments.map(assessment => (
+            <AssessmentCard key={assessment.id}>
+              <h3>{assessment.title}</h3>
+              <p>{assessment.description}</p>
+              <p><strong>Due:</strong> {assessment.dueDate}</p>
+              <p><strong>Status:</strong> {getAvailability(assessment.dueDate, assessment.endDate)}</p>
+              {submissionStatus[assessment.id]?.submitted && (
+                <p><strong>Submitted:</strong> Yes</p>
               )}
-              {assessment.status === 'in-progress' && (
-                <div style={{ marginTop: '1rem' }}>
-                  <ProgressBar>
-                    <Progress $value={assessment.progress} />
-                  </ProgressBar>
-                  <div style={{ color: '#666', fontSize: '0.9rem' }}>
-                    {assessment.progress}% Complete
-                  </div>
-                </div>
-              )}
-              <ActionButton onClick={() => navigate(`/assessments/${assessment.id}`)}>
-                {assessment.status === 'completed' ? 'View Results' :
-                 assessment.status === 'in-progress' ? 'Continue Assessment' :
-                 'Start Assessment'}
+              <ActionButton onClick={() => navigate(`/assessment/${assessment.id}`)}>
+                {submissionStatus[assessment.id]?.submitted ? 'Review' : 'Start'}
               </ActionButton>
-            </AssessmentContent>
-          </AssessmentCard>
-        ))}
-      </AssessmentGrid>
-    </Container>
+            </AssessmentCard>
+          ))}
+        </AssessmentsGrid>
+      ) : (
+        <TableWrapper>
+          <Table>
+            <thead>
+              <tr>
+                <Th>Assessment</Th>
+                <Th>Description</Th>
+                <Th>Due Date</Th>
+                <Th>Status</Th>
+                <Th>Action</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {assessments.map(assessment => (
+                <tr key={assessment.id}>
+                  <Td>{assessment.title}</Td>
+                  <Td>{assessment.description}</Td>
+                  <Td>{assessment.dueDate}</Td>
+                  <Td>{getAvailability(assessment.dueDate, assessment.endDate)}</Td>
+                  <Td>
+                    <ActionButton onClick={() => navigate(`/assessment/${assessment.id}`)}>
+                      {submissionStatus[assessment.id]?.submitted ? 'Review' : 'Start'}
+                    </ActionButton>
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </TableWrapper>
+      )}
+    </Sidebar>
   );
 };
 
