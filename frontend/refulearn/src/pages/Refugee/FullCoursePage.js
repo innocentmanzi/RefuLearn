@@ -1,214 +1,14 @@
-import React, { useEffect, useState } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import db from '../../pouchdb';
+import React, { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import db from '../../pouchdb';
+import ContentWrapper from '../../components/ContentWrapper';
 import allCourses from '../../data/courses';
-
-const getProgressId = (courseId, userId = 'currentUser') => `progress_${userId}_${courseId}`;
-
-// Realistic resources and videos for each course
-const courseResources = {
-  'Basic English Communication': [
-    { name: 'English Grammar PDF', link: 'https://www.ef.com/wwen/english-resources/english-grammar/' },
-    { name: 'BBC Learning English', link: 'https://www.bbc.co.uk/learningenglish/' }
-  ],
-  'Digital Skills Fundamentals': [
-    { name: 'Digital Literacy Guide', link: 'https://www.digitalliteracy.gov/' },
-    { name: 'Google Digital Garage', link: 'https://learndigital.withgoogle.com/digitalgarage' }
-  ],
-  'Job Search Strategies': [
-    { name: 'UNHCR Job Search Tips', link: 'https://www.unhcr.org/job-search-tips.html' },
-    { name: 'Indeed Career Guide', link: 'https://www.indeed.com/career-advice' }
-  ],
-  'Professional Networking': [
-    { name: 'LinkedIn Networking Tips', link: 'https://www.linkedin.com/pulse/10-tips-effective-networking-linkedin-editors/' },
-    { name: 'Networking for Refugees', link: 'https://www.refugeeworksguide.org/networking' }
-  ],
-  'Advanced Programming': [
-    { name: 'FreeCodeCamp Advanced JS', link: 'https://www.freecodecamp.org/news/javascript-projects-for-beginners/' },
-    { name: 'MDN Web Docs', link: 'https://developer.mozilla.org/en-US/' }
-  ],
-  'Leadership Skills': [
-    { name: 'MindTools Leadership', link: 'https://www.mindtools.com/pages/main/newMN_LDR.htm' },
-    { name: 'UNHCR Leadership Training', link: 'https://www.unhcr.org/leadership-training.html' }
-  ]
-};
-
-const courseVideos = {
-  'Basic English Communication': [
-    { title: 'English Conversation Practice', url: 'https://www.youtube.com/embed/WRy1pEc7Q4Y' },
-    { title: 'Learn English in 30 Minutes', url: 'https://www.youtube.com/embed/eIho2S0ZahI' }
-  ],
-  'Digital Skills Fundamentals': [
-    { title: 'Digital Literacy Skills', url: 'https://www.youtube.com/embed/8O8R6Fzj3zY' },
-    { title: 'Computer Basics', url: 'https://www.youtube.com/embed/1zR7Qqk0q6w' }
-  ],
-  'Job Search Strategies': [
-    { title: 'How to Find a Job', url: 'https://www.youtube.com/embed/9QbZV7vU5bA' },
-    { title: 'Resume Writing Tips', url: 'https://www.youtube.com/embed/8uQqQyNd5vU' }
-  ],
-  'Professional Networking': [
-    { title: 'Networking for Success', url: 'https://www.youtube.com/embed/6a6wPzFghpE' },
-    { title: 'How to Network Effectively', url: 'https://www.youtube.com/embed/3Q8nIHD1b6Q' }
-  ],
-  'Advanced Programming': [
-    { title: 'Advanced JavaScript', url: 'https://www.youtube.com/embed/PoRJizFvM7s' },
-    { title: 'React Advanced Patterns', url: 'https://www.youtube.com/embed/IL82CzlaCys' }
-  ],
-  'Leadership Skills': [
-    { title: 'Leadership Skills Overview', url: 'https://www.youtube.com/embed/5MgBikgcWnY' },
-    { title: 'Effective Communication', url: 'https://www.youtube.com/embed/HAnw168huqA' }
-  ]
-};
-
-const modulesData = {
-  'Basic English Communication': [
-    {
-      title: 'Introduction',
-      content: 'Welcome to the course! This module introduces the main topics.',
-      resources: [
-        { name: 'English Grammar PDF', link: 'https://www.ef.com/wwen/english-resources/english-grammar/' }
-      ],
-      video: { title: 'Learn English in 30 Minutes', url: 'https://www.youtube.com/embed/eIho2S0ZahI' }
-    },
-    {
-      title: 'Core Concepts',
-      content: 'Learn the essential concepts for this course.',
-      resources: [
-        { name: 'BBC Learning English', link: 'https://www.bbc.co.uk/learningenglish/' }
-      ],
-      video: { title: 'English Conversation for Beginners', url: 'https://www.youtube.com/embed/1Bix44C1EzY' }
-    },
-    {
-      title: 'Practical Application',
-      content: 'Apply what you have learned in real-world scenarios.',
-      resources: [],
-      video: { title: 'English Speaking Practice', url: 'https://www.youtube.com/embed/8zQdK3y1QdA' }
-    },
-    {
-      title: 'Assessment',
-      content: 'Test your knowledge with a final assessment.',
-      resources: [],
-      video: null
-    }
-  ],
-  // Add similar module arrays for other courses...
-};
-
-const sectionStyle = {
-  marginBottom: 32,
-  paddingBottom: 24,
-  borderBottom: '1px solid #eee'
-};
-
-// Sample quiz questions per course
-const courseQuizzes = {
-  'Basic English Communication': [
-    {
-      question: 'Which of the following is a greeting in English?',
-      options: ['Bonjour', 'Hello', 'Ciao', 'Hola'],
-      answer: 1
-    },
-    {
-      question: 'What is the past tense of "go"?',
-      options: ['Goed', 'Went', 'Go', 'Gone'],
-      answer: 1
-    },
-    {
-      question: 'Which word is a noun?',
-      options: ['Run', 'Beautiful', 'Happiness', 'Quickly'],
-      answer: 2
-    }
-  ],
-  'Digital Skills Fundamentals': [
-    {
-      question: 'What does "URL" stand for?',
-      options: ['Uniform Resource Locator', 'Universal Reference Link', 'User Resource List', 'Unified Routing Logic'],
-      answer: 0
-    },
-    {
-      question: 'Which device is used to input text?',
-      options: ['Monitor', 'Keyboard', 'Speaker', 'Printer'],
-      answer: 1
-    },
-    {
-      question: 'Which of these is a web browser?',
-      options: ['Windows', 'Chrome', 'Excel', 'Word'],
-      answer: 1
-    }
-  ],
-  'Job Search Strategies': [
-    {
-      question: 'What is a CV also known as?',
-      options: ['Cover Letter', 'Resume', 'Reference', 'Portfolio'],
-      answer: 1
-    },
-    {
-      question: 'Which is important for a job interview?',
-      options: ['Arriving late', 'Dressing appropriately', 'Not preparing', 'Interrupting'],
-      answer: 1
-    },
-    {
-      question: 'Where can you search for jobs online?',
-      options: ['Indeed', 'Netflix', 'Spotify', 'YouTube'],
-      answer: 0
-    }
-  ],
-  'Professional Networking': [
-    {
-      question: 'Which platform is best for professional networking?',
-      options: ['Instagram', 'LinkedIn', 'Snapchat', 'Reddit'],
-      answer: 1
-    },
-    {
-      question: 'What should you do at a networking event?',
-      options: ['Stay silent', 'Introduce yourself', 'Ignore others', 'Leave early'],
-      answer: 1
-    },
-    {
-      question: 'What is a business card used for?',
-      options: ['Playing games', 'Sharing contact info', 'Drawing', 'Cooking'],
-      answer: 1
-    }
-  ],
-  'Advanced Programming': [
-    {
-      question: 'Which of these is a JavaScript framework?',
-      options: ['React', 'Photoshop', 'Excel', 'Word'],
-      answer: 0
-    },
-    {
-      question: 'What does API stand for?',
-      options: ['Application Programming Interface', 'Advanced Program Integration', 'Applied Programming Internet', 'None'],
-      answer: 0
-    },
-    {
-      question: 'Which is used for version control?',
-      options: ['Git', 'Paint', 'PowerPoint', 'Zoom'],
-      answer: 0
-    }
-  ],
-  'Leadership Skills': [
-    {
-      question: 'A good leader should be...',
-      options: ['Authoritative', 'Inspiring', 'Unapproachable', 'Indecisive'],
-      answer: 1
-    },
-    {
-      question: 'What is important for team success?',
-      options: ['Clear communication', 'Ignoring feedback', 'Micromanaging', 'Blaming others'],
-      answer: 0
-    },
-    {
-      question: 'Which is a leadership style?',
-      options: ['Democratic', 'Chaotic', 'Lazy', 'Silent'],
-      answer: 0
-    }
-  ]
-};
+import { courseModules } from '../../data/courseContent';
+import { FaLock, FaCheckCircle } from 'react-icons/fa';
 
 const Container = styled.div`
-  padding: 2rem;
+  padding: 2rem 2.5rem 2rem 2.5rem;
   background: ${({ theme }) => theme.colors.white};
   min-height: 100vh;
   max-width: 100vw;
@@ -216,442 +16,757 @@ const Container = styled.div`
     padding: 1rem;
   }
 `;
-const Section = styled.div`
+
+const BackButton = styled.button`
+  background: none;
+  border: none;
+  color: ${({ theme }) => theme.colors.primary};
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   margin-bottom: 2rem;
-  background: #f8f9fa;
-  border-radius: 12px;
-  padding: 2rem;
-  width: 100%;
-  max-width: 100vw;
-  @media (max-width: 600px) {
-    padding: 1rem;
-    font-size: 0.98rem;
+  padding: 0.5rem 0;
+  &:hover { text-decoration: underline; }
+`;
+
+const CourseHeader = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3rem;
+  margin-bottom: 3rem;
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+    gap: 2rem;
   }
+`;
+
+const CourseImage = styled.div`
+  height: 300px;
+  background: ${({ image }) => `url(${image}) center/cover`};
+  border-radius: 12px;
+  position: relative;
+  @media (max-width: 768px) { height: 200px; }
+`;
+
+const CourseInfo = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+`;
+
+const CourseTitle = styled.h1`
+  color: ${({ theme }) => theme.colors.primary};
+  font-size: 2.5rem;
+  font-weight: bold;
+  margin: 0;
+  @media (max-width: 768px) { font-size: 2rem; }
+`;
+
+const CourseDescription = styled.p`
+  color: #666;
+  font-size: 1.1rem;
+  line-height: 1.6;
+  margin: 0;
+`;
+
+const CourseMeta = styled.div`
+  display: flex;
+  gap: 2rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+`;
+
+const MetaItem = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+`;
+
+const MetaLabel = styled.span`
+  color: #888;
+  font-size: 0.9rem;
+  font-weight: 500;
+`;
+
+const MetaValue = styled.span`
+  color: #333;
+  font-size: 1rem;
+  font-weight: 600;
+`;
+
+const LevelBadge = styled.span`
+  background: ${({ level }) => 
+    level === 'Beginner' ? '#4CAF50' :
+    level === 'Intermediate' ? '#FFC107' :
+    '#F44336'};
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  align-self: flex-start;
+`;
+
+const Section = styled.div`
+  margin-bottom: 3rem;
+`;
+
+const SectionTitle = styled.h2`
+  color: ${({ theme }) => theme.colors.primary};
+  font-size: 1.8rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 2px solid #f0f0f0;
+  padding-bottom: 0.5rem;
+`;
+
+const Overview = styled.div`
+  background: #f8f9fa;
+  padding: 2rem;
+  border-radius: 12px;
+  border-left: 4px solid ${({ theme }) => theme.colors.primary};
+  p { color: #555; line-height: 1.7; margin: 0; white-space: pre-line; }
+`;
+
+const ObjectivesTwoCol = styled.div`
+  display: flex;
+  gap: 2rem;
+  @media (max-width: 700px) {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+`;
+
+const ObjectivesCol = styled.ul`
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  flex: 1;
+`;
+
+const ObjectiveItem = styled.li`
+  display: flex;
+  align-items: center;
+  font-size: 1.08rem;
+  color: #222;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  background: none;
+  border: none;
+  padding: 0;
+`;
+
+const CurriculumSection = styled.div`
+  margin-bottom: 2rem;
+`;
+
+const CurriculumList = styled.ul`
+  list-style: none;
+  padding: 0;
+  margin: 0;
+`;
+
+const CurriculumItem = styled.li`
+  background: #f8f9fa;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  padding: 1.2rem 1.5rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #e1e5e9;
+  transition: box-shadow 0.2s;
+  box-shadow: none;
+`;
+
+const ModuleTitle = styled.div`
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #333;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+`;
+
+const ModuleContent = styled.div`
+  margin-top: 1rem;
+  color: #444;
+`;
+
+const VideoWrapper = styled.div`
+  margin: 1rem 0;
+  position: relative;
+  padding-bottom: 56.25%;
+  height: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  iframe {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%; border-radius: 8px;
+  }
+`;
+
+const ResourceList = styled.ul`
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0 0;
+`;
+
+const ResourceItem = styled.li`
+  margin-bottom: 0.5rem;
+  a { color: #3498db; text-decoration: underline; }
+`;
+
+const QuizSection = styled.div`
+  margin-top: 1.5rem;
+  background: #f4f8fb;
+  border-radius: 8px;
+  padding: 1rem 1.5rem;
+`;
+
+const QuizQuestion = styled.div`
+  margin-bottom: 1rem;
+  font-weight: 500;
+`;
+
+const QuizOptions = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+`;
+
+const QuizOption = styled.button`
+  background: #fff;
+  border: 1px solid #e1e5e9;
+  border-radius: 6px;
+  padding: 0.7rem 1rem;
+  text-align: left;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background 0.2s, border 0.2s;
+  &:hover { background: #eaf6fb; border-color: #3498db; }
+  &.correct { background: #d4edda; border-color: #28a745; color: #155724; }
+  &.incorrect { background: #f8d7da; border-color: #dc3545; color: #721c24; }
+`;
+
+const QuizExplanation = styled.div`
+  margin-top: 0.5rem;
+  color: #888;
+  font-size: 0.95rem;
+`;
+
+const ActionButtons = styled.div`
+  display: flex;
+  gap: 1rem;
+  margin-top: 2rem;
+  flex-wrap: wrap;
+`;
+
+const EnrollButton = styled.button`
+  background: ${({ theme }) => theme.colors.primary};
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 1rem 2rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  &:hover { background: ${({ theme }) => theme.colors.secondary}; transform: translateY(-2px); }
+`;
+
+const InstructorSection = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 2rem 0 1rem 0;
+`;
+
+const InstructorAvatar = styled.img`
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+`;
+
+const InstructorInfo = styled.div`
+  display: flex;
+  flex-direction: column;
+`;
+
+const InstructorName = styled.div`
+  font-weight: 600;
+  color: #333;
+`;
+
+const InstructorRole = styled.div`
+  color: #888;
+  font-size: 0.95rem;
+`;
+
+const Rating = styled.div`
+  color: #f1c40f;
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-top: 0.2rem;
+`;
+
+const LockedOverlay = styled.div`
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(255,255,255,0.85);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  border-radius: 8px;
+`;
+
+const ModuleSummaryTitle = styled.div`
+  font-weight: 600;
+  color: #222;
+  margin-bottom: 0.5rem;
+  margin-top: 1rem;
+`;
+
+const ModuleSummaryList = styled.ul`
+  list-style: none;
+  padding: 0 0 0 1.2rem;
+  margin: 0 0 1rem 0;
+`;
+
+const ModuleSummaryItem = styled.li`
+  color: #444;
+  margin-bottom: 0.3rem;
+  font-size: 1rem;
+`;
+
+const WeekLabel = styled.span`
+  display: inline-block;
+  background: #eaf6fb;
+  color: #3498db;
+  font-weight: 600;
+  border-radius: 12px;
+  padding: 0.2rem 0.9rem;
+  font-size: 0.98rem;
+  margin-right: 1rem;
+`;
+
+const ResourceLink = styled.a`
+  color: #3498db;
+  text-decoration: underline;
+  margin-right: 1rem;
+  &:hover { text-decoration: underline; color: #217dbb; }
+`;
+
+const VideoLink = styled.a`
+  color: #16a085;
+  text-decoration: underline;
+  margin-right: 1rem;
+  &:hover { text-decoration: underline; color: #117864; }
+`;
+
+const StartButton = styled.button`
+  background: #27ae60;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 1.2rem;
+  font-size: 1rem;
+  font-weight: 500;
+  margin-left: 0.5rem;
+  cursor: pointer;
+  transition: background 0.2s;
+  &:hover { background: #219150; }
+`;
+
+const CompletedMark = styled.span`
+  color: #27ae60;
+  font-weight: bold;
+  margin-left: auto;
+  margin-right: 0;
+  display: flex;
+  align-items: center;
+  font-size: 1.3rem;
+`;
+
+const SubItemTick = styled.span`
+  color: #27ae60;
+  font-weight: bold;
+  margin-left: 8px;
+  font-size: 1.1rem;
+  vertical-align: middle;
 `;
 
 const FullCoursePage = () => {
   const { id } = useParams();
-  const location = useLocation();
   const navigate = useNavigate();
-  let course = location.state;
+  const location = useLocation();
+  const [enrolled, setEnrolled] = useState(false);
+  const [course, setCourse] = useState(null);
+  const [completedModules, setCompletedModules] = useState([0, 1]); // For demo, first two modules completed
+  const [completedSubItems, setCompletedSubItems] = useState({}); // { [moduleIdx]: { resources: [idx], videos: [idx], quizzes: [idx], assignments: [idx] } }
+  const [expandedModule, setExpandedModule] = useState(null);
+  const prevCourseId = useRef(null);
+  const [quizAnswers, setQuizAnswers] = useState({});
+  const [quizResults, setQuizResults] = useState({});
 
-  if (!course && id) {
-    course = allCourses.find(c => String(c.id) === String(id));
-  }
-
-  const [completedModules, setCompletedModules] = useState([]);
-  const [watchedVideos, setWatchedVideos] = useState([]);
-  const [quizCompleted, setQuizCompleted] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [comments, setComments] = useState([]);
-  const [commentInput, setCommentInput] = useState('');
-  const [openModule, setOpenModule] = useState(null);
-  const [quizHistory, setQuizHistory] = useState([]);
-  const [detailsOpen, setDetailsOpen] = useState({});
+  useEffect(() => {
+    // Get course from location state or find by ID
+    if (location.state) {
+      setCourse(location.state);
+    } else {
+      const foundCourse = allCourses.find(c => c.id === parseInt(id));
+      setCourse(foundCourse);
+    }
+    // Check if user is enrolled
+    db.get(`enrolled_${id}`).then(doc => {
+      setEnrolled(true);
+    }).catch(() => {
+      setEnrolled(false);
+    });
+  }, [id, location.state]);
 
   useEffect(() => {
     if (!course) return;
-    db.get(getProgressId(course.id)).then(doc => {
-      setCompletedModules(doc.completedModules || []);
-      setWatchedVideos(doc.watchedVideos || []);
-      setQuizCompleted(doc.quizCompleted || false);
-      setLoading(false);
-    }).catch(() => {
-      setCompletedModules([]);
-      setWatchedVideos([]);
-      setQuizCompleted(false);
-      setLoading(false);
-    });
-    // Fetch quiz history for this course
-    db.allDocs({ include_docs: true, startkey: `quizresult_currentUser_${course.id}_`, endkey: `quizresult_currentUser_${course.id}_\ufff0` })
-      .then(result => {
-        setQuizHistory(result.rows.map(row => row.doc).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
-      });
-  }, [course]);
-
-  // Mark module as completed when scrolled into view
-  const handleModuleInView = idx => {
-    if (!completedModules.includes(idx)) {
-      const updated = [...completedModules, idx];
-      setCompletedModules(updated);
-      db.put({
-        _id: getProgressId(course.id),
-        completedModules: updated,
-        watchedVideos,
-        quizCompleted,
-        courseId: course.id
-      }).catch(err => {
-        if (err.status === 409) {
-          db.get(getProgressId(course.id)).then(doc => {
-            db.put({ ...doc, completedModules: updated });
-          });
-        }
-      });
-    }
-  };
-
-  // Mark video as watched
-  const handleMarkWatched = idx => {
-    if (!watchedVideos.includes(idx)) {
-      const updated = [...watchedVideos, idx];
-      setWatchedVideos(updated);
-      db.put({
-        _id: getProgressId(course.id),
-        completedModules,
-        watchedVideos: updated,
-        quizCompleted,
-        courseId: course.id
-      }).catch(err => {
-        if (err.status === 409) {
-          db.get(getProgressId(course.id)).then(doc => {
-            db.put({ ...doc, watchedVideos: updated });
-          });
-        }
-      });
-    }
-  };
-
-  // Mark quiz as completed
-  const handleQuizComplete = () => {
-    setQuizCompleted(true);
-    db.put({
-      _id: getProgressId(course.id),
-      completedModules,
-      watchedVideos,
-      quizCompleted: true,
-      courseId: course.id
-    }).catch(err => {
-      if (err.status === 409) {
-        db.get(getProgressId(course.id)).then(doc => {
-          db.put({ ...doc, quizCompleted: true });
-        });
+    const modules = courseModules[course.title] || [];
+    if (!modules.length) return;
+    modules.forEach((mod, idx) => {
+      const sub = completedSubItems[idx] || { resources: [], videos: [], quizzes: [], assignments: [] };
+      const allResourcesDone = mod.resources ? mod.resources.length > 0 && mod.resources.every((_, i) => sub.resources.includes(i)) : true;
+      const allVideosDone = mod.video ? sub.videos.includes(0) : true;
+      const allQuizzesDone = mod.quiz ? mod.quiz.length > 0 && mod.quiz.every((_, i) => sub.quizzes.includes(i)) : true;
+      const allAssignmentsDone = mod.assignments ? mod.assignments.length > 0 && mod.assignments.every((_, i) => sub.assignments.includes(i)) : true;
+      const moduleDone = allResourcesDone && allVideosDone && allQuizzesDone && allAssignmentsDone;
+      if (moduleDone && !completedModules.includes(idx)) {
+        setCompletedModules(prev => [...prev, idx]);
       }
     });
-  };
+    // eslint-disable-next-line
+  }, [completedSubItems, course]);
 
-  // Progress calculation
-  const modulesCount = modulesData[course.title]?.length || 0;
-  const videosCount = (courseVideos[course.title] || []).length;
-  const moduleProgress = modulesCount ? (completedModules.length / modulesCount) * 50 : 0;
-  const videoProgress = videosCount ? (watchedVideos.length / videosCount) * 25 : 0;
-  const quizProgress = quizCompleted ? 25 : 0;
-  const progress = Math.round(moduleProgress + videoProgress + quizProgress);
+  // Restore expandedModule from localStorage per course, only when course changes
+  useEffect(() => {
+    if (course && course.id !== prevCourseId.current) {
+      const expandedKey = `expandedModule_${course.id}`;
+      const saved = localStorage.getItem(expandedKey);
+      setExpandedModule(saved !== null ? Number(saved) : null);
+      prevCourseId.current = course.id;
+    }
+  }, [course]);
 
-  // Comments
-  const handleAddComment = () => {
-    if (commentInput.trim()) {
-      setComments([...comments, commentInput.trim()]);
-      setCommentInput('');
+  // Persist expandedModule to localStorage per course
+  useEffect(() => {
+    if (course) {
+      const expandedKey = `expandedModule_${course.id}`;
+      if (expandedModule === null) {
+        localStorage.removeItem(expandedKey);
+      } else {
+        localStorage.setItem(expandedKey, expandedModule);
+      }
+    }
+  }, [expandedModule, course]);
+
+  if (!course) {
+    return (
+      <ContentWrapper>
+        <Container>Loading...</Container>
+      </ContentWrapper>
+    );
+  }
+
+  const modules = courseModules[course.title] || [];
+
+  const handleEnroll = async () => {
+    try {
+      await db.put({
+        _id: `enrolled_${course.id}`,
+        courseId: course.id,
+        enrolledAt: new Date().toISOString(),
+        progress: 0
+      });
+      setEnrolled(true);
+      // Optionally, scroll to curriculum after enrolling
+    } catch (error) {
+      console.error('Error enrolling in course:', error);
     }
   };
 
-  // Export quiz history as CSV
-  const handleExportCSV = () => {
-    if (!quizHistory.length) return;
-    const header = ['Attempt', 'Date', 'Score', 'Total', 'Question', 'Your Answer', 'Correct Answer'];
-    let rows = [header.join(',')];
-    quizHistory.forEach((attempt, idx) => {
-      const attemptNum = quizHistory.length - idx;
-      const date = new Date(attempt.timestamp).toLocaleString();
-      const score = attempt.score;
-      const total = attempt.total;
-      const quiz = courseQuizzes[course.title] || [];
-      quiz.forEach((q, qIdx) => {
-        const userAns = typeof attempt.answers[qIdx] !== 'undefined' ? q.options[attempt.answers[qIdx]] : '';
-        const correctAns = q.options[q.answer];
-        rows.push([attemptNum, date, score, total, q.question.replace(/,/g, ' '), userAns.replace(/,/g, ' '), correctAns.replace(/,/g, ' ')].join(','));
-      });
-    });
-    const csvContent = rows.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${course.title.replace(/\s+/g, '_')}_quiz_history.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleExpandModule = (idx) => {
+    setExpandedModule(expandedModule === idx ? null : idx);
   };
 
-  if (!course) {
-    return <div style={{ padding: 32 }}>No course details found.</div>;
-  }
+  const handleQuizAnswer = (moduleIdx, qIdx, selectedIdx) => {
+    setQuizAnswers(prev => ({ ...prev, [`${moduleIdx}_${qIdx}`]: selectedIdx }));
+    const module = courseModules[course.title][moduleIdx];
+    const question = module.quiz[qIdx];
+    setQuizResults(prev => ({
+      ...prev,
+      [`${moduleIdx}_${qIdx}`]: selectedIdx === question.answer
+    }));
+  };
 
-  const resources = courseResources[course.title] || [];
-  const videos = courseVideos[course.title] || [];
-  const quiz = courseQuizzes[course.title] || [];
-  const modules = modulesData[course.title] || [];
+  // Instructor mock data (can be dynamic)
+  const instructor = {
+    name: 'Jacqueline Miller',
+    role: 'Founder Eduport company',
+    avatar: 'https://randomuser.me/api/portraits/women/44.jpg',
+    rating: 4.5
+  };
 
   return (
-    <Container>
-      <button onClick={() => navigate(-1)} style={{ marginBottom: 24, background: '#3498db', color: '#fff', border: 'none', borderRadius: 20, padding: '8px 24px', cursor: 'pointer' }}>Back</button>
-      {/* Course Overview */}
-      <Section>
-        <img src={course.image} alt={course.title} style={{ width: '100%', borderRadius: 12, marginBottom: 20, maxHeight: 260, objectFit: 'cover' }} />
-        <h1 style={{ margin: '0 0 8px 0' }}>{course.title}</h1>
-        <div style={{ color: '#888', marginBottom: 8, fontWeight: 500 }}>
-          <span style={{ marginRight: 16 }}>Level: <b>{course.level}</b></span>
-          <span style={{ marginRight: 16 }}>Duration: <b>{course.duration}</b></span>
-          <span>{course.students}+ students</span>
-        </div>
-        {course.description && <div style={{ color: '#555', marginBottom: 0 }}>{course.description}</div>}
-      </Section>
-      {/* Progress */}
-      <Section>
-        <div style={{ fontWeight: 'bold', marginBottom: 8 }}>Progress: {progress}%</div>
-        <div style={{ background: '#eee', borderRadius: 8, height: 12, width: '100%', marginBottom: 8 }}>
-          <div style={{ width: `${progress}%`, background: '#3498db', height: '100%', borderRadius: 8, transition: 'width 0.3s' }} />
-        </div>
-      </Section>
-      {/* Modules */}
-      <Section>
-        <h2 style={{ marginBottom: 16 }}>Modules</h2>
-        <ol style={{ paddingLeft: 20, margin: 0 }}>
-          {modules.map((mod, idx) => (
-            <li key={idx} style={{ marginBottom: 18 }}>
-              <div
-                style={{ cursor: 'pointer', color: completedModules.includes(idx) ? '#27ae60' : '#333', fontWeight: completedModules.includes(idx) ? 600 : 400 }}
-                onClick={() => setOpenModule(openModule === idx ? null : idx)}
-                onMouseEnter={() => handleModuleInView(idx)}
-              >
-                {mod.title}
-              </div>
-              {openModule === idx && (
-                <div style={{ marginLeft: 12, color: '#555', marginTop: 8 }}>
-                  <div style={{ marginBottom: 8 }}>{mod.content}</div>
-                  {mod.resources && mod.resources.length > 0 && (
-                    <div style={{ marginBottom: 8 }}>
-                      <b>Resources:</b>
-                      <ul style={{ paddingLeft: 20, margin: 0 }}>
-                        {mod.resources.map((res, rIdx) => (
-                          <li key={rIdx} style={{ marginBottom: 6 }}>
-                            <a href={res.link} target="_blank" rel="noopener noreferrer" style={{ color: '#3498db', textDecoration: 'underline' }}>{res.name}</a>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {mod.video && (
-                    <div style={{ marginBottom: 8 }}>
-                      <b>{mod.video.title}</b>
-                      <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden', borderRadius: 8, marginBottom: 8 }}>
-                        <iframe
-                          src={mod.video.url}
-                          title={mod.video.title}
-                          frameBorder="0"
-                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                          allowFullScreen
-                          style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', borderRadius: 8 }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
+    <ContentWrapper>
+      <Container>
+        <BackButton onClick={() => navigate('/courses')}>
+          ← Back to Courses
+        </BackButton>
+
+        <CourseHeader>
+          <CourseImage image={course.image} />
+          <CourseInfo>
+            <CourseTitle>{course.title}</CourseTitle>
+            <CourseDescription>{course.description}</CourseDescription>
+            <LevelBadge level={course.level}>{course.level}</LevelBadge>
+            <CourseMeta>
+              <MetaItem>
+                <MetaLabel>Duration</MetaLabel>
+                <MetaValue>{course.duration}</MetaValue>
+              </MetaItem>
+              <MetaItem>
+                <MetaLabel>Students</MetaLabel>
+                <MetaValue>{course.students}+ enrolled</MetaValue>
+              </MetaItem>
+              <MetaItem>
+                <MetaLabel>Category</MetaLabel>
+                <MetaValue>{course.category}</MetaValue>
+              </MetaItem>
+            </CourseMeta>
+            <ActionButtons>
+              {enrolled ? null : (
+                <EnrollButton onClick={handleEnroll}>
+                  Enroll Now
+                </EnrollButton>
               )}
-            </li>
-          ))}
-        </ol>
-      </Section>
-      {/* Resources */}
-      <Section>
-        <h2 style={{ marginBottom: 16 }}>Resources</h2>
-        <ul style={{ paddingLeft: 20, margin: 0 }}>
-          {resources.map((res, idx) => (
-            <li key={idx} style={{ marginBottom: 10 }}>
-              <a href={res.link} target="_blank" rel="noopener noreferrer" style={{ color: '#3498db', textDecoration: 'underline' }}>{res.name}</a>
-            </li>
-          ))}
-        </ul>
-        
-        {/* Q&A Forum for this course */}
-        <div style={{ marginTop: '2rem', padding: '1.5rem', background: '#f8f9fa', borderRadius: '12px', border: '1px solid #e9ecef' }}>
-          <h3 style={{ margin: '0 0 1rem 0', color: '#2c3e50' }}>📚 Course Q&A Forum</h3>
-          <p style={{ margin: '0 0 1rem 0', color: '#555', lineHeight: 1.6 }}>
-            Have questions about this course? Ask your instructor and fellow students for help. 
-            This is a great place to clarify concepts, share insights, and learn from others.
-          </p>
-          
-          {/* Sample Q&A for this course */}
-          <div style={{ marginBottom: '1rem' }}>
-            <h4 style={{ margin: '0 0 0.75rem 0', color: '#2c3e50', fontSize: '1rem' }}>Recent Questions</h4>
-            <div style={{ background: '#fff', border: '1px solid #e9ecef', borderRadius: '8px', padding: '12px', marginBottom: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
-                <h5 style={{ margin: 0, color: '#3498db', fontSize: '0.9rem' }}>How do I practice the concepts from Module 2?</h5>
-                <span style={{ fontSize: '0.75rem', color: '#6c757d' }}>2 hours ago</span>
-              </div>
-              <p style={{ margin: '0 0 6px 0', color: '#555', fontSize: '0.85rem' }}>
-                I'm having trouble understanding the practical application. Can someone help me with exercises?
-              </p>
-              <div style={{ display: 'flex', gap: '12px', fontSize: '0.75rem', color: '#6c757d' }}>
-                <span>👤 by Ahmed H.</span>
-                <span>💬 3 answers</span>
-                <span>👍 5 votes</span>
-              </div>
-            </div>
-            
-            <div style={{ background: '#fff', border: '1px solid #e9ecef', borderRadius: '8px', padding: '12px', marginBottom: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
-                <h5 style={{ margin: 0, color: '#3498db', fontSize: '0.9rem' }}>Is there additional material for advanced learners?</h5>
-                <span style={{ fontSize: '0.75rem', color: '#6c757d' }}>1 day ago</span>
-              </div>
-              <p style={{ margin: '0 0 6px 0', color: '#555', fontSize: '0.85rem' }}>
-                I found the course very helpful but would like to explore more advanced topics.
-              </p>
-              <div style={{ display: 'flex', gap: '12px', fontSize: '0.75rem', color: '#6c757d' }}>
-                <span>👤 by Maria R.</span>
-                <span>💬 1 answer</span>
-                <span>👍 2 votes</span>
-              </div>
-            </div>
-          </div>
-          
-          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <button
-              onClick={() => navigate('/qa-forum', { state: { courseFilter: course.title } })}
-              style={{ 
-                background: '#3498db', 
-                color: '#fff', 
-                border: 'none', 
-                borderRadius: '6px', 
-                padding: '0.6rem 1rem', 
-                cursor: 'pointer', 
-                fontSize: '0.85rem',
-                fontWeight: 500
-              }}
-            >
-              📝 Ask a Question
-            </button>
-            <button
-              onClick={() => navigate('/qa-forum')}
-              style={{ 
-                background: '#27ae60', 
-                color: '#fff', 
-                border: 'none', 
-                borderRadius: '6px', 
-                padding: '0.6rem 1rem', 
-                cursor: 'pointer', 
-                fontSize: '0.85rem',
-                fontWeight: 500
-              }}
-            >
-              🔍 View All Questions
-            </button>
-          </div>
-        </div>
-      </Section>
-      {/* Videos */}
-      <Section>
-        <h2 style={{ marginBottom: 16 }}>Videos</h2>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          {videos.map((vid, idx) => (
-            <div key={idx}>
-              <div style={{ fontWeight: 500, marginBottom: 8 }}>{vid.title}</div>
-              <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden', borderRadius: 8, marginBottom: 8 }}>
-                <iframe
-                  src={vid.url}
-                  title={vid.title}
-                  frameBorder="0"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                  style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', borderRadius: 8 }}
-                />
-              </div>
-              <button
-                onClick={() => handleMarkWatched(idx)}
-                disabled={watchedVideos.includes(idx)}
-                style={{ background: watchedVideos.includes(idx) ? '#27ae60' : '#3498db', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 16px', cursor: watchedVideos.includes(idx) ? 'default' : 'pointer' }}
-              >
-                {watchedVideos.includes(idx) ? 'Watched' : 'Mark as Watched'}
-              </button>
-            </div>
-          ))}
-        </div>
-      </Section>
-      {/* Quiz */}
-      {quiz.length > 0 && (
+            </ActionButtons>
+          </CourseInfo>
+        </CourseHeader>
+
+        {/* Instructor Section */}
+        <InstructorSection>
+          <InstructorAvatar src={instructor.avatar} alt={instructor.name} />
+          <InstructorInfo>
+            <InstructorName>By {instructor.name}</InstructorName>
+            <InstructorRole>{instructor.role}</InstructorRole>
+            <Rating>★ {instructor.rating}/5.0</Rating>
+          </InstructorInfo>
+        </InstructorSection>
+
         <Section>
-          <h2 style={{ marginBottom: 16 }}>Quiz</h2>
-          <button
-            onClick={() => navigate(`/courses/quiz/${course.id}`, { state: { course, quiz } })}
-            style={{ background: '#3498db', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 16, cursor: 'pointer', marginBottom: 12 }}
-            disabled={quizCompleted}
-          >
-            {quizCompleted ? 'Quiz Completed' : 'Start Quiz'}
-          </button>
+          <SectionTitle>Course Overview</SectionTitle>
+          <Overview>
+            <p>{course.overview}</p>
+          </Overview>
         </Section>
-      )}
-      {/* Comments */}
-      <Section>
-        <h2 style={{ marginBottom: 16 }}>Comments</h2>
-        <div style={{ marginBottom: 16 }}>
-          <textarea
-            value={commentInput}
-            onChange={e => setCommentInput(e.target.value)}
-            placeholder="Leave a comment..."
-            style={{ width: '100%', minHeight: 60, borderRadius: 8, border: '1px solid #ccc', padding: 8, fontSize: 16 }}
-          />
-          <button
-            onClick={handleAddComment}
-            style={{ marginTop: 8, background: '#27ae60', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', cursor: 'pointer', fontSize: 16 }}
-          >
-            Add Comment
-          </button>
-        </div>
-        <ul style={{ paddingLeft: 0, listStyle: 'none' }}>
-          {comments.map((c, idx) => (
-            <li key={idx} style={{ marginBottom: 12, background: '#f7f7f7', borderRadius: 8, padding: 12 }}>
-              {c}
-            </li>
-          ))}
-        </ul>
-      </Section>
-      {/* Quiz History */}
-      {quizHistory.length > 0 && (
+
         <Section>
-          <h2 style={{ marginBottom: 12 }}>Quiz History</h2>
-          <button onClick={handleExportCSV} style={{ marginBottom: 16, background: '#3498db', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', cursor: 'pointer', fontSize: 16 }}>Export Results</button>
-          <ul style={{ paddingLeft: 0, listStyle: 'none' }}>
-            {quizHistory.map((attempt, idx) => {
-              const attemptNum = quizHistory.length - idx;
-              const quiz = courseQuizzes[course.title] || [];
-              return (
-                <li key={attempt._id} style={{ marginBottom: 10, background: '#f7f7f7', borderRadius: 8, padding: 10 }}>
-                  <span style={{ fontWeight: 500 }}>Attempt {attemptNum}:</span> &nbsp;
-                  <span>Date: {new Date(attempt.timestamp).toLocaleString()}</span> &nbsp;|&nbsp;
-                  <span>Score: {attempt.score} / {attempt.total}</span>
-                  <button
-                    onClick={() => setDetailsOpen({ ...detailsOpen, [attempt._id]: !detailsOpen[attempt._id] })}
-                    style={{ marginLeft: 16, background: '#27ae60', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: 14 }}
+          <SectionTitle>Modules</SectionTitle>
+          <CurriculumSection>
+            <CurriculumList>
+              {modules.map((mod, idx) => {
+                let label = '';
+                if (mod.weeks) {
+                  if (mod.weeks.length === 1) {
+                    label = `Week ${mod.weeks[0]}. `;
+                  } else {
+                    label = `Weeks ${mod.weeks[0]}-${mod.weeks[mod.weeks.length-1]}. `;
+                  }
+                } else {
+                  label = `Week ${idx + 1}. `;
+                }
+                const isCompleted = completedModules.includes(idx);
+                const isExpanded = expandedModule === idx;
+                // Sub-item completion logic
+                const sub = completedSubItems[idx] || { resources: [], videos: [], quizzes: [], assignments: [] };
+                const allResourcesDone = mod.resources ? mod.resources.length > 0 && mod.resources.every((_, i) => sub.resources.includes(i)) : true;
+                const allVideosDone = mod.video ? sub.videos.includes(0) : true;
+                const allQuizzesDone = mod.quiz ? mod.quiz.length > 0 && mod.quiz.every((_, i) => sub.quizzes.includes(i)) : true;
+                const allAssignmentsDone = mod.assignments ? mod.assignments.length > 0 && mod.assignments.every((_, i) => sub.assignments.includes(i)) : true;
+                const moduleDone = allResourcesDone && allVideosDone && allQuizzesDone && allAssignmentsDone;
+                return (
+                  <CurriculumItem
+                    key={mod.id || idx}
+                    style={{ background: moduleDone ? '#f6fff6' : undefined, fontWeight: moduleDone ? 'bold' : undefined, position: 'relative' }}
+                    onClick={() => setExpandedModule(isExpanded ? null : idx)}
                   >
-                    {detailsOpen[attempt._id] ? 'Hide Details' : 'View Details'}
-                  </button>
-                  {detailsOpen[attempt._id] && (
-                    <ul style={{ marginTop: 10, paddingLeft: 20 }}>
-                      {quiz.map((q, qIdx) => {
-                        const userAnsIdx = attempt.answers[qIdx];
-                        const userAns = typeof userAnsIdx !== 'undefined' ? q.options[userAnsIdx] : '(No answer)';
-                        const correctAns = q.options[q.answer];
-                        const isCorrect = userAnsIdx === q.answer;
-                        return (
-                          <li key={qIdx} style={{ marginBottom: 8 }}>
-                            <div style={{ fontWeight: 500 }}>{q.question}</div>
-                            <div style={{ marginLeft: 8 }}>
-                              Your answer: <span style={{ color: isCorrect ? 'green' : 'red', fontWeight: 600 }}>{userAns}</span>
-                              {!isCorrect && (
-                                <span> &nbsp;|&nbsp; Correct: <span style={{ color: 'green', fontWeight: 600 }}>{correctAns}</span></span>
-                              )}
+                    <div style={{ flex: 1 }}>
+                      <span>{label}{mod.title || mod}</span>
+                      {isExpanded && (
+                        <div style={{ marginTop: 12 }}>
+                          <div>{mod.content}</div>
+                          {mod.video && (
+                            <div style={{ margin: '1rem 0', display: 'flex', alignItems: 'center' }}>
+                              <a
+                                href={mod.video}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ color: '#3498db', textDecoration: 'underline', fontWeight: 600 }}
+                                onClick={e => {
+                                  e.preventDefault();
+                                  setCompletedSubItems(prev => ({
+                                    ...prev,
+                                    [idx]: {
+                                      ...prev[idx],
+                                      videos: prev[idx]?.videos?.includes(0) ? prev[idx].videos : [...(prev[idx]?.videos || []), 0],
+                                      resources: prev[idx]?.resources || [],
+                                      quizzes: prev[idx]?.quizzes || [],
+                                      assignments: prev[idx]?.assignments || []
+                                    }
+                                  }));
+                                  window.open(mod.video, '_blank', 'noopener');
+                                }}
+                              >
+                                Watch Video
+                              </a>
+                              {sub.videos.includes(0) && <SubItemTick>✔️</SubItemTick>}
                             </div>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+                          )}
+                          {mod.resources && mod.resources.length > 0 && (
+                            <ResourceList>
+                              {mod.resources.map((res, i) => (
+                                <ResourceItem key={i} style={{ display: 'flex', alignItems: 'center' }}>
+                                  <a
+                                    href={res.link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={e => {
+                                      e.preventDefault();
+                                      setCompletedSubItems(prev => ({
+                                        ...prev,
+                                        [idx]: {
+                                          ...prev[idx],
+                                          resources: prev[idx]?.resources?.includes(i) ? prev[idx].resources : [...(prev[idx]?.resources || []), i],
+                                          videos: prev[idx]?.videos || [],
+                                          quizzes: prev[idx]?.quizzes || [],
+                                          assignments: prev[idx]?.assignments || []
+                                        }
+                                      }));
+                                      window.open(res.link, '_blank', 'noopener');
+                                    }}
+                                  >
+                                    {res.name}
+                                  </a>
+                                  {sub.resources.includes(i) && <SubItemTick>✔️</SubItemTick>}
+                                </ResourceItem>
+                              ))}
+                            </ResourceList>
+                          )}
+                          {mod.quiz && mod.quiz.length > 0 && (
+                            <QuizSection>
+                              {mod.quiz.map((q, qIdx) => {
+                                const userAnswer = quizAnswers[`${idx}_${qIdx}`];
+                                const isAnswered = typeof userAnswer !== 'undefined';
+                                const isCorrect = quizResults[`${idx}_${qIdx}`];
+                                return (
+                                  <div key={qIdx} style={{ display: 'flex', alignItems: 'center' }}>
+                                    <div style={{ flex: 1 }}>
+                                      <QuizQuestion>{q.question}</QuizQuestion>
+                                      <QuizOptions>
+                                        {q.options.map((opt, oIdx) => (
+                                          <QuizOption
+                                            key={oIdx}
+                                            className={
+                                              isAnswered
+                                                ? userAnswer === oIdx
+                                                  ? isCorrect
+                                                    ? 'correct'
+                                                    : 'incorrect'
+                                                  : ''
+                                                : ''
+                                            }
+                                            onClick={() => {
+                                              handleQuizAnswer(idx, qIdx, oIdx);
+                                              setCompletedSubItems(prev => ({
+                                                ...prev,
+                                                [idx]: {
+                                                  ...prev[idx],
+                                                  quizzes: prev[idx]?.quizzes?.includes(qIdx) ? prev[idx].quizzes : [...(prev[idx]?.quizzes || []), qIdx],
+                                                  resources: prev[idx]?.resources || [],
+                                                  videos: prev[idx]?.videos || [],
+                                                  assignments: prev[idx]?.assignments || []
+                                                }
+                                              }));
+                                            }}
+                                            disabled={isAnswered}
+                                          >
+                                            {opt}
+                                          </QuizOption>
+                                        ))}
+                                      </QuizOptions>
+                                      {isAnswered && (
+                                        <QuizExplanation>
+                                          {isCorrect ? 'Correct!' : 'Incorrect. Try again!'}
+                                        </QuizExplanation>
+                                      )}
+                                    </div>
+                                    {sub.quizzes.includes(qIdx) && <SubItemTick>✔️</SubItemTick>}
+                                  </div>
+                                );
+                              })}
+                            </QuizSection>
+                          )}
+                          {mod.assignments && mod.assignments.length > 0 && (
+                            <ResourceList>
+                              {mod.assignments.map((a, i) => (
+                                <ResourceItem key={i} style={{ display: 'flex', alignItems: 'center' }}>
+                                  <a
+                                    href={a.link || '#'}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={e => {
+                                      e.preventDefault();
+                                      setCompletedSubItems(prev => ({
+                                        ...prev,
+                                        [idx]: {
+                                          ...prev[idx],
+                                          assignments: prev[idx]?.assignments?.includes(i) ? prev[idx].assignments : [...(prev[idx]?.assignments || []), i],
+                                          resources: prev[idx]?.resources || [],
+                                          videos: prev[idx]?.videos || [],
+                                          quizzes: prev[idx]?.quizzes || []
+                                        }
+                                      }));
+                                      if (a.link) window.open(a.link, '_blank', 'noopener');
+                                    }}
+                                  >
+                                    {a.title}
+                                  </a>
+                                  {sub.assignments && sub.assignments.includes(i) && <SubItemTick>✔️</SubItemTick>}
+                                </ResourceItem>
+                              ))}
+                            </ResourceList>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {moduleDone && <CompletedMark style={{ position: 'absolute', top: 16, right: 24 }}>✔️</CompletedMark>}
+                  </CurriculumItem>
+                );
+              })}
+            </CurriculumList>
+          </CurriculumSection>
         </Section>
-      )}
-    </Container>
+
+        {!enrolled && (
+          <div style={{ margin: '2.5rem 0 1.5rem 0', textAlign: 'center' }}>
+            <EnrollButton onClick={handleEnroll}>
+              Enroll Now
+            </EnrollButton>
+          </div>
+        )}
+      </Container>
+    </ContentWrapper>
   );
 };
 

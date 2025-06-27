@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { UserProvider, useUser } from './contexts/UserContext';
 import Landing from './pages/Landing/Landing';
 import Login from './pages/Auth/Login';
 import Register from './pages/Auth/Register';
@@ -17,20 +18,19 @@ import PostJobs from './pages/Employer/PostJobs';
 import ViewApplicants from './pages/Employer/ViewApplicants';
 import Sidebar from './components/Sidebar';
 import Profile from './pages/Profile/Profile';
+import AccountSettings from './pages/Profile/AccountSettings';
 import Jobs from './pages/Refugee/Jobs';
 import DetailPage from './pages/Refugee/DetailPage';
 import MentorDetail from './pages/Refugee/MentorDetail';
 import PeerLearning from './pages/Refugee/PeerLearning';
 import BrowseCourses from './pages/Refugee/BrowseCourses';
+import CategoryCourses from './pages/Refugee/CategoryCourses';
 import LearningPath from './pages/Refugee/LearningPath';
 import Assessments from './pages/Instructor/Assessments';
-import RefugeeAssessments from './pages/Refugee/Assessments';
 import Certificates from './pages/Refugee/Certificates';
 import ManageCourses from './pages/Instructor/ManageCourses';
 import FullCoursePage from './pages/Refugee/FullCoursePage';
 import CourseQuizPage from './pages/Refugee/CourseQuizPage';
-import AssessmentStart from './pages/Refugee/AssessmentStart';
-import AssessmentQuizPage from './pages/Refugee/AssessmentQuizPage';
 import GroupDetails from './pages/Refugee/GroupDetails';
 import MentorGroupDetails from './pages/Mentor/MentorGroupDetails';
 import MentorPeerLearning from './pages/Mentor/PeerLearning';
@@ -42,29 +42,33 @@ import HelpTickets from './pages/Refugee/HelpTickets';
 import InstructorHelpManagement from './pages/Instructor/HelpManagement';
 import MentorHelpManagement from './pages/Mentor/HelpManagement';
 import AdminHelpManagement from './pages/Admin/HelpManagement';
+import CourseContentPage from './pages/Refugee/CourseContentPage';
 
-function AppRoutes({ isAuthenticated, setIsAuthenticated, userRole, setUserRole }) {
+function AppRoutes() {
+  const { isAuthenticated, userRole, logout } = useUser();
+
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
       {!isAuthenticated && (
         <>
-          <Route path="/login" element={<Login setIsAuthenticated={setIsAuthenticated} setUserRole={setUserRole} />} />
-          <Route path="/register" element={<Register setIsAuthenticated={setIsAuthenticated} />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
         </>
       )}
       {isAuthenticated && (
         <Route path="*" element={
-          <Sidebar role={userRole} onLogout={() => setIsAuthenticated(false)}>
+          <Sidebar role={userRole} onLogout={logout}>
             <Routes>
               {userRole === 'refugee' && (
                 <>
                   <Route path="/dashboard" element={<RefugeeDashboard />} />
                   <Route path="/courses" element={<BrowseCourses />} />
+                  <Route path="/courses/category/:categoryName" element={<CategoryCourses />} />
                   <Route path="/courses/:id" element={<DetailPage />} />
                   <Route path="/courses/full/:id" element={<FullCoursePage />} />
+                  <Route path="/courses/content/:id" element={<CourseContentPage />} />
                   <Route path="/learning-path" element={<LearningPath />} />
-                  <Route path="/assessments" element={<RefugeeAssessments />} />
                   <Route path="/certificates" element={<Certificates />} />
                   <Route path="/peer-learning" element={<PeerLearning />} />
                   <Route path="/help" element={<Help />} />
@@ -73,8 +77,6 @@ function AppRoutes({ isAuthenticated, setIsAuthenticated, userRole, setUserRole 
                   <Route path="/jobs/detail" element={<DetailPage />} />
                   <Route path="/peer-learning/mentor/:mentorId" element={<MentorDetail />} />
                   <Route path="/courses/quiz/:id" element={<CourseQuizPage />} />
-                  <Route path="/assessments/:id" element={<AssessmentStart />} />
-                  <Route path="/assessments/:id/quiz" element={<AssessmentQuizPage />} />
                   <Route path="/peer-learning/group/:groupId" element={<GroupDetails />} />
                 </>
               )}
@@ -118,6 +120,7 @@ function AppRoutes({ isAuthenticated, setIsAuthenticated, userRole, setUserRole 
                 </>
               )}
               <Route path="/profile" element={<Profile userRole={userRole} />} />
+              <Route path="/account-settings" element={<AccountSettings />} />
               <Route path="*" element={<div>Page not found</div>} />
             </Routes>
           </Sidebar>
@@ -129,27 +132,12 @@ function AppRoutes({ isAuthenticated, setIsAuthenticated, userRole, setUserRole 
 }
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return localStorage.getItem('isAuthenticated') === 'true';
-  });
-  const [userRole, setUserRole] = useState(() => {
-    return localStorage.getItem('userRole') || 'refugee';
-  });
-
-  useEffect(() => {
-    localStorage.setItem('isAuthenticated', isAuthenticated);
-    localStorage.setItem('userRole', userRole);
-  }, [isAuthenticated, userRole]);
-
   return (
-    <Router>
-      <AppRoutes 
-        isAuthenticated={isAuthenticated} 
-        setIsAuthenticated={setIsAuthenticated} 
-        userRole={userRole}
-        setUserRole={setUserRole}
-      />
-    </Router>
+    <UserProvider>
+      <Router>
+        <AppRoutes />
+      </Router>
+    </UserProvider>
   );
 }
 

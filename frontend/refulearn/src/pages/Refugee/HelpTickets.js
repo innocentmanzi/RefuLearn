@@ -32,6 +32,13 @@ const StatCard = styled.div`
   padding: 1.5rem;
   text-align: center;
   box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  }
 `;
 
 const StatNumber = styled.div`
@@ -207,6 +214,7 @@ const HelpTickets = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [assignedToFilter, setAssignedToFilter] = useState('all');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState('all');
 
   // Sample data - in real app, this would come from PouchDB
   useEffect(() => {
@@ -306,31 +314,36 @@ const HelpTickets = () => {
     window.location.href = '/help';
   };
 
+  const handleStatCardClick = (status) => {
+    setSelectedStatusFilter(status);
+    setStatusFilter(status);
+  };
+
   return (
     <Container>
-      <Title>My Help Tickets</Title>
+      <Title>My Requests</Title>
       <Subtitle>
         Track the status of your help requests and view responses from instructors, mentors, and support staff.
       </Subtitle>
 
       <NewTicketButton onClick={handleNewTicket}>
-        + Submit New Help Request
+        + Submit New Request
       </NewTicketButton>
 
       <StatsGrid>
-        <StatCard>
+        <StatCard onClick={() => handleStatCardClick('all')}>
           <StatNumber color="#3498db">{stats.total}</StatNumber>
           <StatLabel>Total Requests</StatLabel>
         </StatCard>
-        <StatCard>
+        <StatCard onClick={() => handleStatCardClick('open')}>
           <StatNumber color="#e74c3c">{stats.open}</StatNumber>
           <StatLabel>Open</StatLabel>
         </StatCard>
-        <StatCard>
+        <StatCard onClick={() => handleStatCardClick('in_progress')}>
           <StatNumber color="#f39c12">{stats.inProgress}</StatNumber>
           <StatLabel>In Progress</StatLabel>
         </StatCard>
-        <StatCard>
+        <StatCard onClick={() => handleStatCardClick('resolved')}>
           <StatNumber color="#27ae60">{stats.resolved}</StatNumber>
           <StatLabel>Resolved</StatLabel>
         </StatCard>

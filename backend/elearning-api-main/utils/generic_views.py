@@ -57,6 +57,12 @@ class GenericListCreateView(APIView):
         if not self.resource_name:
             self.resource_name = self.model.__name__
 
+    def get_queryset(self):
+        """
+        Return the queryset for list view. Subclasses should override for role-based filtering.
+        """
+        return self.model.objects.all().order_by("id")
+
     @extend_schema(
         responses={
             200: None,  # Subclasses should override with serializer_class(many=True)
@@ -81,7 +87,7 @@ class GenericListCreateView(APIView):
         )
 
         try:
-            queryset = self.model.objects.all().order_by("id")
+            queryset = self.get_queryset()
             paginator = self.pagination_class()
             paginated_items = paginator.paginate_queryset(queryset, request)
 

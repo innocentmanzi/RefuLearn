@@ -1,11 +1,10 @@
-import uuid
 import random
 from django.db import models
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, MaxValueValidator
 from core.models import Language
 from authentication.models import User
-from utils import logging_config, choices, utils
+from utils import logging_config, choices, utils, uuid as uuid_utils
 
 logger = logging_config.setup_logging()
 
@@ -16,7 +15,13 @@ class CourseCategory(models.Model):
     Referenced by Course model.
     """
 
-    id = models.BigAutoField(primary_key=True)
+    id = models.BigIntegerField(
+        primary_key=True,
+        default=uuid_utils.generate_short_numeric_uuid,
+        editable=False,
+        unique=True,
+        null=False,
+    )
     name = models.CharField(max_length=100, unique=True, null=False, blank=False)
 
     def __str__(self):
@@ -55,7 +60,13 @@ class Course(models.Model):
     References Language, User (instructor), and CourseCategory.
     """
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.BigIntegerField(
+        primary_key=True,
+        default=uuid_utils.generate_short_numeric_uuid,
+        editable=False,
+        unique=True,
+        null=False,
+    )
     title = models.CharField(max_length=255, unique=True, null=False, blank=False)
     description = models.TextField(null=True, blank=True)
     language = models.ForeignKey(
@@ -162,7 +173,13 @@ class Module(models.Model):
     Represents individual units within a course, such as lessons or quizzes.
     """
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.BigIntegerField(
+        primary_key=True,
+        default=uuid_utils.generate_short_numeric_uuid,
+        editable=False,
+        unique=True,
+        null=False,
+    )
     course = models.ForeignKey(
         Course, on_delete=models.CASCADE, related_name="course_module"
     )
@@ -221,7 +238,13 @@ class Enrollment(models.Model):
     Tracks user enrollment in courses, including status.
     """
 
-    id = models.BigAutoField(primary_key=True)
+    id = models.BigIntegerField(
+        primary_key=True,
+        default=uuid_utils.generate_short_numeric_uuid,
+        editable=False,
+        unique=True,
+        null=False,
+    )
     user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
@@ -300,7 +323,13 @@ class UserProgress(models.Model):
     Records user progress within course modules.
     """
 
-    id = models.BigAutoField(primary_key=True)
+    id = models.BigIntegerField(
+        primary_key=True,
+        default=uuid_utils.generate_short_numeric_uuid,
+        editable=False,
+        unique=True,
+        null=False,
+    )
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="user_progress"
     )
@@ -368,7 +397,13 @@ class Assessment(models.Model):
     Stores assessments tied to course modules, such as quizzes or assignments.
     """
 
-    id = models.BigAutoField(primary_key=True)
+    id = models.BigIntegerField(
+        primary_key=True,
+        default=uuid_utils.generate_short_numeric_uuid,
+        editable=False,
+        unique=True,
+        null=False,
+    )
     module = models.ForeignKey(
         Module, on_delete=models.CASCADE, related_name="assessment_module"
     )
@@ -420,7 +455,13 @@ class Question(models.Model):
     Stores questions tied to an assessment, such as multiple-choice or essay questions.
     """
 
-    id = models.BigAutoField(primary_key=True)
+    id = models.BigIntegerField(
+        primary_key=True,
+        default=uuid_utils.generate_short_numeric_uuid,
+        editable=False,
+        unique=True,
+        null=False,
+    )
     assessment = models.ForeignKey(
         Assessment, on_delete=models.CASCADE, related_name="assessment_questions"
     )
@@ -515,7 +556,13 @@ class UserAssessment(models.Model):
     Tracks user responses and scores for assessments.
     """
 
-    id = models.BigAutoField(primary_key=True)
+    id = models.BigIntegerField(
+        primary_key=True,
+        default=uuid_utils.generate_short_numeric_uuid,
+        editable=False,
+        unique=True,
+        null=False,
+    )
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="user_assessments"
     )
@@ -523,7 +570,7 @@ class UserAssessment(models.Model):
         Assessment, on_delete=models.CASCADE, related_name="assessments"
     )
     attempt_number = models.PositiveIntegerField(default=1)
-    answers = models.JSONField(default=dict)
+    answers = models.JSONField(default=list)
     score = models.FloatField(null=True, blank=True)
     passed = models.BooleanField(default=False)
     started_at = models.DateTimeField(auto_now_add=True)
@@ -553,11 +600,11 @@ class UserAssessment(models.Model):
                 }
             )
 
-        if not isinstance(self.answers, dict):
+        if not isinstance(self.answers, list):
             logger.warning(f"Invalid answers format: {self.answers}")
             raise ValidationError(
                 {
-                    "error": "Answers must be a dictionary.",
+                    "error": "Answers must be a list of {'question', 'answer'} objects.",
                     "error_code": "INVALID_ANSWERS",
                 }
             )
@@ -609,7 +656,13 @@ class Certification(models.Model):
     Manages certificates awarded to users for course completion or achievements.
     """
 
-    id = models.BigAutoField(primary_key=True)
+    id = models.BigIntegerField(
+        primary_key=True,
+        default=uuid_utils.generate_short_numeric_uuid,
+        editable=False,
+        unique=True,
+        null=False,
+    )
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="user_certificates"
     )
@@ -751,13 +804,13 @@ class Discussion(models.Model):
     Represents community discussions and forums under a course.
     """
 
-    id = models.BigAutoField(primary_key=True)
-    title = models.CharField(max_length=255)
-    author = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name="discussion_author"
+    id = models.BigIntegerField(
+        primary_key=True,
+        default=uuid_utils.generate_short_numeric_uuid,
+        editable=False,
+        unique=True,
+        null=False,
     )
-    category = models.CharField(max_length=50, choices=choices.DISCUSSION_CATEGORIES)
-    content = models.TextField(null=True, blank=True)
     course = models.ForeignKey(
         Course,
         on_delete=models.CASCADE,
@@ -765,6 +818,12 @@ class Discussion(models.Model):
         blank=True,
         related_name="course_discussion",
     )
+    author = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="discussion_author"
+    )
+    title = models.CharField(max_length=255)
+    category = models.CharField(max_length=50, choices=choices.DISCUSSION_CATEGORIES)
+    content = models.TextField(null=True, blank=True)
     status = models.CharField(
         max_length=20, choices=choices.DISCUSSION_STATUS, default="Submitted"
     )
@@ -833,7 +892,13 @@ class DiscussionReply(models.Model):
     Represents replies to discussions, supporting nested replies.
     """
 
-    id = models.BigAutoField(primary_key=True)
+    id = models.BigIntegerField(
+        primary_key=True,
+        default=uuid_utils.generate_short_numeric_uuid,
+        editable=False,
+        unique=True,
+        null=False,
+    )
     discussion = models.ForeignKey(
         Discussion, on_delete=models.CASCADE, related_name="discussion_replies"
     )

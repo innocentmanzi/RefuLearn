@@ -153,6 +153,55 @@ def sanitize_input(data, fields=None, email_fields=None, otp_fields=None):
 
     for field in target_fields:
         if field in sanitized_data and sanitized_data[field] is not None:
+            # Special handling for 'answers' field: allow list of dicts with 'question' and 'answer'
+            if field == "answers":
+                value = sanitized_data[field]
+
+                if isinstance(value, list) and all(
+                    isinstance(item, dict)
+                    and set(item.keys()) == {"question", "answer"}
+                    for item in value
+                ):
+                    # Optionally, strip dangerous characters from question/answer strings
+                    for idx, item in enumerate(value):
+                        for k in ["question", "answer"]:
+                            if not isinstance(item[k], str):
+                                logger.warning(
+                                    f"Invalid type for '{k}' in answers[{idx}]: {item[k]}"
+                                )
+                                raise ValidationError(
+                                    {
+                                        "error": f"Each '{k}' in answers must be a string.",
+                                        "error_code": "INVALID_ANSWER_TYPE",
+                                    }
+                                )
+
+                            # Remove dangerous characters from question/answer
+                            cleaned = re.sub(r"[<>;{}]", "", item[k])
+                            if cleaned != item[k]:
+                                logger.warning(
+                                    f"Invalid characters in answers[{idx}]['{k}']: {item[k]}"
+                                )
+                                raise ValidationError(
+                                    {
+                                        "error": f"Field 'answers[{idx}][{k}]' contains invalid characters",
+                                        "error_code": "INVALID_INPUT",
+                                    }
+                                )
+
+                            item[k] = cleaned
+                    sanitized_data[field] = value
+                    continue
+
+                else:
+                    logger.warning(f"Invalid format for 'answers': {value}")
+                    raise ValidationError(
+                        {
+                            "error": "Field 'answers' must be a list of {'question', 'answer'} objects.",
+                            "error_code": "INVALID_ANSWERS_FORMAT",
+                        }
+                    )
+
             value = str(sanitized_data[field]).strip()
 
             if field in otp_fields:
@@ -168,6 +217,7 @@ def sanitize_input(data, fields=None, email_fields=None, otp_fields=None):
                             "error_code": "INVALID_OTP",
                         }
                     )
+
             else:
                 # General fields: remove dangerous characters
                 sanitized_value = re.sub(r"[<>;{}]", "", value)
@@ -205,12 +255,16 @@ def get_module_upload_path(instance, filename):
     # Determine file type directory
     if ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]:
         file_type_dir = "images"
+
     elif ext == ".pdf":
         file_type_dir = "files"
+
     elif ext in [".mp4", ".mov", ".avi", ".mkv"]:
         file_type_dir = "videos"
+
     elif ext in [".mp3", ".wav", ".ogg", ".m4a"]:
         file_type_dir = "audios"
+
     else:
         file_type_dir = "others"
 

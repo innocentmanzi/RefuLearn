@@ -2,7 +2,7 @@ import logging
 import os
 import uuid
 import sys
-from logging.handlers import RotatingFileHandler
+from concurrent_log_handler import ConcurrentRotatingFileHandler
 from datetime import datetime
 import threading
 from pathlib import Path
@@ -114,8 +114,8 @@ def setup_logging():
                 )
                 raise
 
-            # File handler with rotation (10 files of 1MB each)
-            file_handler = RotatingFileHandler(
+            # Use ConcurrentRotatingFileHandler for safe multi-process logging
+            file_handler = ConcurrentRotatingFileHandler(
                 filename=os.path.join(log_dir, "messages.log"),
                 maxBytes=1024 * 1024,  # 1MB
                 backupCount=10,

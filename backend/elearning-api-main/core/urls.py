@@ -6,21 +6,21 @@ urlpatterns = [
     path(
         "languages/",
         views.LanguageListCreateView.as_view(),
-        name="language_list_create",
+        name="languages-list-create",
     ),
     path(
-        "language/<uuid:instance_id>/",
+        "languages/<int:instance_id>/",
         views.LanguageDetailView.as_view(),
-        name="language_retrieve_update_delete",
+        name="languages-retrieve-update-delete",
     ),
     path(
         "camps/",
         views.CampListCreateView.as_view(),
-        name="camp_list_create",
+        name="camps-list-create",
     ),
     path(
-        "camp/<uuid:instance_id>/",
+        "camps/<int:instance_id>/",
         views.CampDetailView.as_view(),
-        name="camp_retrieve_update_delete",
+        name="camps-retrieve-update-delete",
     ),
 ]

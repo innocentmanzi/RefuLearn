@@ -1,6 +1,5 @@
-import uuid
 from django.db import models
-from utils import logging_config
+from utils import logging_config, uuid
 
 logger = logging_config.setup_logging()
 
@@ -11,8 +10,12 @@ class Language(models.Model):
     Used to manage language options for UserProfile and Course models.
     """
 
-    id = models.UUIDField(
-        primary_key=True, default=uuid.uuid4, editable=False, unique=True, null=False
+    id = models.BigIntegerField(
+        primary_key=True,
+        default=uuid.generate_short_numeric_uuid,
+        editable=False,
+        unique=True,
+        null=False,
     )
     code = models.CharField(max_length=10, unique=True, null=False, blank=False)
     name = models.CharField(max_length=100, null=False, blank=False)
@@ -56,8 +59,12 @@ class Camp(models.Model):
     Used to associate users with their camp location in UserProfile.
     """
 
-    id = models.UUIDField(
-        primary_key=True, default=uuid.uuid4, editable=False, unique=True, null=False
+    id = models.BigIntegerField(
+        primary_key=True,
+        default=uuid.generate_short_numeric_uuid,
+        editable=False,
+        unique=True,
+        null=False,
     )
     name = models.CharField(max_length=255, unique=True, null=False, blank=False)
     location = models.CharField(max_length=255, null=False, blank=False)

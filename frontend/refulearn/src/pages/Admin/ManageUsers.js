@@ -28,18 +28,11 @@ const UserCard = styled.div`
   border: 1px solid #eee;
   border-radius: 12px;
   padding: 1.5rem;
-  margin-bottom: 1rem;
-  display: grid;
-  grid-template-columns: 0.5fr 2fr 3fr 1fr 1fr 2fr;
-  align-items: center;
-  gap: 1rem;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-
-  @media (max-width: 992px) {
-    grid-template-columns: 1fr;
-    gap: 1rem;
-    position: relative;
-    padding-top: 2rem;
+  cursor: pointer;
+  transition: box-shadow 0.2s;
+  &:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
   }
 `;
 
@@ -177,12 +170,41 @@ const BulkBar = styled.div`
   margin-bottom: 1rem;
 `;
 
+const UsersGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin-top: 2rem;
+`;
+
+const ProfilePic = styled.img`
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  margin-right: 0.75rem;
+  background: #eee;
+`;
+const ProfileInitials = styled.div`
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #bbb;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.1rem;
+  margin-right: 0.75rem;
+`;
+
 const ManageUsers = () => {
   const [users, setUsers] = useState([
-    { id: 1, name: 'John Doe', email: 'john@example.com', role: 'refugee', status: 'active' },
-    { id: 2, name: 'Jane Smith', email: 'jane@example.com', role: 'mentor', status: 'active' },
-    { id: 3, name: 'Bob Johnson', email: 'bob@example.com', role: 'instructor', status: 'inactive' },
-    { id: 4, name: 'Alice Brown', email: 'alice@example.com', role: 'employer', status: 'active' },
+    { id: 1, name: 'John Doe', email: 'john@example.com', role: 'refugee', status: 'active', profilePic: '' },
+    { id: 2, name: 'Jane Smith', email: 'jane@example.com', role: 'mentor', status: 'active', profilePic: '' },
+    { id: 3, name: 'Bob Johnson', email: 'bob@example.com', role: 'instructor', status: 'inactive', profilePic: '' },
+    { id: 4, name: 'Alice Brown', email: 'alice@example.com', role: 'employer', status: 'active', profilePic: '' },
   ]);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleModal, setRoleModal] = useState({ open: false, userId: null });
@@ -193,6 +215,8 @@ const ManageUsers = () => {
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [detailsModal, setDetailsModal] = useState({ open: false, user: null });
   const [confirmDialog, setConfirmDialog] = useState({ open: false, action: null, user: null, bulk: false });
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   const filteredUsers = users.filter(user =>
     (roleFilter === 'all' || user.role === roleFilter) &&
@@ -288,117 +312,86 @@ const ManageUsers = () => {
           <ActionButton color="#6c757d" onClick={() => setSelectedUsers([])}>Clear</ActionButton>
         </BulkBar>
       )}
-      <UserList>
-        <UserHeader>
-          <CheckboxContainer>
-            <input 
-              type="checkbox" 
-              checked={paginatedUsers.length > 0 && paginatedUsers.every(u => selectedUsers.includes(u.id))} 
-              onChange={handleSelectAll} 
-            />
-          </CheckboxContainer>
-          <UserInfo>Name</UserInfo>
-          <UserInfo>Email</UserInfo>
-          <UserInfo>Role</UserInfo>
-          <UserInfo>Status</UserInfo>
-          <ActionButtons>Actions</ActionButtons>
-        </UserHeader>
+      <UsersGrid>
         {paginatedUsers.map(user => (
-          <UserCard key={user.id}>
-            <CheckboxContainer>
-              <input 
-                type="checkbox" 
-                checked={selectedUsers.includes(user.id)} 
-                onChange={() => handleSelectUser(user.id)} 
-              />
-            </CheckboxContainer>
-            <UserInfo data-label="Name:">{user.name}</UserInfo>
-            <UserInfo data-label="Email:">{user.email}</UserInfo>
-            <UserInfo data-label="Role:">
-              <Badge color={getRoleColor(user.role)}>{user.role}</Badge>
-            </UserInfo>
-            <UserInfo data-label="Status:">
-              <Badge color={user.status === 'active' ? '#28a745' : '#dc3545'}>
-                {user.status}
-              </Badge>
-            </UserInfo>
-            <ActionButtons>
-              {user.status === 'active' ? (
-                <ActionButton color="#dc3545" onClick={() => openConfirmDialog('deactivate', user)}>
-                  Deactivate
-                </ActionButton>
-              ) : (
-                <ActionButton color="#28a745" onClick={() => openConfirmDialog('activate', user)}>
-                  Activate
-                </ActionButton>
-              )}
-              <ActionButton color="#6c757d" onClick={() => openRoleModal(user.id)}>
-                Change Role
-              </ActionButton>
-              <ActionButton color="#17a2b8" onClick={() => openDetailsModal(user)}>
-                Details
-              </ActionButton>
-            </ActionButtons>
+          <UserCard key={user.id} onClick={() => setDetailsModal({ open: true, user })}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+              {user.profilePic
+                ? <ProfilePic src={user.profilePic} alt={user.name} />
+                : <ProfileInitials>{user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}</ProfileInitials>
+              }
+              <span style={{ fontWeight: 600, fontSize: '1.1rem' }}>{user.name}</span>
+            </div>
+            <div style={{ color: '#555', fontSize: '0.98rem', marginBottom: 4 }}>{user.email}</div>
+            <Badge color={getRoleColor(user.role)}>{user.role}</Badge>
+            <Badge color={user.status === 'active' ? '#28a745' : '#dc3545'} style={{ marginLeft: 8 }}>{user.status}</Badge>
           </UserCard>
         ))}
-      </UserList>
+      </UsersGrid>
       <PaginationBar>
         <button disabled={page === 1} onClick={() => setPage(page - 1)}>&lt; Prev</button>
         <span>Page {page} of {totalPages}</span>
         <button disabled={page === totalPages} onClick={() => setPage(page + 1)}>Next &gt;</button>
       </PaginationBar>
-      {detailsModal.open && (
-        <ModalOverlay>
-          <ModalContent>
-            <h2>User Details</h2>
-            <div><b>Name:</b> {detailsModal.user.name}</div>
-            <div><b>Email:</b> {detailsModal.user.email}</div>
-            <div><b>Role:</b> {detailsModal.user.role}</div>
-            <div><b>Status:</b> {detailsModal.user.status}</div>
-            <div style={{ marginTop: 16 }}>
-              <ActionButton color="#6c757d" onClick={closeDetailsModal}>Close</ActionButton>
+      {detailsModal.open && detailsModal.user && (
+        <ModalOverlay onClick={closeDetailsModal}>
+          <ModalContent onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+              {detailsModal.user.profilePic
+                ? <ProfilePic src={detailsModal.user.profilePic} alt={detailsModal.user.name} />
+                : <ProfileInitials>{detailsModal.user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}</ProfileInitials>
+              }
+              <h2 style={{ margin: 0 }}>{detailsModal.user.name}</h2>
             </div>
+            <div style={{ marginBottom: 8 }}><b>Email:</b> {detailsModal.user.email}</div>
+            <div style={{ marginBottom: 8 }}><b>Role:</b> <Badge color={getRoleColor(detailsModal.user.role)}>{detailsModal.user.role}</Badge></div>
+            <div style={{ marginBottom: 8 }}><b>Account Status:</b> <Badge color={detailsModal.user.status === 'active' ? '#28a745' : '#dc3545'}>{detailsModal.user.status}</Badge></div>
+            <div style={{ marginBottom: 8 }}><b>Profile Picture:</b> {detailsModal.user.profilePic ? 'Uploaded' : 'Not uploaded'}</div>
+            <div style={{ margin: '16px 0' }}>
+              <label>Change Role: </label>
+              <select value={detailsModal.user.role} onChange={e => setDetailsModal({ ...detailsModal, user: { ...detailsModal.user, role: e.target.value } })} style={{ padding: '0.5rem', borderRadius: 8, marginLeft: 8 }}>
+                <option value="refugee">Refugee</option>
+                <option value="mentor">Mentor</option>
+                <option value="instructor">Instructor</option>
+                <option value="employer">Employer</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div style={{ margin: '16px 0' }}>
+              <label>Account Management: </label>
+              <select value={detailsModal.user.status} onChange={e => setDetailsModal({ ...detailsModal, user: { ...detailsModal.user, status: e.target.value } })} style={{ padding: '0.5rem', borderRadius: 8, marginLeft: 8 }}>
+                <option value="active">Activate User</option>
+                <option value="inactive">Deactivate User</option>
+              </select>
+            </div>
+            <div style={{ marginTop: 24, display: 'flex', gap: '1rem' }}>
+              <ActionButton color="#28a745" onClick={async () => {
+                setSaveLoading(true);
+                // Simulate API call to update user role and account status
+                await new Promise(res => setTimeout(res, 1200));
+                setUsers(users.map(u => u.id === detailsModal.user.id ? { ...detailsModal.user } : u));
+                setSaveLoading(false);
+                setSaveSuccess(true);
+                setTimeout(() => { setSaveSuccess(false); closeDetailsModal(); }, 1200);
+              }} disabled={saveLoading}>
+                {saveLoading ? 'Saving...' : 'Save Changes'}
+              </ActionButton>
+              <ActionButton color="#6c757d" onClick={closeDetailsModal} disabled={saveLoading}>Close</ActionButton>
+            </div>
+            {saveSuccess && <div style={{ color: '#28a745', marginTop: 12 }}>User role and account status updated successfully!</div>}
           </ModalContent>
         </ModalOverlay>
       )}
       {confirmDialog.open && (
         <ModalOverlay>
           <ModalContent>
-            <h3>Confirm {confirmDialog.action === 'deactivate' ? 'Deactivation' : 'Activation'}</h3>
-            <div style={{ margin: '1rem 0' }}>
+            <div>
               {confirmDialog.bulk
                 ? `Are you sure you want to ${confirmDialog.action} ${selectedUsers.length} selected users?`
-                : `Are you sure you want to ${confirmDialog.action} user "${confirmDialog.user.name}"?`}
+                : `Are you sure you want to ${confirmDialog.action} user "${confirmDialog.user?.name}"?`}
             </div>
             <ActionButton color="#dc3545" onClick={handleConfirm}>Yes, {confirmDialog.action.charAt(0).toUpperCase() + confirmDialog.action.slice(1)}</ActionButton>
             <ActionButton color="#6c757d" onClick={closeConfirmDialog}>Cancel</ActionButton>
-          </ModalContent>
-        </ModalOverlay>
-      )}
-      {roleModal.open && (
-        <ModalOverlay>
-          <ModalContent>
-            <h3>Change User Role</h3>
-            {['refugee', 'mentor', 'instructor', 'employer', 'admin'].map(role => (
-              <button
-                key={role}
-                style={{
-                  display: 'block', width: '100%', margin: '8px 0', padding: '0.7rem 1rem',
-                  background: '#007bff', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer'
-                }}
-                onClick={() => handleRoleSelect(role)}
-              >
-                {role.charAt(0).toUpperCase() + role.slice(1)}
-              </button>
-            ))}
-            <button
-              style={{
-                marginTop: 12, background: '#6c757d', color: '#fff', border: 'none', borderRadius: 6, padding: '0.5rem 1rem'
-              }}
-              onClick={closeRoleModal}
-            >
-              Cancel
-            </button>
           </ModalContent>
         </ModalOverlay>
       )}
@@ -417,4 +410,4 @@ const getRoleColor = (role) => {
   }
 };
 
-export default ManageUsers; 
+export default ManageUsers;

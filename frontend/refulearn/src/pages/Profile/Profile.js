@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import styled from 'styled-components';
 import { FiEdit, FiPlus, FiMapPin, FiFile } from 'react-icons/fi';
+import { useUser } from '../../contexts/UserContext';
 
 const Container = styled.div`
   padding: 2rem;
@@ -236,41 +237,12 @@ function normalizeCertificates(certs) {
 }
 
 const Profile = ({ userRole }) => {
+  const { user, updateUser } = useUser();
   // Editable state
   const [edit, setEdit] = useState({});
-  const [user, setUser] = useState({
-    firstName: 'Jane',
-    lastName: 'Doe',
-    email: 'jane.doe@email.com',
-    phone: '+1234567890',
-    profilePic: 'https://via.placeholder.com/100',
-    social: {
-      linkedin: 'https://linkedin.com/in/janedoe',
-      twitter: 'https://twitter.com/janedoe',
-      instagram: 'https://instagram.com/janedoe',
-      facebook: 'https://facebook.com/janedoe',
-    },
-    interests: ['Digital Literacy', 'Community Building', 'Language Learning'],
-    summary: 'A passionate learner and community builder.',
-    experiences: [
-      { company: 'Tech Org', role: 'Intern', years: '2022-2023', summary: 'Worked on web development projects.' },
-    ],
-    education: [
-      { school: 'ALU', degree: 'BSc Computer Science', years: '2020-2024' },
-    ],
-    languages: ['English', 'French'],
-    skills: ['React', 'Communication', 'Teamwork'],
-    certificates: normalizeCertificates([
-      'Digital Literacy Certificate',
-      'English Proficiency',
-    ]),
-    role: userRole,
-    country: 'Rwanda',
-    city: 'Kigali',
-  });
   const [form, setForm] = useState({
     ...user,
-    certificates: normalizeCertificates(user.certificates),
+    certificates: user.certificates ? user.certificates.map(c => ({ ...c })) : [],
   });
   const [profilePicFile, setProfilePicFile] = useState(null);
   const [degreeFiles, setDegreeFiles] = useState({});
@@ -288,7 +260,9 @@ const Profile = ({ userRole }) => {
   const handleChange = (e, section, idx, subfield) => {
     if (section === 'social') {
       setForm({ ...form, social: { ...form.social, [subfield]: e.target.value } });
-    } else if (['experiences', 'education', 'languages', 'skills', 'certificates', 'interests'].includes(section)) {
+    } else if ([
+      'experiences', 'education', 'languages', 'skills', 'certificates', 'interests'
+    ].includes(section)) {
       const updated = [...form[section]];
       if (subfield) {
         updated[idx][subfield] = e.target.value;
@@ -302,17 +276,11 @@ const Profile = ({ userRole }) => {
   };
   const handleSave = (section) => {
     if (section === 'certificates') {
-      setUser(prev => ({
-        ...prev,
-        certificates: normalizeCertificates(form.certificates)
-      }));
+      updateUser({ certificates: form.certificates });
       setEdit({ ...edit, [section]: false });
       return;
     }
-    setUser(prev => ({
-      ...prev,
-      [section]: form[section]
-    }));
+    updateUser({ [section]: form[section] });
     setEdit({ ...edit, [section]: false });
   };
   const handleAddListItem = (section, template) => {
@@ -332,7 +300,7 @@ const Profile = ({ userRole }) => {
     }
   };
   const handleProfilePicSave = () => {
-    setUser({ ...user, profilePic: form.profilePic });
+    updateUser({ profilePic: form.profilePic });
     setEdit({ ...edit, profilePic: false });
     setProfilePicFile(null);
   };
@@ -427,16 +395,16 @@ const Profile = ({ userRole }) => {
               </>
             ) : (
               <>
-                {user.social.linkedin && (
+                {user.social?.linkedin && (
                   <div><a href={user.social.linkedin} target="_blank" rel="noopener noreferrer">LinkedIn</a></div>
                 )}
-                {user.social.twitter && (
+                {user.social?.twitter && (
                   <div><a href={user.social.twitter} target="_blank" rel="noopener noreferrer">Twitter</a></div>
                 )}
-                {user.social.instagram && (
+                {user.social?.instagram && (
                   <div><a href={user.social.instagram} target="_blank" rel="noopener noreferrer">Instagram</a></div>
                 )}
-                {user.social.facebook && (
+                {user.social?.facebook && (
                   <div><a href={user.social.facebook} target="_blank" rel="noopener noreferrer">Facebook</a></div>
                 )}
               </>

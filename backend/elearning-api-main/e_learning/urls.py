@@ -22,7 +22,8 @@ urlpatterns = [
 urlpatterns += [
     path("auth/", include("authentication.urls")),
     path("core/", include("core.urls")),
-    path("course/", include("course.urls")),
+    path("courses/", include("course.urls")),
+    path("jobs/", include("jobs.urls")),
 ]
 
 # ======== Django Rest Framework authentication views ========

@@ -6,28 +6,28 @@ urlpatterns = [
     path(
         "categories/",
         views.CourseCategoryListCreateView.as_view(),
-        name="category-list-create",
+        name="categories-list-create",
     ),
     path(
-        "category/<int:instance_id>/",
+        "categories/<int:instance_id>/",
         views.CourseCategoryRetrieveUpdateDeleteView.as_view(),
-        name="category-retrieve-update-delete",
+        name="categories-retrieve-update-delete",
     ),
-    path("modules/", views.ModuleListCreateView.as_view(), name="module-list-create"),
+    path("modules/", views.ModuleListCreateView.as_view(), name="modules-list-create"),
     path(
-        "module/<uuid:instance_id>/",
+        "modules/<int:instance_id>/",
         views.ModuleRetrieveUpdateDeleteView.as_view(),
-        name="module-retrieve-update-delete",
+        name="modules-retrieve-update-delete",
     ),
     path(
         "enrollments/",
         views.EnrollmentListCreateView.as_view(),
-        name="enrollment-list-create",
+        name="enrollments-list-create",
     ),
     path(
-        "enrollment/<int:instance_id>/",
+        "enrollments/<int:instance_id>/",
         views.EnrollmentRetrieveUpdateDeleteView.as_view(),
-        name="enrollment-retrieve-update-delete",
+        name="enrollments-retrieve-update-delete",
     ),
     path(
         "user-progress/",
@@ -42,27 +42,67 @@ urlpatterns = [
     path(
         "assessments/",
         views.AssessmentListCreateView.as_view(),
-        name="assessment-list-create",
+        name="assessments-list-create",
     ),
     path(
         "assessments/<int:instance_id>/",
         views.AssessmentRetrieveUpdateDeleteView.as_view(),
-        name="assessment-retrieve-update-delete",
+        name="assessments-retrieve-update-delete",
     ),
     path(
         "questions/",
         views.QuestionListCreateView.as_view(),
-        name="question-list-create",
+        name="questions-list-create",
     ),
     path(
         "questions/<int:instance_id>/",
         views.QuestionRetrieveUpdateDeleteView.as_view(),
-        name="question-retrieve-update-delete",
+        name="questions-retrieve-update-delete",
     ),
-    path("", views.CourseListCreateView.as_view(), name="course-list-create"),
     path(
-        "<uuid:instance_id>/",
+        "user-assessments/",
+        views.UserAssessmentListCreateView.as_view(),
+        name="user-assessments-list-create",
+    ),
+    path(
+        "user-assessments/<int:instance_id>/",
+        views.UserAssessmentRetrieveUpdateDeleteView.as_view(),
+        name="user-assessments-retrieve-update-delete",
+    ),
+    path(
+        "certificates/",
+        views.CertificationListCreateView.as_view(),
+        name="certificates-list-create",
+    ),
+    path(
+        "certificates/<int:instance_id>/",
+        views.CertificationRetrieveUpdateDeleteView.as_view(),
+        name="certificates-retrieve-update-delete",
+    ),
+    path(
+        "discussions/",
+        views.DiscussionListCreateView.as_view(),
+        name="discussions-list-create",
+    ),
+    path(
+        "discussions/<int:instance_id>/",
+        views.DiscussionRetrieveUpdateDeleteView.as_view(),
+        name="discussions-retrieve-update-delete",
+    ),
+    path(
+        "discussions/replies/",
+        views.DiscussionReplyListCreateView.as_view(),
+        name="discussions-replies-list-create",
+    ),
+    path(
+        "discussions/replies/<int:instance_id>/",
+        views.DiscussionReplyRetrieveUpdateDeleteView.as_view(),
+        name="discussions-replies-retrieve-update-delete",
+    ),
+    path("", views.CourseListCreateView.as_view(), name="courses-list-create"),
+    path(
+        "<int:instance_id>/",
         views.CourseRetrieveUpdateDeleteView.as_view(),
-        name="course-retrieve-update-delete",
+        name="courses-retrieve-update-delete",
     ),
 ]

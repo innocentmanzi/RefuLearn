@@ -23,7 +23,7 @@ urlpatterns = [
     path("users/", views.UserListView.as_view(), name="user_list"),
     path("user/", views.UserDataView.as_view(), name="user_data"),
     path(
-        "profile/<uuid:user_id>/",
+        "profile/<int:user_id>/",
         views.UserProfileView.as_view(),
         name="user_profile",
     ),

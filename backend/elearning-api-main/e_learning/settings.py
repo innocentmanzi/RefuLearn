@@ -44,6 +44,7 @@ LOCAL_APPS = [
     "authentication",
     "core",
     "course",
+    "jobs",
 ]
 
 # Combine all apps into INSTALLED_APPS

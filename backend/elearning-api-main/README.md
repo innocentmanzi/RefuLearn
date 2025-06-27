@@ -11,19 +11,19 @@ Ensure you have the following installed:
 
 ### Installation
 
-1. **Clone the Repository**
+1. Clone the Repository
    ```bash
-   git clone https://github.com/your-username/elearning-api.git
+      git clone https://github.com/ElvisMugisha/elearning-api.git
 
-2. **Navigate into the Project Folder**
+2. Navigate into the Project Folder
    ```bash
-   cd elearning-api
+      cd elearning-api
 
-3. **Create a Virtual Environment**
+3. Create a Virtual Environment (env)
    ```bash
-   python -m venv env
+      python -m venv env
 
-4. **Activate the Virtual Environment**
+4. Activate the Virtual Environment (env)
    ```bash
     Windows (Powershell):
       . env\Scripts\Activate
@@ -34,11 +34,11 @@ Ensure you have the following installed:
     macOS/Linux:
       . source env/bin/activate
 
-5. **Install Dependencies**
+5. Install Dependencies
    ```bash
-   pip install -r requirements.txt
+      pip install -r requirements.txt
 
-6. **Remember to create a .env file and add you keys/password in the file**
+6. Remember to create a .env file and add your keys/password in the file
    .env Variables
 
    SECRET_KEY=
@@ -49,9 +49,9 @@ Ensure you have the following installed:
 
    CACHE_TIMEOUT=
 
-   CORS_ALLOW_ALL_ORIGINS=
+   CORS_ALLOW_ALL_ORIGINS=True
 
-   CORS_ALLOWED_ORIGINS=
+   CORS_ALLOWED_ORIGINS=http://localhost:8000,http://localhost:3000
 
    EMAIL_BACKEND=
 
@@ -63,6 +63,11 @@ Ensure you have the following installed:
 
    EMAIL_HOST_PASSWORD=
 
-1. **Running the Project (Run the Development Server)**
+7. Running the Project (Run the Development Server)
    ```bash
-   python manage.py runserver
+      python manage.py runserver
+
+### And if somehow you get the errors or warning that there are no tables or db, just run the migration and migrate.
+   ```bash
+      python manage.py makemigrations
+      python manage.py migrate

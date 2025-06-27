@@ -218,6 +218,45 @@ const StickyFooter = styled.div`
   border-top: 1px solid #eee;
 `;
 
+const HeaderContainer = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  gap: 1rem;
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+`;
+
+const SearchContainer = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  max-width: 400px;
+  
+  @media (max-width: 768px) {
+    max-width: 100%;
+  }
+`;
+
+const SearchInput = styled.input`
+  flex: 1;
+  padding: 0.8rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 1rem;
+  
+  &:focus {
+    outline: none;
+    border-color: ${({ theme }) => theme.colors.primary};
+    box-shadow: 0 0 0 2px ${({ theme }) => theme.colors.primary}20;
+  }
+`;
+
 const initialAssessments = [
   { id: 1, title: 'Quiz 1', description: 'Basic programming concepts.' },
   { id: 2, title: 'Midterm Exam', description: 'Covers all topics up to week 6.' },
@@ -247,6 +286,7 @@ const Assessments = () => {
     questions: [],
   });
   const [courses] = useState(initialCourses);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const openAddModal = () => {
     setModalMode('add');
@@ -354,10 +394,27 @@ const Assessments = () => {
     closeBuilder();
   };
 
+  const filteredAssessments = assessments.filter(assessment =>
+    assessment.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    assessment.description.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <Container>
       <Title>Manage Assessments</Title>
-      <AddButton onClick={openAddModal}>+ Add New Assessment</AddButton>
+      
+      <HeaderContainer>
+        <AddButton onClick={openAddModal}>+ Add New Assessment</AddButton>
+        
+        <SearchContainer>
+          <SearchInput
+            type="text"
+            placeholder="Search assessments..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </SearchContainer>
+      </HeaderContainer>
 
       <AssessmentList>
         <AssessmentHeader>
@@ -365,7 +422,7 @@ const Assessments = () => {
           <div>Description</div>
           <div>Actions</div>
         </AssessmentHeader>
-        {assessments.map(assessment => (
+        {filteredAssessments.map(assessment => (
           <AssessmentCard key={assessment.id}>
             <AssessmentInfo>
               <h3>{assessment.title}</h3>

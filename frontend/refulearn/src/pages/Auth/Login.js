@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import styled from 'styled-components';
 import { useNavigate, Link } from 'react-router-dom';
 import Logo from '../../components/Logo';
+import { useUser } from '../../contexts/UserContext';
 
 const Container = styled.div`
   min-height: 100vh;
@@ -64,16 +65,23 @@ const Button = styled.button`
   }
 `;
 
-const Login = ({ setIsAuthenticated, setUserRole }) => {
+const Login = () => {
   const navigate = useNavigate();
+  const { login } = useUser();
   const [role, setRole] = useState('refugee');
 
   const handleSubmit = e => {
     e.preventDefault();
     // In a real app, you would authenticate the user here
     // and receive the actual user role from the backend.
-    setIsAuthenticated(true);
-    setUserRole(role);
+    const userData = {
+      firstName: 'Jane',
+      lastName: 'Doe',
+      email: 'jane.doe@email.com',
+      profilePic: null,
+      role: role
+    };
+    login(userData, role);
     navigate('/dashboard');
   };
 

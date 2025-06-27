@@ -1187,8 +1187,6 @@ class UserProfileView(views.APIView):
         logger.info(
             f"User profile PATCH request from IP: {client_ip} for user_id: {user_id}"
         )
-        logger.debug(f"Request data: {dict(request.data)}")
-        logger.debug(f"Request files: {dict(request.FILES)}")
 
         try:
             user = self.get_object(user_id)
@@ -1209,17 +1207,24 @@ class UserProfileView(views.APIView):
             if "profile_picture" in request.FILES:
                 sanitized_data["profile_picture"] = request.FILES["profile_picture"]
 
+            sanitized_data["user"] = user.id  # Always include user ID
+
             user_profile = getattr(user, "user_profile", None)
+            logger.debug(f"Sanitized data: {sanitized_data}")
+
             if user_profile:
                 # Update existing UserProfile
                 serializer = self.serializer_class(
                     user_profile, data=sanitized_data, partial=True
                 )
+                action = "updated"
                 logger.debug(f"Updating existing UserProfile for user: {user.email}")
+
             else:
                 # Create new UserProfile
                 sanitized_data["user"] = user.id
                 serializer = self.serializer_class(data=sanitized_data)
+                action = "created"
                 logger.debug(f"Creating new UserProfile for user: {user.email}")
 
             if not serializer.is_valid():
@@ -1236,9 +1241,7 @@ class UserProfileView(views.APIView):
                 )
 
             serializer.save()
-            action = "updated" if user_profile else "created"
             logger.info(f"UserProfile {action} successfully for user: {user.email}")
-
             return Response(
                 {
                     "message": f"User profile {action} successfully",

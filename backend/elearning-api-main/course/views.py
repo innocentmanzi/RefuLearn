@@ -138,7 +138,10 @@ class CourseListCreateView(generic_views.GenericListCreateView):
     Supports file uploads for course profile pictures.
     """
 
-    permission_classes = [IsAuthenticated, permissions.IsInstructor]
+    permission_classes = [
+        IsAuthenticated,
+        permissions.IsCourseAdminInstructorOrReadOnly,
+    ]
     model = Course
     serializer_class = CourseSerializer
     pagination_class = custom_pagination.CustomPageNumberPagination
@@ -151,6 +154,26 @@ class CourseListCreateView(generic_views.GenericListCreateView):
     ]
     resource_name = "Course"
     parser_classes = [parsers.MultiPartParser, parsers.FormParser]
+
+    def get_queryset(self):
+        """
+        Return courses based on user role:
+        - Admin: all courses
+        - Instructor: only their own courses
+        - Student: all courses (read-only)
+        """
+        user = self.request.user
+        if user.role == "Admin":
+            logger.info(f"Admin {user.email} retrieving all courses")
+            return self.model.objects.all().order_by("-created_at")
+
+        elif user.role == "Instructor":
+            logger.info(f"Instructor {user.email} retrieving their own courses")
+            return self.model.objects.filter(instructor=user).order_by("-created_at")
+
+        else:
+            logger.info(f"Student {user.email} retrieving all courses (read-only)")
+            return self.model.objects.all().order_by("-created_at")
 
     @extend_schema(
         responses={200: CourseSerializer(many=True)},
@@ -186,7 +209,10 @@ class CourseRetrieveUpdateDeleteView(generic_views.GenericRetrieveUpdateDeleteVi
     Supports file uploads for updating course profile pictures.
     """
 
-    permission_classes = [IsAuthenticated, permissions.IsInstructor]
+    permission_classes = [
+        IsAuthenticated,
+        permissions.IsCourseAdminInstructorOrReadOnly,
+    ]
     model = Course
     serializer_class = CourseSerializer
     sanitize_fields = [
@@ -248,7 +274,10 @@ class ModuleListCreateView(generic_views.GenericListCreateView):
     Supports file uploads for module media.
     """
 
-    permission_classes = [IsAuthenticated, permissions.IsInstructor]
+    permission_classes = [
+        IsAuthenticated,
+        permissions.IsCourseAdminInstructorOrReadOnly,
+    ]
     model = Module
     serializer_class = ModuleSerializer
     pagination_class = custom_pagination.CustomPageNumberPagination
@@ -260,6 +289,30 @@ class ModuleListCreateView(generic_views.GenericListCreateView):
     ]
     resource_name = "Module"
     parser_classes = [parsers.MultiPartParser, parsers.FormParser]
+
+    def get_queryset(self):
+        """
+        Return modules based on user role:
+        - Admin: all modules
+        - Instructor: only the modules under their own courses
+        - Student: all modules (read-only)
+        """
+        user = self.request.user
+        if user.role == "Admin":
+            logger.info(f"Admin {user.email} retrieving all modules")
+            return self.model.objects.all().order_by("-created_at")
+
+        elif user.role == "Instructor":
+            logger.info(
+                f"Instructor {user.email} retrieving the modules under their own courses"
+            )
+            return self.model.objects.filter(course__instructor=user).order_by(
+                "-created_at"
+            )
+
+        else:
+            logger.info(f"Student {user.email} retrieving all modules (read-only)")
+            return self.model.objects.all().order_by("-created_at")
 
     @extend_schema(
         responses={200: ModuleSerializer(many=True)},
@@ -377,7 +430,10 @@ class ModuleRetrieveUpdateDeleteView(generic_views.GenericRetrieveUpdateDeleteVi
     Supports file uploads for updating module media.
     """
 
-    permission_classes = [IsAuthenticated, permissions.IsInstructor]
+    permission_classes = [
+        IsAuthenticated,
+        permissions.IsCourseAdminInstructorOrReadOnly,
+    ]
     model = Module
     serializer_class = ModuleSerializer
     sanitize_fields = [
@@ -488,6 +544,7 @@ class EnrollmentListCreateView(generic_views.GenericListCreateView):
         logger.info(
             f"{self.resource_name} list GET request from IP: {client_ip} for user: {user.email} (Role: {user.role})"
         )
+
         try:
             # Determine queryset based on user role
             if user.role == "Admin":
@@ -537,8 +594,6 @@ class EnrollmentListCreateView(generic_views.GenericListCreateView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-        # return super().get(request)
-
     @extend_schema(
         request=EnrollmentSerializer,
         responses={200: EnrollmentSerializer},
@@ -558,6 +613,7 @@ class EnrollmentListCreateView(generic_views.GenericListCreateView):
         try:
             course = Course.objects.get(id=course_id)
             return f"User {data.get('user')} in Course {course.title}"
+
         except Course.DoesNotExist:
             return f"User {data.get('user')} in Course ID {course_id}"
 
@@ -630,12 +686,17 @@ class UserProgressListCreateView(generic_views.GenericListCreateView):
     resource_name = "UserProgress"
 
     def get_queryset(self):
-        """
-        Return only the current user's progress records.
-        """
-        return self.model.objects.filter(user=self.request.user).order_by(
-            "-last_accessed"
-        )
+        user = self.request.user
+        if user.role == "Admin":
+            return self.model.objects.all().order_by("-last_accessed")
+
+        elif user.role == "Instructor":
+            return self.model.objects.filter(course__instructor=user).order_by(
+                "-last_accessed"
+            )
+
+        else:
+            return self.model.objects.filter(user=user).order_by("-last_accessed")
 
     @extend_schema(
         responses={200: UserProgressSerializer(many=True)},
@@ -766,6 +827,7 @@ class UserProgressRetrieveUpdateDeleteView(
                         "error_code": "PERMISSION_DENIED",
                     }
                 )
+
             return progress
 
         except ValidationError as e:
@@ -876,6 +938,7 @@ class UserProgressRetrieveUpdateDeleteView(
                 },
                 status=status.HTTP_404_NOT_FOUND,
             )
+
         except Exception as e:
             logger.error(f"Error updating UserProgress {instance_id}: {str(e)}")
             return Response(
@@ -917,6 +980,7 @@ class UserProgressRetrieveUpdateDeleteView(
                 },
                 status=status.HTTP_404_NOT_FOUND,
             )
+
         except Exception as e:
             logger.error(f"Error deleting UserProgress {instance_id}: {str(e)}")
             return Response(
@@ -940,7 +1004,10 @@ class AssessmentListCreateView(generic_views.GenericListCreateView):
     Only admins and instructors (for their own courses) can access.
     """
 
-    permission_classes = [IsAuthenticated, permissions.IsAdminOrInstructor]
+    permission_classes = [
+        IsAuthenticated,
+        permissions.IsCourseAdminInstructorOrReadOnly,
+    ]
     model = Assessment
     serializer_class = AssessmentSerializer
     pagination_class = custom_pagination.CustomPageNumberPagination
@@ -950,16 +1017,34 @@ class AssessmentListCreateView(generic_views.GenericListCreateView):
     def get_queryset(self):
         """
         Return assessments based on user role:
-        - Admins see all assessments
-        - Instructors only see assessments for their own courses
+        - Admin: all assessments
+        - Instructor: only assessments under their courses
+        - Student/Other: only assessments under courses they are enrolled in
         """
-        queryset = super().get_queryset()
+        user = self.request.user
+        if user.role == "Admin":
+            logger.info(f"Admin {user.email} retrieving all assessments")
+            return self.model.objects.all().order_by("-created_at")
 
-        if hasattr(self.request.user, "is_admin") and self.request.user.is_admin:
-            return queryset
+        elif user.role == "Instructor":
+            logger.info(
+                f"Instructor {user.email} retrieving assessments under their courses"
+            )
+            return self.model.objects.filter(module__course__instructor=user).order_by(
+                "-created_at"
+            )
 
-        # For instructors, filter by their courses
-        return queryset.filter(module__course__instructor=self.request.user)
+        else:
+            logger.info(
+                f"Student {user.email} retrieving assessments under enrolled courses"
+            )
+            # Get all course IDs the student is enrolled in
+            enrolled_course_ids = user.student_enrollment.values_list(
+                "course_id", flat=True
+            )
+            return self.model.objects.filter(
+                module__course__id__in=enrolled_course_ids
+            ).order_by("-created_at")
 
     @extend_schema(
         responses={200: AssessmentSerializer(many=True)},
@@ -1064,7 +1149,10 @@ class AssessmentRetrieveUpdateDeleteView(generic_views.GenericRetrieveUpdateDele
     Only admins and instructors (for their own courses) can access.
     """
 
-    permission_classes = [IsAuthenticated, permissions.IsAdminOrInstructor]
+    permission_classes = [
+        IsAuthenticated,
+        permissions.IsCourseAdminInstructorOrReadOnly,
+    ]
     model = Assessment
     serializer_class = AssessmentSerializer
     sanitize_fields = ["title", "description"]
@@ -1077,16 +1165,19 @@ class AssessmentRetrieveUpdateDeleteView(generic_views.GenericRetrieveUpdateDele
         """
         try:
             assessment = super().get_object(instance_id)
+            user = self.request.user
 
             # Admins can access any assessment
-            if hasattr(self.request.user, "is_admin") and self.request.user.is_admin:
+            if user.role == "Admin":
                 return assessment
 
-            # Instructors can only access their own course assessments
-            if assessment.module.course.instructor != self.request.user:
+            # Instructors can access assessments under their courses
+            if user.role == "Instructor":
+                if assessment.module.course.instructor == user:
+                    return assessment
+
                 logger.warning(
-                    f"User {self.request.user.username} attempted to access "
-                    f"assessment {instance_id} from another instructor's course"
+                    f"Instructor {user.username} attempted to access assessment {instance_id} not under their course"
                 )
                 raise ValidationError(
                     {
@@ -1095,7 +1186,44 @@ class AssessmentRetrieveUpdateDeleteView(generic_views.GenericRetrieveUpdateDele
                     }
                 )
 
-            return assessment
+            # Students/Other: can only retrieve if enrolled, but not update/delete
+            if user.role == "Student":
+                enrolled_course_ids = user.student_enrollment.values_list(
+                    "course_id", flat=True
+                )
+                if assessment.module.course.id in enrolled_course_ids:
+                    # Only allow safe methods (GET, HEAD, OPTIONS)
+                    if self.request.method in ("GET", "HEAD", "OPTIONS"):
+                        return assessment
+                    logger.warning(
+                        f"Student {user.username} attempted to modify assessment {instance_id} (not allowed)"
+                    )
+                    raise ValidationError(
+                        {
+                            "error": "You do not have permission to modify this assessment",
+                            "error_code": "PERMISSION_DENIED",
+                        }
+                    )
+                logger.warning(
+                    f"Student {user.username} attempted to access assessment {instance_id} not in enrolled courses"
+                )
+                raise ValidationError(
+                    {
+                        "error": "You can only access assessments in your enrolled courses",
+                        "error_code": "PERMISSION_DENIED",
+                    }
+                )
+
+            # Other roles: deny
+            logger.warning(
+                f"User {user.username} with role {user.role} attempted to access assessment {instance_id} without permission"
+            )
+            raise ValidationError(
+                {
+                    "error": "You do not have permission to access this assessment",
+                    "error_code": "PERMISSION_DENIED",
+                }
+            )
 
         except ValidationError as e:
             raise e
@@ -1272,7 +1400,10 @@ class QuestionListCreateView(generic_views.GenericListCreateView):
     Only admins and instructors (for their own courses) can access.
     """
 
-    permission_classes = [IsAuthenticated, permissions.IsAdminOrInstructor]
+    permission_classes = [
+        IsAuthenticated,
+        permissions.IsCourseAdminInstructorOrReadOnly,
+    ]
     model = Question
     serializer_class = QuestionSerializer
     pagination_class = custom_pagination.CustomPageNumberPagination
@@ -1282,16 +1413,26 @@ class QuestionListCreateView(generic_views.GenericListCreateView):
     def get_queryset(self):
         """
         Return questions based on user role:
-        - Admins see all questions
-        - Instructors only see questions for their own courses
+        - Admins: all questions
+        - Instructors: all questions for their own courses
+        - Student: all questions (read-only)
         """
-        queryset = super().get_queryset()
+        user = self.request.user
+        if user.role == "Admin":
+            logger.info(f"Admin {user.email} retrieving all questions")
+            return self.model.objects.all().order_by("-created_at")
 
-        if hasattr(self.request.user, "is_admin") and self.request.user.is_admin:
-            return queryset
+        elif user.role == "Instructor":
+            logger.info(
+                f"Instructor {user.email} retrieving questions under their own courses"
+            )
+            return self.model.objects.filter(
+                assessment__module__course__instructor=user
+            ).order_by("-created_at")
 
-        # For instructors, filter by their courses
-        return queryset.filter(assessment__module__course__instructor=self.request.user)
+        else:
+            logger.info(f"Student {user.email} retrieving all questions (read-only)")
+            return self.model.objects.all().order_by("-created_at")
 
     @extend_schema(
         responses={200: QuestionSerializer(many=True)},
@@ -1395,50 +1536,15 @@ class QuestionRetrieveUpdateDeleteView(generic_views.GenericRetrieveUpdateDelete
     Only admins and instructors (for their own courses) can access.
     """
 
-    permission_classes = [IsAuthenticated, permissions.IsAdminOrInstructor]
+    permission_classes = [
+        IsAuthenticated,
+        permissions.IsCourseAdminInstructorOrReadOnly,
+    ]
     model = Question
     serializer_class = QuestionSerializer
     sanitize_fields = ["question", "correct_answer"]
     resource_name = "Question"
     id_field = "id"
-
-    def get_object(self, instance_id):
-        """
-        Retrieve the Question instance with permission checks.
-        """
-        try:
-            question = super().get_object(instance_id)
-
-            # Admins can access any question
-            if hasattr(self.request.user, "is_admin") and self.request.user.is_admin:
-                return question
-
-            # Instructors can only access their own course questions
-            if question.assessment.module.course.instructor != self.request.user:
-                logger.warning(
-                    f"User {self.request.user.username} attempted to access "
-                    f"question {instance_id} from another instructor's course"
-                )
-                raise ValidationError(
-                    {
-                        "error": "You can only access questions in your own courses",
-                        "error_code": "PERMISSION_DENIED",
-                    }
-                )
-
-            return question
-
-        except ValidationError as e:
-            raise e
-
-        except Exception as e:
-            logger.error(f"Error retrieving Question {instance_id}: {str(e)}")
-            raise ValidationError(
-                {
-                    "error": "Failed to retrieve question",
-                    "error_code": "QUESTION_RETRIEVAL_ERROR",
-                }
-            )
 
     @extend_schema(
         responses={200: QuestionSerializer},
@@ -1596,3 +1702,1194 @@ class QuestionRetrieveUpdateDeleteView(generic_views.GenericRetrieveUpdateDelete
         Generate a log message for Question operations.
         """
         return f"{instance.question} (Assessment: {instance.assessment.title})"
+
+
+class UserAssessmentListCreateView(generic_views.GenericListCreateView):
+    """
+    API view for listing and creating UserAssessment records.
+    - GET: Lists user assessments based on user role (Admin: all, Instructor: their courses, Student: their own).
+    - POST: Allows authenticated users to submit assessment attempts.
+    """
+
+    permission_classes = [IsAuthenticated]
+    model = UserAssessment
+    serializer_class = UserAssessmentSerializer
+    pagination_class = custom_pagination.CustomPageNumberPagination
+    sanitize_fields = ["attempt_number", "answers", "score", "passed", "time_taken"]
+    resource_name = "UserAssessment"
+
+    def get_queryset(self):
+        """
+        Return user assessments based on user role.
+        """
+        user = self.request.user
+        if user.role == "Admin":
+            return self.model.objects.all().order_by("-started_at")
+
+        elif user.role == "Instructor":
+            return self.model.objects.filter(
+                assessment__module__course__instructor=user
+            ).order_by("-started_at")
+
+        else:
+            return self.model.objects.filter(user=user).order_by("-started_at")
+
+    @extend_schema(
+        responses={200: UserAssessmentSerializer(many=True)},
+        description="Retrieve a paginated list of user assessments. Admins see all, instructors see their courses, students see their own.",
+    )
+    def get(self, request):
+        """
+        Retrieve user assessments based on user permissions.
+        """
+        try:
+            return super().get(request)
+
+        except Exception as e:
+            logger.error(f"Error retrieving UserAssessment list: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @extend_schema(
+        request=UserAssessmentSerializer,
+        responses={201: UserAssessmentSerializer},
+        description="Submit a new user assessment attempt.",
+    )
+    def post(self, request):
+        """
+        Submit a new user assessment attempt.
+        """
+        try:
+            sanitized_data = utils.sanitize_input(
+                request.data, fields=self.sanitize_fields
+            )
+            # Always set user to the authenticated user
+            sanitized_data["user"] = request.user.id
+            serializer = self.serializer_class(data=sanitized_data)
+
+            if not serializer.is_valid():
+                logger.warning(f"Invalid UserAssessment data: {serializer.errors}")
+                return Response(
+                    {
+                        "message": "Invalid input data",
+                        "errors": serializer.errors,
+                        "error_code": "INVALID_DATA",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            assessment = serializer.save()
+            logger.info(
+                f"UserAssessment created for user {request.user.username} on assessment {assessment.assessment.title}"
+            )
+
+            return Response(
+                {
+                    "message": "Assessment attempt submitted successfully",
+                    "data": serializer.data,
+                    "error_code": None,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        except ValidationError as e:
+            logger.error(f"Validation error creating UserAssessment: {str(e)}")
+            return Response(
+                {
+                    "message": "Validation error",
+                    "errors": str(e),
+                    "error_code": "VALIDATION_ERROR",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        except Exception as e:
+            logger.error(f"Unexpected error creating UserAssessment: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def _get_log_message(self, data):
+        """
+        Generate a log message for UserAssessment operations.
+        """
+        return f"User {data.get('user', 'unknown')} - Assessment {data.get('assessment', 'unknown')} (Attempt {data.get('attempt_number', '?')})"
+
+
+class UserAssessmentRetrieveUpdateDeleteView(
+    generic_views.GenericRetrieveUpdateDeleteView
+):
+    """
+    API view for retrieving, updating, or deleting a specific UserAssessment record.
+    Only the owner, instructors (for their courses), or admins can access.
+    """
+
+    permission_classes = [IsAuthenticated]
+    model = UserAssessment
+    serializer_class = UserAssessmentSerializer
+    sanitize_fields = ["attempt_number", "answers", "score", "passed", "time_taken"]
+    resource_name = "UserAssessment"
+    id_field = "id"
+
+    def get_object(self, instance_id):
+        """
+        Retrieve the UserAssessment instance with permission checks.
+        """
+        try:
+            assessment = super().get_object(instance_id)
+            user = self.request.user
+            if user.role == "Admin":
+                return assessment
+
+            if user.role == "Instructor":
+                if assessment.assessment.module.course.instructor == user:
+                    return assessment
+
+            if assessment.user == user:
+                return assessment
+
+            logger.warning(
+                f"User {user.username} attempted to access UserAssessment {instance_id} without permission"
+            )
+            raise ValidationError(
+                {
+                    "error": "You do not have permission to access this assessment attempt",
+                    "error_code": "PERMISSION_DENIED",
+                }
+            )
+
+        except ValidationError as e:
+            raise e
+
+        except Exception as e:
+            logger.error(f"Error retrieving UserAssessment {instance_id}: {str(e)}")
+            raise ValidationError(
+                {
+                    "error": "Failed to retrieve user assessment",
+                    "error_code": "USER_ASSESSMENT_RETRIEVAL_ERROR",
+                }
+            )
+
+    @extend_schema(
+        responses={200: UserAssessmentSerializer},
+        description="Retrieve a specific user assessment attempt.",
+    )
+    def get(self, request, instance_id):
+        """
+        Retrieve a specific user assessment attempt.
+        """
+        try:
+            return super().get(request, instance_id)
+
+        except ValidationError as e:
+            return Response(
+                {
+                    "message": "Invalid request",
+                    "errors": str(e),
+                    "error_code": e.detail.get("error_code", "VALIDATION_ERROR"),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except Exception as e:
+            logger.error(f"Error retrieving UserAssessment {instance_id}: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @extend_schema(
+        request=UserAssessmentSerializer,
+        responses={200: UserAssessmentSerializer},
+        description="Update a specific user assessment attempt.",
+    )
+    def patch(self, request, instance_id):
+        """
+        Update a specific user assessment attempt.
+        """
+        try:
+            sanitized_data = utils.sanitize_input(
+                request.data, fields=self.sanitize_fields
+            )
+            assessment = self.get_object(instance_id)
+            serializer = self.serializer_class(
+                assessment, data=sanitized_data, partial=True
+            )
+
+            if not serializer.is_valid():
+                logger.warning(
+                    f"Invalid UserAssessment update data for {instance_id}: {serializer.errors}"
+                )
+                return Response(
+                    {
+                        "message": "Invalid input data",
+                        "errors": serializer.errors,
+                        "error_code": "INVALID_DATA",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            serializer.save()
+            logger.info(
+                f"UserAssessment {instance_id} updated successfully by {request.user.username}"
+            )
+            return Response(
+                {
+                    "message": "Assessment attempt updated successfully",
+                    "data": serializer.data,
+                    "error_code": None,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except ValidationError as e:
+            return Response(
+                {
+                    "message": "Invalid request",
+                    "errors": str(e),
+                    "error_code": e.detail.get("error_code", "VALIDATION_ERROR"),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except Exception as e:
+            logger.error(f"Error updating UserAssessment {instance_id}: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @extend_schema(
+        responses={204: None},
+        description="Delete a specific user assessment attempt.",
+    )
+    def delete(self, request, instance_id):
+        """
+        Delete a specific user assessment attempt.
+        """
+        try:
+            assessment = self.get_object(instance_id)
+            assessment.delete()
+            logger.info(
+                f"UserAssessment {instance_id} deleted successfully by {request.user.username}"
+            )
+
+            return Response(
+                {
+                    "message": "Assessment attempt deleted successfully",
+                    "error_code": None,
+                },
+                status=status.HTTP_204_NO_CONTENT,
+            )
+
+        except ValidationError as e:
+            return Response(
+                {
+                    "message": "Invalid request",
+                    "errors": str(e),
+                    "error_code": e.detail.get("error_code", "VALIDATION_ERROR"),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except Exception as e:
+            logger.error(f"Error deleting UserAssessment {instance_id}: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def _get_log_message(self, instance):
+        """
+        Generate a log message for UserAssessment operations.
+        """
+        return f"{instance.user.username} - {instance.assessment.title} (Attempt {instance.attempt_number})"
+
+
+class CertificationListCreateView(generic_views.GenericListCreateView):
+    """
+    API view for listing and creating Certification records.
+    - GET: Lists certifications (admins see all, instructors see their courses, students see their own).
+    - POST: Allows creation of new certifications.
+    """
+
+    permission_classes = [IsAuthenticated]
+    model = Certification
+    serializer_class = CertificationSerializer
+    pagination_class = custom_pagination.CustomPageNumberPagination
+    sanitize_fields = ["certificate_type", "title", "description"]
+    resource_name = "Certification"
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == "Admin":
+            return self.model.objects.all().order_by("-issued_at")
+
+        elif user.role == "Instructor":
+            return self.model.objects.filter(course__instructor=user).order_by(
+                "-issued_at"
+            )
+
+        else:
+            return self.model.objects.filter(user=user).order_by("-issued_at")
+
+    @extend_schema(
+        responses={200: CertificationSerializer(many=True)},
+        description="Retrieve a paginated list of certifications. Admins see all, instructors see their courses, students see their own.",
+    )
+    def get(self, request):
+        try:
+            return super().get(request)
+
+        except Exception as e:
+            logger.error(f"Error retrieving Certification list: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @extend_schema(
+        request=CertificationSerializer,
+        responses={201: CertificationSerializer},
+        description="Create a new certification.",
+    )
+    def post(self, request):
+        try:
+            sanitized_data = utils.sanitize_input(
+                request.data, fields=self.sanitize_fields
+            )
+            sanitized_data["user"] = request.user.id
+            serializer = self.serializer_class(data=sanitized_data)
+
+            if not serializer.is_valid():
+                logger.warning(f"Invalid Certification data: {serializer.errors}")
+                return Response(
+                    {
+                        "message": "Invalid input data",
+                        "errors": serializer.errors,
+                        "error_code": "INVALID_DATA",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            certification = serializer.save()
+            logger.info(
+                f"Certification created for user {request.user.username} in course {certification.course.title}"
+            )
+
+            return Response(
+                {
+                    "message": "Certification created successfully",
+                    "data": serializer.data,
+                    "error_code": None,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        except ValidationError as e:
+            logger.error(f"Validation error creating Certification: {str(e)}")
+            return Response(
+                {
+                    "message": "Validation error",
+                    "errors": str(e),
+                    "error_code": "VALIDATION_ERROR",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        except Exception as e:
+            logger.error(f"Unexpected error creating Certification: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def _get_log_message(self, data):
+        return f"User {data.get('user', 'unknown')} - Course {data.get('course', 'unknown')} ({data.get('certificate_type', '?')})"
+
+
+class CertificationRetrieveUpdateDeleteView(
+    generic_views.GenericRetrieveUpdateDeleteView
+):
+    """
+    API view for retrieving, updating, or deleting a specific Certification record.
+    Only the owner, instructors (for their courses), or admins can access.
+    """
+
+    permission_classes = [IsAuthenticated]
+    model = Certification
+    serializer_class = CertificationSerializer
+    sanitize_fields = ["certificate_type", "title", "description"]
+    resource_name = "Certification"
+    id_field = "id"
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser]
+
+    def get_object(self, instance_id):
+        try:
+            cert = super().get_object(instance_id)
+            user = self.request.user
+
+            if user.role == "Admin":
+                return cert
+
+            if user.role == "Instructor" and cert.course.instructor == user:
+                return cert
+
+            if cert.user == user:
+                return cert
+
+            logger.warning(
+                f"User {user.username} attempted to access Certification {instance_id} without permission"
+            )
+            raise ValidationError(
+                {
+                    "error": "You do not have permission to access this certification",
+                    "error_code": "PERMISSION_DENIED",
+                }
+            )
+
+        except ValidationError as e:
+            raise e
+
+        except Exception as e:
+            logger.error(f"Error retrieving Certification {instance_id}: {str(e)}")
+            raise ValidationError(
+                {
+                    "error": "Failed to retrieve certification",
+                    "error_code": "CERTIFICATION_RETRIEVAL_ERROR",
+                }
+            )
+
+    @extend_schema(
+        responses={200: CertificationSerializer},
+        description="Retrieve a specific certification.",
+    )
+    def get(self, request, instance_id):
+        try:
+            return super().get(request, instance_id)
+
+        except ValidationError as e:
+            return Response(
+                {
+                    "message": "Invalid request",
+                    "errors": str(e),
+                    "error_code": e.detail.get("error_code", "VALIDATION_ERROR"),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except Exception as e:
+            logger.error(f"Error retrieving Certification {instance_id}: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @extend_schema(
+        request=CertificationSerializer,
+        responses={200: CertificationSerializer},
+        description="Update a specific certification.",
+    )
+    def patch(self, request, instance_id):
+        try:
+            sanitized_data = utils.sanitize_input(
+                request.data, fields=self.sanitize_fields
+            )
+            cert = self.get_object(instance_id)
+            serializer = self.serializer_class(cert, data=sanitized_data, partial=True)
+
+            if not serializer.is_valid():
+                logger.warning(
+                    f"Invalid Certification update data for {instance_id}: {serializer.errors}"
+                )
+                return Response(
+                    {
+                        "message": "Invalid input data",
+                        "errors": serializer.errors,
+                        "error_code": "INVALID_DATA",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            serializer.save()
+            logger.info(
+                f"Certification {instance_id} updated successfully by {request.user.username}"
+            )
+            return Response(
+                {
+                    "message": "Certification updated successfully",
+                    "data": serializer.data,
+                    "error_code": None,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except ValidationError as e:
+            return Response(
+                {
+                    "message": "Invalid request",
+                    "errors": str(e),
+                    "error_code": e.detail.get("error_code", "VALIDATION_ERROR"),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except Exception as e:
+            logger.error(f"Error updating Certification {instance_id}: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @extend_schema(
+        responses={204: None},
+        description="Delete a specific certification.",
+    )
+    def delete(self, request, instance_id):
+        try:
+            cert = self.get_object(instance_id)
+            cert.delete()
+            logger.info(
+                f"Certification {instance_id} deleted successfully by {request.user.username}"
+            )
+            return Response(
+                {"message": "Certification deleted successfully", "error_code": None},
+                status=status.HTTP_204_NO_CONTENT,
+            )
+
+        except ValidationError as e:
+            return Response(
+                {
+                    "message": "Invalid request",
+                    "errors": str(e),
+                    "error_code": e.detail.get("error_code", "VALIDATION_ERROR"),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except Exception as e:
+            logger.error(f"Error deleting Certification {instance_id}: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def _get_log_message(self, instance):
+        return f"{instance.user.username} - {instance.course.title} ({instance.certificate_type})"
+
+
+class DiscussionListCreateView(generic_views.GenericListCreateView):
+    """
+    API view for listing and creating Discussion records.
+    - GET: Lists discussions (admins see all, instructors see their courses, students see their own or all).
+    - POST: Allows creation of new discussions.
+    """
+
+    permission_classes = [IsAuthenticated]
+    model = Discussion
+    serializer_class = DiscussionSerializer
+    pagination_class = custom_pagination.CustomPageNumberPagination
+    sanitize_fields = ["title", "category", "content", "status"]
+    resource_name = "Discussion"
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == "Admin":
+            return self.model.objects.all().order_by("-created_at")
+
+        elif user.role == "Instructor":
+            return self.model.objects.filter(course__instructor=user).order_by(
+                "-created_at"
+            )
+
+        else:
+            # Students see all discussions or only their own, adjust as needed
+            return self.model.objects.all().order_by("-created_at")
+
+    @extend_schema(
+        responses={200: DiscussionSerializer(many=True)},
+        description="Retrieve a paginated list of discussions.",
+    )
+    def get(self, request):
+        try:
+            return super().get(request)
+
+        except Exception as e:
+            logger.error(f"Error retrieving Discussion list: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @extend_schema(
+        request=DiscussionSerializer,
+        responses={201: DiscussionSerializer},
+        description="Create a new discussion.",
+    )
+    def post(self, request):
+        try:
+            sanitized_data = utils.sanitize_input(
+                request.data, fields=self.sanitize_fields
+            )
+            sanitized_data["author"] = request.user.id
+            serializer = self.serializer_class(data=sanitized_data)
+
+            if not serializer.is_valid():
+                logger.warning(f"Invalid Discussion data: {serializer.errors}")
+                return Response(
+                    {
+                        "message": "Invalid input data",
+                        "errors": serializer.errors,
+                        "error_code": "INVALID_DATA",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            discussion = serializer.save()
+            logger.info(
+                f"Discussion created by user {request.user.username} with title '{discussion.title}'"
+            )
+            return Response(
+                {
+                    "message": "Discussion created successfully",
+                    "data": serializer.data,
+                    "error_code": None,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        except ValidationError as e:
+            logger.error(f"Validation error creating Discussion: {str(e)}")
+            return Response(
+                {
+                    "message": "Validation error",
+                    "errors": str(e),
+                    "error_code": "VALIDATION_ERROR",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        except Exception as e:
+            logger.error(f"Unexpected error creating Discussion: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def _get_log_message(self, data):
+        return f"Discussion '{data.get('title', 'unknown')}' by user {data.get('author', 'unknown')}"
+
+
+class DiscussionRetrieveUpdateDeleteView(generic_views.GenericRetrieveUpdateDeleteView):
+    """
+    API view for retrieving, updating, or deleting a specific Discussion record.
+    Only the author, instructors (for their courses), or admins can access.
+    """
+
+    permission_classes = [IsAuthenticated]
+    model = Discussion
+    serializer_class = DiscussionSerializer
+    sanitize_fields = ["title", "category", "content", "status"]
+    resource_name = "Discussion"
+    id_field = "id"
+
+    def get_object(self, instance_id):
+        try:
+            discussion = super().get_object(instance_id)
+            user = self.request.user
+
+            if user.role == "Admin":
+                return discussion
+            if (
+                user.role == "Instructor"
+                and discussion.course
+                and discussion.course.instructor == user
+            ):
+                return discussion
+
+            if discussion.author == user:
+                return discussion
+
+            logger.warning(
+                f"User {user.username} attempted to access Discussion {instance_id} without permission"
+            )
+            raise ValidationError(
+                {
+                    "error": "You do not have permission to access this discussion",
+                    "error_code": "PERMISSION_DENIED",
+                }
+            )
+
+        except ValidationError as e:
+            raise e
+
+        except Exception as e:
+            logger.error(f"Error retrieving Discussion {instance_id}: {str(e)}")
+            raise ValidationError(
+                {
+                    "error": "Failed to retrieve discussion",
+                    "error_code": "DISCUSSION_RETRIEVAL_ERROR",
+                }
+            )
+
+    @extend_schema(
+        responses={200: DiscussionSerializer},
+        description="Retrieve a specific discussion.",
+    )
+    def get(self, request, instance_id):
+        try:
+            return super().get(request, instance_id)
+
+        except ValidationError as e:
+            return Response(
+                {
+                    "message": "Invalid request",
+                    "errors": str(e),
+                    "error_code": getattr(e, "error_code", "VALIDATION_ERROR"),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except Exception as e:
+            logger.error(f"Error retrieving Discussion {instance_id}: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @extend_schema(
+        request=DiscussionSerializer,
+        responses={200: DiscussionSerializer},
+        description="Update a specific discussion.",
+    )
+    def patch(self, request, instance_id):
+        try:
+            sanitized_data = utils.sanitize_input(
+                request.data, fields=self.sanitize_fields
+            )
+            discussion = self.get_object(instance_id)
+            serializer = self.serializer_class(
+                discussion, data=sanitized_data, partial=True
+            )
+
+            if not serializer.is_valid():
+                logger.warning(
+                    f"Invalid Discussion update data for {instance_id}: {serializer.errors}"
+                )
+                return Response(
+                    {
+                        "message": "Invalid input data",
+                        "errors": serializer.errors,
+                        "error_code": "INVALID_DATA",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            serializer.save()
+            logger.info(
+                f"Discussion {instance_id} updated successfully by {request.user.username}"
+            )
+            return Response(
+                {
+                    "message": "Discussion updated successfully",
+                    "data": serializer.data,
+                    "error_code": None,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except ValidationError as e:
+            return Response(
+                {
+                    "message": "Invalid request",
+                    "errors": str(e),
+                    "error_code": getattr(e, "error_code", "VALIDATION_ERROR"),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except Exception as e:
+            logger.error(f"Error updating Discussion {instance_id}: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @extend_schema(
+        responses={204: None},
+        description="Delete a specific discussion.",
+    )
+    def delete(self, request, instance_id):
+        try:
+            discussion = self.get_object(instance_id)
+            discussion.delete()
+            logger.info(
+                f"Discussion {instance_id} deleted successfully by {request.user.username}"
+            )
+
+            return Response(
+                {"message": "Discussion deleted successfully", "error_code": None},
+                status=status.HTTP_204_NO_CONTENT,
+            )
+
+        except ValidationError as e:
+            return Response(
+                {
+                    "message": "Invalid request",
+                    "errors": str(e),
+                    "error_code": getattr(e, "error_code", "VALIDATION_ERROR"),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except Exception as e:
+            logger.error(f"Error deleting Discussion {instance_id}: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def _get_log_message(self, instance):
+        return f"{instance.title} by {instance.author.username}"
+
+
+class DiscussionReplyListCreateView(generic_views.GenericListCreateView):
+    """
+    API view for listing and creating DiscussionReply records.
+    - GET: Lists replies (admins see all, instructors see their courses, students see their own or all).
+    - POST: Allows creation of new replies.
+    """
+
+    permission_classes = [IsAuthenticated]
+    model = DiscussionReply
+    serializer_class = DiscussionReplySerializer
+    pagination_class = custom_pagination.CustomPageNumberPagination
+    sanitize_fields = ["content", "is_solution"]
+    resource_name = "DiscussionReply"
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == "Admin":
+            return self.model.objects.all().order_by("-created_at")
+
+        elif user.role == "Instructor":
+            return self.model.objects.filter(
+                discussion__course__instructor=user
+            ).order_by("-created_at")
+
+        else:
+            # Students see all replies or only their own, adjust as needed
+            return self.model.objects.all().order_by("-created_at")
+
+    @extend_schema(
+        responses={200: DiscussionReplySerializer(many=True)},
+        description="Retrieve a paginated list of discussion replies.",
+    )
+    def get(self, request):
+        try:
+            return super().get(request)
+
+        except Exception as e:
+            logger.error(f"Error retrieving DiscussionReply list: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @extend_schema(
+        request=DiscussionReplySerializer,
+        responses={201: DiscussionReplySerializer},
+        description="Create a new discussion reply.",
+    )
+    def post(self, request):
+        try:
+            sanitized_data = utils.sanitize_input(
+                request.data, fields=self.sanitize_fields
+            )
+            sanitized_data["author"] = request.user.id
+            serializer = self.serializer_class(data=sanitized_data)
+
+            if not serializer.is_valid():
+                logger.warning(f"Invalid DiscussionReply data: {serializer.errors}")
+                return Response(
+                    {
+                        "message": "Invalid input data",
+                        "errors": serializer.errors,
+                        "error_code": "INVALID_DATA",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            reply = serializer.save()
+            logger.info(
+                f"DiscussionReply created by user {request.user.username} for discussion {reply.discussion.id}"
+            )
+            return Response(
+                {
+                    "message": "Discussion reply created successfully",
+                    "data": serializer.data,
+                    "error_code": None,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        except ValidationError as e:
+            logger.error(f"Validation error creating DiscussionReply: {str(e)}")
+            return Response(
+                {
+                    "message": "Validation error",
+                    "errors": str(e),
+                    "error_code": "VALIDATION_ERROR",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        except Exception as e:
+            logger.error(f"Unexpected error creating DiscussionReply: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def _get_log_message(self, data):
+        return f"Reply by user {data.get('author', 'unknown')} to discussion {data.get('discussion', 'unknown')}"
+
+
+class DiscussionReplyRetrieveUpdateDeleteView(
+    generic_views.GenericRetrieveUpdateDeleteView
+):
+    """
+    API view for retrieving, updating, or deleting a specific DiscussionReply record.
+    Only the author, instructors (for their courses), or admins can access.
+    """
+
+    permission_classes = [IsAuthenticated]
+    model = DiscussionReply
+    serializer_class = DiscussionReplySerializer
+    sanitize_fields = ["content", "is_solution"]
+    resource_name = "DiscussionReply"
+    id_field = "id"
+
+    def get_object(self, instance_id):
+        try:
+            reply = super().get_object(instance_id)
+            user = self.request.user
+            if user.role == "Admin":
+                return reply
+
+            if (
+                user.role == "Instructor"
+                and reply.discussion.course
+                and reply.discussion.course.instructor == user
+            ):
+                return reply
+
+            if reply.author == user:
+                return reply
+
+            logger.warning(
+                f"User {user.username} attempted to access DiscussionReply {instance_id} without permission"
+            )
+            raise ValidationError(
+                {
+                    "error": "You do not have permission to access this reply",
+                    "error_code": "PERMISSION_DENIED",
+                }
+            )
+
+        except ValidationError as e:
+            raise e
+
+        except Exception as e:
+            logger.error(f"Error retrieving DiscussionReply {instance_id}: {str(e)}")
+            raise ValidationError(
+                {
+                    "error": "Failed to retrieve discussion reply",
+                    "error_code": "DISCUSSION_REPLY_RETRIEVAL_ERROR",
+                }
+            )
+
+    @extend_schema(
+        responses={200: DiscussionReplySerializer},
+        description="Retrieve a specific discussion reply.",
+    )
+    def get(self, request, instance_id):
+        try:
+            return super().get(request, instance_id)
+
+        except ValidationError as e:
+            return Response(
+                {
+                    "message": "Invalid request",
+                    "errors": str(e),
+                    "error_code": getattr(e, "error_code", "VALIDATION_ERROR"),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except Exception as e:
+            logger.error(f"Error retrieving DiscussionReply {instance_id}: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @extend_schema(
+        request=DiscussionReplySerializer,
+        responses={200: DiscussionReplySerializer},
+        description="Update a specific discussion reply.",
+    )
+    def patch(self, request, instance_id):
+        try:
+            sanitized_data = utils.sanitize_input(
+                request.data, fields=self.sanitize_fields
+            )
+            reply = self.get_object(instance_id)
+            serializer = self.serializer_class(reply, data=sanitized_data, partial=True)
+
+            if not serializer.is_valid():
+                logger.warning(
+                    f"Invalid DiscussionReply update data for {instance_id}: {serializer.errors}"
+                )
+                return Response(
+                    {
+                        "message": "Invalid input data",
+                        "errors": serializer.errors,
+                        "error_code": "INVALID_DATA",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            serializer.save()
+            logger.info(
+                f"DiscussionReply {instance_id} updated successfully by {request.user.username}"
+            )
+            return Response(
+                {
+                    "message": "Discussion reply updated successfully",
+                    "data": serializer.data,
+                    "error_code": None,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except ValidationError as e:
+            return Response(
+                {
+                    "message": "Invalid request",
+                    "errors": str(e),
+                    "error_code": getattr(e, "error_code", "VALIDATION_ERROR"),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except Exception as e:
+            logger.error(f"Error updating DiscussionReply {instance_id}: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @extend_schema(
+        responses={204: None},
+        description="Delete a specific discussion reply.",
+    )
+    def delete(self, request, instance_id):
+        try:
+            reply = self.get_object(instance_id)
+            reply.delete()
+            logger.info(
+                f"DiscussionReply {instance_id} deleted successfully by {request.user.username}"
+            )
+
+            return Response(
+                {
+                    "message": "Discussion reply deleted successfully",
+                    "error_code": None,
+                },
+                status=status.HTTP_204_NO_CONTENT,
+            )
+
+        except ValidationError as e:
+            return Response(
+                {
+                    "message": "Invalid request",
+                    "errors": str(e),
+                    "error_code": getattr(e, "error_code", "VALIDATION_ERROR"),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except Exception as e:
+            logger.error(f"Error deleting DiscussionReply {instance_id}: {str(e)}")
+            return Response(
+                {
+                    "message": "An unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def _get_log_message(self, instance):
+        return f"Reply by {instance.author.username} to discussion {instance.discussion.id}"

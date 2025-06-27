@@ -493,9 +493,14 @@ class UserProfileDetailSerializer(serializers.ModelSerializer):
     Handles serialization and validation for user profile details, including file uploads.
     """
 
+    user = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all(), write_only=True, required=True
+    )
+
     class Meta:
         model = UserProfile
         fields = [
+            "user",
             "bio",
             "phone_number",
             "dob",

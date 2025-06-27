@@ -1,8 +1,7 @@
 from django.db import models
-import uuid
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from .manager import UserManager
-from utils import choices, logging_config
+from utils import choices, logging_config, uuid
 
 # Initialize logger from the provided logging setup
 logger = logging_config.setup_logging()
@@ -14,9 +13,14 @@ class User(AbstractBaseUser, PermissionsMixin):
     Uses email for authentication and supports additional user fields with UUID primary key.
     """
 
-    id = models.UUIDField(
-        primary_key=True, default=uuid.uuid4, editable=False, unique=True, null=False
+    id = models.BigIntegerField(
+        primary_key=True,
+        default=uuid.generate_short_numeric_uuid,
+        editable=False,
+        unique=True,
+        null=False,
     )
+
     username = models.CharField(max_length=255, unique=True)
     first_name = models.CharField(max_length=255, null=False, blank=False)
     middle_name = models.CharField(max_length=255, null=True, blank=True)
@@ -84,8 +88,12 @@ class UserProfile(models.Model):
     Uses UUID as primary key and maintains a one-to-one relationship with User.
     """
 
-    id = models.UUIDField(
-        primary_key=True, default=uuid.uuid4, editable=False, unique=True, null=False
+    id = models.BigIntegerField(
+        primary_key=True,
+        default=uuid.generate_short_numeric_uuid,
+        editable=False,
+        unique=True,
+        null=False,
     )
     user = models.OneToOneField(
         User,
@@ -156,8 +164,12 @@ class OneTimePassword(models.Model):
     Uses UUID as primary key and maintains a one-to-one relationship with User.
     """
 
-    id = models.UUIDField(
-        primary_key=True, default=uuid.uuid4, editable=False, unique=True, null=False
+    id = models.BigIntegerField(
+        primary_key=True,
+        default=uuid.generate_short_numeric_uuid,
+        editable=False,
+        unique=True,
+        null=False,
     )
     user = models.OneToOneField(
         User,

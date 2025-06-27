@@ -290,13 +290,6 @@ const RefugeeDashboard = () => {
             <QuickAction>Browse Courses</QuickAction>
           </ProgressCard>
 
-          <ProgressCard onClick={() => navigate('/assessments')}>
-            <SubTitle>Assessments</SubTitle>
-            <Stat>{stats.assessmentsCompleted}</Stat>
-            <StatLabel>Completed Assessments</StatLabel>
-            <QuickAction>Take Assessment</QuickAction>
-          </ProgressCard>
-
           <ProgressCard onClick={() => navigate('/certificates')}>
             <SubTitle>Certificates</SubTitle>
             <Stat>{stats.certificates}</Stat>

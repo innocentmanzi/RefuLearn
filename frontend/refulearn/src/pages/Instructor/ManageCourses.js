@@ -190,6 +190,45 @@ const CardActions = styled.div`
   margin-top: 0.5rem;
 `;
 
+const HeaderContainer = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  gap: 1rem;
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+`;
+
+const SearchContainer = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  max-width: 400px;
+  
+  @media (max-width: 768px) {
+    max-width: 100%;
+  }
+`;
+
+const SearchInput = styled.input`
+  flex: 1;
+  padding: 0.7rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 1rem;
+  
+  &:focus {
+    outline: none;
+    border-color: ${({ theme }) => theme.colors.primary};
+    box-shadow: 0 0 0 2px ${({ theme }) => theme.colors.primary}20;
+  }
+`;
+
 const initialCourses = [
   { id: 1, title: 'Intro to Programming', description: 'Learn the basics of programming.' },
   { id: 2, title: 'Web Development', description: 'Build modern web applications.' },
@@ -212,6 +251,7 @@ const ManageCourses = () => {
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 900);
   const [showCourseBuilder, setShowCourseBuilder] = useState(false);
   const [modalMode, setModalMode] = useState('add'); // 'add' or 'edit'
+  const [searchTerm, setSearchTerm] = useState('');
 
   const getInitialCourseState = () => ({
     id: null,
@@ -404,14 +444,31 @@ const ManageCourses = () => {
     setBuilderCourse({ ...builderCourse, resourceUploads: updated });
   };
 
+  const filteredCourses = courses.filter(course =>
+    course.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    course.description.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <Container>
       <Title>Manage Courses</Title>
-      <AddButton onClick={() => openCourseBuilder('add')}>+ Add New Course</AddButton>
+      
+      <HeaderContainer>
+        <AddButton onClick={() => openCourseBuilder('add')}>+ Add New Course</AddButton>
+        
+        <SearchContainer>
+          <SearchInput
+            type="text"
+            placeholder="Search courses..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </SearchContainer>
+      </HeaderContainer>
 
       {isMobile ? (
         <CoursesGrid>
-          {courses.map(course => (
+          {filteredCourses.map(course => (
             <CourseCard key={course.id}>
               <CourseInfo>
                 <CourseTitle>{course.title}</CourseTitle>
@@ -434,7 +491,7 @@ const ManageCourses = () => {
             </tr>
           </thead>
           <tbody>
-            {courses.map(course => (
+            {filteredCourses.map(course => (
               <tr key={course.id}>
                 <Td>{course.title}</Td>
                 <Td>{course.description}</Td>

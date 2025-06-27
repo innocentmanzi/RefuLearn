@@ -91,3 +91,22 @@ DISCUSSION_STATUS = [
     ("Accepted", "Accepted"),
     ("Rejected", "Rejected"),
 ]
+
+# Job types for job opportunities
+JOB_TYPES = [
+    ("Full Time", "Full Time"),
+    ("Part Time", "Part Time"),
+    ("Contract", "Contract"),
+    ("Freelance", "Freelance"),
+    ("Internship", "Internship"),
+]
+
+# Choices for job application status
+APPLICATION_STATUS_CHOICES = [
+    ("Submitted", "Submitted"),
+    ("Under Review", "Under Review"),
+    ("Shortlisted", "Shortlisted"),
+    ("Interviewed", "Interviewed"),
+    ("Accepted", "Accepted"),
+    ("Rejected", "Rejected"),
+]

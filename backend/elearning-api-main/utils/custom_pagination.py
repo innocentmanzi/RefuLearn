@@ -46,6 +46,7 @@ class CustomPageNumberPagination(PageNumberPagination):
                     self.max_page_size,
                 )
                 page_size = self.max_page_size
+
             return page_size
 
         except ValueError as e:
@@ -71,6 +72,7 @@ class CustomPageNumberPagination(PageNumberPagination):
                 query_params[self.page_size_query_param] = [
                     str(self.page.paginator.per_page)
                 ]
+
             return f"{parsed_url.path}?{urlencode(query_params, doseq=True)}"
 
         except Exception as e:
@@ -97,6 +99,7 @@ class CustomPageNumberPagination(PageNumberPagination):
                 query_params[self.page_size_query_param] = [
                     str(self.page.paginator.per_page)
                 ]
+
             return f"{parsed_url.path}?{urlencode(query_params, doseq=True)}"
 
         except Exception as e:
@@ -123,6 +126,7 @@ class CustomPageNumberPagination(PageNumberPagination):
                 query_params[self.page_size_query_param] = [
                     str(self.page.paginator.per_page)
                 ]
+
             return f"{parsed_url.path}?{urlencode(query_params, doseq=True)}"
 
         except Exception as e:
@@ -149,6 +153,7 @@ class CustomPageNumberPagination(PageNumberPagination):
                 query_params[self.page_size_query_param] = [
                     str(self.page.paginator.per_page)
                 ]
+
             return f"{parsed_url.path}?{urlencode(query_params, doseq=True)}"
 
         except Exception as e:
