@@ -1,0 +1,9 @@
+@echo off
+echo Stopping any existing Node.js processes...
+taskkill /F /IM node.exe /T 2>NUL
+echo Waiting for processes to stop...
+timeout /t 3 /nobreak >NUL
+
+echo Starting RefuLearn backend server...
+cd /d "%~dp0"
+npm start 
