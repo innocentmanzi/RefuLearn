@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useNavigate, Link } from 'react-router-dom';
 import Logo from '../../components/Logo';
 import { useUser } from '../../contexts/UserContext';
+import { useTranslation } from 'react-i18next';
 
 const Container = styled.div`
   min-height: 100vh;
@@ -111,8 +112,16 @@ const Login = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login } = useUser();
+  const { login, isAuthenticated } = useUser();
   const navigate = useNavigate();
+  
+  // Redirect authenticated users to their dashboard
+  useEffect(() => {
+    if (isAuthenticated) {
+      console.log('🔄 User already authenticated, redirecting to dashboard');
+      navigate('/dashboard');
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

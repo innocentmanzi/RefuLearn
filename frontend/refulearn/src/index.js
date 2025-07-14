@@ -61,10 +61,20 @@ root.render(
   </MuiThemeProvider>
 );
 
-// If you want your app to work offline and load faster, you can change
-// unregister() to register() below. Note this comes with some pitfalls.
-// Learn more about service workers: https://cra.link/PWA
-serviceWorkerRegistration.unregister();
+// Enable offline functionality and faster loading with service worker
+// This enables your app to work offline and load faster
+serviceWorkerRegistration.register({
+  onSuccess: (registration) => {
+    console.log('✅ Service Worker registered successfully for offline use');
+  },
+  onUpdate: (registration) => {
+    console.log('🔄 New content available, please refresh');
+    // Show update notification to user
+    if (window.confirm('New version available! Refresh to update?')) {
+      window.location.reload();
+    }
+  }
+});
 
 // If you want to start measuring performance in your app, pass a function
 // to log results (for example: reportWebVitals(console.log))

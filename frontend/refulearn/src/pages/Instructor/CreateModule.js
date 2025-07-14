@@ -141,6 +141,7 @@ export default function CreateModule() {
               content: typeof c === 'string' ? c : c.content || c
             }))
           : editModule.content ? [{ id: 0, content: editModule.content }] : [],
+        contentItems: editModule.contentItems || [],
         assessments: editModule.assessments || [],
         quizzes: editModule.quizzes || [],
         discussions: editModule.discussions || [],
@@ -156,6 +157,7 @@ export default function CreateModule() {
     title: '',
     description: '',
     content: [],
+    contentItems: [],
     assessments: [],
     quizzes: [],
     discussions: [],
@@ -176,6 +178,19 @@ export default function CreateModule() {
   const [showQuizCreator, setShowQuizCreator] = useState(false);
   const [editingAssessment, setEditingAssessment] = useState(null);
   const [editingQuiz, setEditingQuiz] = useState(null);
+  const [contentItems, setContentItems] = useState(
+    editModule?.contentItems || 
+    (location.state?.module?.contentItems) || 
+    []
+  );
+  const [contentItemDraft, setContentItemDraft] = useState({
+    type: 'article',
+    title: '',
+    url: '',
+    description: '',
+    file: null,
+    fileName: ''
+  });
 
   // Load existing assessments when in edit mode
   useEffect(() => {
@@ -252,6 +267,51 @@ export default function CreateModule() {
       });
     setContentDraft({ content: '' });
   };
+
+  const handleAddContentItem = () => {
+    if (!contentItemDraft.title) {
+      alert('Please enter a title for the content item');
+      return;
+    }
+
+    const newItem = {
+      ...contentItemDraft,
+      id: `content_item_${Date.now()}_${Math.random()}`,
+      dateAdded: new Date().toISOString()
+    };
+
+    console.log('🔧 ADD CONTENT ITEM - Adding item:', newItem);
+    console.log('🔧 ADD CONTENT ITEM - Current contentItems:', contentItems);
+    
+    setContentItems([...contentItems, newItem]);
+    
+    console.log('🔧 ADD CONTENT ITEM - New contentItems will be:', [...contentItems, newItem]);
+    
+    setContentItemDraft({
+      type: 'article',
+      title: '',
+      url: '',
+      description: '',
+      file: null,
+      fileName: ''
+    });
+  };
+
+  const handleRemoveContentItem = (itemId) => {
+    setContentItems(contentItems.filter(item => item.id !== itemId));
+  };
+
+  const handleEditContentItem = (item) => {
+    setContentItemDraft({
+      type: item.type,
+      title: item.title,
+      url: item.url || '',
+      description: item.description || '',
+      file: item.file || null,
+      fileName: item.fileName || ''
+    });
+    handleRemoveContentItem(item.id);
+  };
   const handleAddAssessment = (assessmentData, originalAssessment) => {
     if (originalAssessment) {
       // Editing existing assessment
@@ -296,20 +356,129 @@ export default function CreateModule() {
     }
     setDiscussionDraft({ title: '', content: '' });
   };
-  const handleAddQuiz = (quizData, originalQuiz) => {
-    if (originalQuiz) {
-      // Editing existing quiz
-      setQuizzes(quizzes.map(q => 
-        q.id === originalQuiz.id ? { ...quizData, id: originalQuiz.id } : q
-      ));
-    } else {
-      // Adding new quiz
-      setQuizzes([...quizzes, { ...quizData, id: `quiz_${Date.now()}_${Math.random()}` }]);
+  const handleAddQuiz = async (quizData, originalQuiz) => {
+    try {
+      const token = localStorage.getItem('token');
+      
+      // Get course ID and module ID from the current context
+      const courseId = courseData?._id || courseData?.courseId || location.state?.courseData?._id;
+      const moduleId = module?._id || editModule?._id || `module_${Date.now()}_temp`;
+      
+      console.log('🧠 Saving quiz immediately:', quizData.title);
+      console.log('📍 Course Data:', courseData);
+      console.log('📍 Course ID:', courseId, 'Module ID:', moduleId);
+      console.log('📍 Module state:', module);
+      
+      // Handle case where we might not have courseId yet for new modules
+      if (!courseId) {
+        console.warn('⚠️ No course ID available - quiz will be created without course association');
+        // You can still create the quiz, but it won't be associated with a specific course/module initially
+      }
+      
+      const quizToSave = {
+        title: quizData.title,
+        description: quizData.description || '',
+        courseId: courseId || '', // Allow empty courseId for now
+        moduleId: moduleId || '', // Allow empty moduleId for now  
+        duration: quizData.timeLimit || 30,
+        totalPoints: quizData.totalPoints || quizData.questions?.reduce((sum, q) => sum + (q.points || 1), 0) || 0,
+        passingScore: quizData.passingScore || 70,
+        dueDate: quizData.dueDate || null,
+        questions: quizData.questions || []
+      };
+      
+      console.log('💾 Quiz data to save:', quizToSave);
+      
+      if (originalQuiz && originalQuiz._id) {
+        // Update existing quiz
+        console.log('🔄 Updating existing quiz:', originalQuiz._id);
+        const response = await fetch(`/api/instructor/quizzes/${originalQuiz._id}`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(quizToSave),
+        });
+        
+        if (response.ok) {
+          await response.json(); // Just consume the response
+          console.log('✅ Quiz updated successfully');
+          
+          // Update local state
+          const updatedQuiz = { ...quizData, id: originalQuiz.id, _id: originalQuiz._id };
+          setQuizzes(quizzes.map(q => 
+            q.id === originalQuiz.id ? updatedQuiz : q
+          ));
+          
+          // Also update the module state
+          setModule(prevModule => ({
+            ...prevModule,
+            quizzes: (prevModule.quizzes || []).map(q => 
+              q.id === originalQuiz.id ? updatedQuiz : q
+            )
+          }));
+          
+          console.log('✅ Quiz updated in local state:', updatedQuiz);
+          alert('Quiz updated successfully!');
+        } else {
+          const error = await response.json();
+          console.error('Failed to update quiz:', error);
+          alert('Failed to update quiz: ' + (error.message || 'Unknown error'));
+          return;
+        }
+        
+      } else {
+        // Create new quiz
+        console.log('🆕 Creating new quiz');
+        const response = await fetch('/api/instructor/quizzes', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(quizToSave),
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          const savedQuiz = result.data?.quiz || result;
+          console.log('✅ Quiz created successfully:', savedQuiz);
+          
+          // Add to local state with the returned _id
+          const newQuiz = { 
+            ...quizData, 
+            id: `quiz_${Date.now()}_${Math.random()}`,
+            _id: savedQuiz._id || savedQuiz.id
+          };
+          setQuizzes([...quizzes, newQuiz]);
+          
+          // Also update the module state to include this quiz
+          setModule(prevModule => ({
+            ...prevModule,
+            quizzes: [...(prevModule.quizzes || []), newQuiz]
+          }));
+          
+          console.log('✅ Quiz added to local state:', newQuiz);
+          alert('Quiz created and saved successfully!');
+        } else {
+          const error = await response.json();
+          console.error('Failed to create quiz:', error);
+          alert('Failed to create quiz: ' + (error.message || 'Unknown error'));
+          return;
+        }
+      }
+      
+    } catch (err) {
+      console.error('Error saving quiz:', err);
+      alert('Error saving quiz: ' + err.message);
+      return;
     }
+    
     setEditingQuiz(null);
   };
   const handleSaveModuleAndAddAnother = () => {
-    const newModule = { ...module, quizzes };
+    const newModule = { ...module, quizzes, contentItems };
     setModules([...modules, newModule]);
     setModule({ 
       title: '', 
@@ -321,6 +490,15 @@ export default function CreateModule() {
       order: modules.length + 2
     });
     setQuizzes([]);
+    setContentItems([]);
+    setContentItemDraft({
+      type: 'article',
+      title: '',
+      url: '',
+      description: '',
+      file: null,
+      fileName: ''
+    });
   };
   const handleFinishAndCreateCourse = async () => {
     try {
@@ -348,6 +526,7 @@ export default function CreateModule() {
           title: mod.title || 'Untitled Module',
           description: mod.description || '',
           content: Array.isArray(mod.content) ? mod.content.map(c => typeof c === 'string' ? c : c.content) : [],
+          contentItems: mod.contentItems || contentItems || [],
           assessments: mod.assessments || [],
           quizzes: mod.quizzes || [],
           discussions: mod.discussions || [],
@@ -374,6 +553,10 @@ export default function CreateModule() {
       }
       
       console.log('All modules being sent:', processedModules); // Debug log
+      console.log('🔧 SAVE COURSE - contentItems in modules:', processedModules.map(m => ({ 
+        title: m.title, 
+        contentItems: m.contentItems 
+      })));
       formData.append('modules', JSON.stringify(processedModules));
       
       // Get auth token
@@ -448,10 +631,14 @@ export default function CreateModule() {
         content_text: Array.isArray(module.content) 
           ? module.content.map(c => typeof c === 'string' ? c : c.content).join('\n')
           : module.content || '',
+        contentItems: JSON.stringify(contentItems || []),
         duration: module.duration || '30 minutes',
         isMandatory: module.isMandatory !== undefined ? module.isMandatory : true,
         order: module.order || 1
       };
+
+      console.log('🔧 SAVE MODULE - contentItems being sent:', contentItems);
+      console.log('🔧 SAVE MODULE - moduleData:', moduleData);
 
       console.log('Saving module data:', moduleData);
 
@@ -555,16 +742,22 @@ export default function CreateModule() {
     for (const quiz of quizzes || []) {
       try {
         const quizData = {
-          ...quiz,
+          title: quiz.title,
+          description: quiz.description || '',
+          courseId,
           moduleId,
-          courseId
+          duration: quiz.timeLimit || 30,
+          totalPoints: quiz.totalPoints || 0,
+          passingScore: 70,
+          dueDate: quiz.dueDate || null,
+          questions: quiz.questions || []
         };
 
         console.log('🧠 Saving quiz:', quiz.title);
 
         if (quiz._id) {
-          // Update existing quiz - using comprehensive endpoint  
-          await fetch(`/api/courses/modules/${moduleId}/quizzes/${quiz._id}`, {
+          // Update existing quiz - using instructor endpoint  
+          await fetch(`/api/instructor/quizzes/${quiz._id}`, {
             method: 'PUT',
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -573,8 +766,8 @@ export default function CreateModule() {
             body: JSON.stringify(quizData),
           });
         } else {
-          // Create new quiz - using module-specific endpoint
-          const response = await fetch(`/api/courses/modules/${moduleId}/quizzes`, {
+          // Create new quiz - using instructor endpoint
+          const response = await fetch('/api/instructor/quizzes', {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -719,12 +912,70 @@ export default function CreateModule() {
           rows="2" 
         />
         
-        {/* Content Type Selection */}
-        <div style={{ marginTop: '16px', marginBottom: '16px' }}>
+        {/* Content Items Management */}
+        <SectionTitle>Content Items</SectionTitle>
+        
+        {/* Content Items List */}
+        {contentItems.length > 0 && (
+          <ItemList style={{ marginBottom: '1rem' }}>
+            {contentItems.map((item, idx) => (
+              <Item key={item.id || idx}>
+                <div style={{ flex: 1 }}>
+                  <ItemTitle style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ 
+                      background: item.type === 'article' ? '#e3f2fd' : 
+                                 item.type === 'video' ? '#fce4ec' : 
+                                 item.type === 'audio' ? '#f3e5f5' : 
+                                 item.type === 'file' ? '#e8f5e8' : '#fff3e0',
+                      color: item.type === 'article' ? '#1976d2' : 
+                             item.type === 'video' ? '#c2185b' : 
+                             item.type === 'audio' ? '#7b1fa2' : 
+                             item.type === 'file' ? '#388e3c' : '#f57c00',
+                      padding: '0.2rem 0.5rem',
+                      borderRadius: '12px',
+                      fontSize: '0.7rem',
+                      fontWeight: '600',
+                      textTransform: 'uppercase'
+                    }}>
+                      {item.type}
+                    </span>
+                    {item.title}
+                  </ItemTitle>
+                  {item.url && (
+                    <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.25rem' }}>
+                      URL: {item.url}
+                    </div>
+                  )}
+                  {item.fileName && (
+                    <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.25rem' }}>
+                      File: {item.fileName}
+                    </div>
+                  )}
+                  {item.description && (
+                    <div style={{ fontSize: '0.8rem', color: '#888', marginTop: '0.25rem' }}>
+                      {item.description}
+                    </div>
+                  )}
+                </div>
+                <ItemActions>
+                  <ActionBtn onClick={() => handleEditContentItem(item)} title="Edit">
+                    <Edit fontSize="small" />
+                  </ActionBtn>
+                  <ActionBtn onClick={() => handleRemoveContentItem(item.id)} title="Delete">
+                    <Delete fontSize="small" />
+                  </ActionBtn>
+                </ItemActions>
+              </Item>
+            ))}
+          </ItemList>
+        )}
+        
+        {/* Add Content Item Form */}
+        <div style={{ background: '#f8f9fa', padding: '1rem', borderRadius: '8px', marginBottom: '1rem' }}>
           <Label style={{ color: BLUE }}>Content Type</Label>
           <select 
-            value={module.content_type || 'article'} 
-            onChange={e => setModule({ ...module, content_type: e.target.value })}
+            value={contentItemDraft.type} 
+            onChange={e => setContentItemDraft({ ...contentItemDraft, type: e.target.value })}
             style={{
               width: '100%',
               padding: '0.7rem',
@@ -738,25 +989,59 @@ export default function CreateModule() {
             <option value="article">Article</option>
             <option value="video">Video</option>
             <option value="audio">Audio</option>
-            <option value="content">Text Content</option>
             <option value="file">File/Document</option>
           </select>
           
-          {/* File Upload based on content type */}
-          {(module.content_type === 'video' || module.content_type === 'audio' || module.content_type === 'file') && (
+          <Label style={{ color: BLUE }}>Title</Label>
+          <Input 
+            value={contentItemDraft.title} 
+            onChange={e => setContentItemDraft({ ...contentItemDraft, title: e.target.value })}
+            placeholder="Enter content title" 
+          />
+          
+          <Label style={{ color: BLUE }}>Description (optional)</Label>
+          <TextArea 
+            value={contentItemDraft.description} 
+            onChange={e => setContentItemDraft({ ...contentItemDraft, description: e.target.value })}
+            placeholder="Brief description of this content item" 
+            rows="2"
+          />
+          
+          {/* URL input for articles and videos */}
+          {(contentItemDraft.type === 'article' || contentItemDraft.type === 'video') && (
             <div style={{ marginBottom: '1rem' }}>
-              <Label style={{ color: BLUE }}>Upload {module.content_type === 'video' ? 'Video' : module.content_type === 'audio' ? 'Audio' : 'File'}</Label>
+              <Label style={{ color: BLUE }}>
+                {contentItemDraft.type === 'article' ? 'Article URL' : 'Video URL (YouTube, Vimeo, etc.)'}
+              </Label>
+              <Input 
+                value={contentItemDraft.url} 
+                onChange={e => setContentItemDraft({ ...contentItemDraft, url: e.target.value })}
+                placeholder={contentItemDraft.type === 'article' ? 'https://example.com/article' : 'https://www.youtube.com/watch?v=...'} 
+              />
+            </div>
+          )}
+          
+          {/* File Upload for videos, audio, and files */}
+          {(contentItemDraft.type === 'video' || contentItemDraft.type === 'audio' || contentItemDraft.type === 'file') && (
+            <div style={{ marginBottom: '1rem' }}>
+              <Label style={{ color: BLUE }}>
+                Upload {contentItemDraft.type === 'video' ? 'Video' : contentItemDraft.type === 'audio' ? 'Audio' : 'File'}
+              </Label>
               <input
                 type="file"
                 accept={
-                  module.content_type === 'video' ? 'video/*' :
-                  module.content_type === 'audio' ? 'audio/*' :
+                  contentItemDraft.type === 'video' ? 'video/*' :
+                  contentItemDraft.type === 'audio' ? 'audio/*' :
                   '*/*'
                 }
                 onChange={e => {
                   const file = e.target.files[0];
                   if (file) {
-                    setModule({ ...module, contentFile: file, contentFileName: file.name });
+                    setContentItemDraft({ 
+                      ...contentItemDraft, 
+                      file: file, 
+                      fileName: file.name 
+                    });
                   }
                 }}
                 style={{
@@ -767,37 +1052,22 @@ export default function CreateModule() {
                   fontSize: '1rem'
                 }}
               />
-              {module.contentFileName && (
+              {contentItemDraft.fileName && (
                 <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.5rem' }}>
-                  Selected: {module.contentFileName}
+                  Selected: {contentItemDraft.fileName}
                 </div>
               )}
             </div>
           )}
           
-          {/* URL input for video content */}
-          {module.content_type === 'video' && (
-            <div style={{ marginBottom: '1rem' }}>
-              <Label style={{ color: BLUE }}>Or Video URL (YouTube, Vimeo, etc.)</Label>
-              <Input 
-                value={module.videoUrl || ''} 
-                onChange={e => setModule({ ...module, videoUrl: e.target.value })}
-                placeholder="https://www.youtube.com/watch?v=..." 
-              />
-            </div>
-          )}
-          
-          {/* Additional fields for article type */}
-          {module.content_type === 'article' && (
-            <div style={{ marginBottom: '1rem' }}>
-              <Label style={{ color: BLUE }}>Article URL (optional)</Label>
-              <Input 
-                value={module.articleUrl || ''} 
-                onChange={e => setModule({ ...module, articleUrl: e.target.value })}
-                placeholder="https://example.com/article" 
-              />
-            </div>
-          )}
+          <SmallAddButton 
+            onClick={handleAddContentItem} 
+            disabled={!contentItemDraft.title || (contentItemDraft.type === 'article' && !contentItemDraft.url && !contentItemDraft.file)}
+          >
+            Add {contentItemDraft.type === 'article' ? 'Article' : 
+                  contentItemDraft.type === 'video' ? 'Video' : 
+                  contentItemDraft.type === 'audio' ? 'Audio' : 'File'}
+          </SmallAddButton>
         </div>
 
 

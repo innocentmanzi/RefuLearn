@@ -383,21 +383,29 @@ const Jobs = () => {
     setLoading(true);
     setError('');
     try {
-      const response = await fetch('/api/employer/jobs/employer', {
+      console.log('🔍 Fetching employer jobs from: /api/jobs/employer/jobs');
+      const token = localStorage.getItem('token');
+      console.log('🔑 Token exists:', !!token);
+      
+      const response = await fetch('/api/jobs/employer/jobs', {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+          'Authorization': `Bearer ${token || ''}`
         }
       });
 
+      console.log('📊 Response status:', response.status);
       const data = await response.json();
+      console.log('📋 Response data:', data);
 
       if (data.success) {
+        console.log('✅ Jobs found:', data.data.jobs?.length || 0);
         setJobs(data.data.jobs || []);
       } else {
+        console.error('❌ API returned error:', data.message);
         setError(data.message || 'Failed to fetch jobs');
       }
     } catch (err) {
-      console.error('Jobs fetch error:', err);
+      console.error('❌ Jobs fetch error:', err);
       setError('Network error. Please try again.');
     } finally {
       setLoading(false);

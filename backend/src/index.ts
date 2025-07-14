@@ -28,6 +28,7 @@ import assessmentRoutes from './routes/assessment.routes';
 import certificateRoutes from './routes/certificate.routes';
 import scholarshipRoutes from './routes/scholarship.routes';
 import peerLearningRoutes from './routes/peerLearning.routes';
+import quizSessionRoutes from './routes/quiz-session.routes';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
@@ -123,9 +124,43 @@ app.get('/health', (_req, res) => {
   });
 });
 
+// Simple test route to verify server is working
+app.get('/api/test-server', (_req, res) => {
+  console.log('🔍 SERVER TEST ROUTE HIT');
+  res.json({ message: 'Server test route working', timestamp: new Date().toISOString() });
+});
+
+// Direct file serving route for submissions (bypassing course router)
+app.get('/api/submission-file/:submissionId', async (req, res) => {
+  console.log('📁 DIRECT FILE ROUTE HIT - Submission ID:', req.params.submissionId);
+  try {
+    // This is a simple version without database lookup for testing
+    const fs = require('fs');
+    const path = require('path');
+    
+    // For testing, serve the specific file - replace with actual database lookup later
+    const testFilePath = 'uploads/general/Innocent-Manzi-Privacy In Digital Age-1752407904305-62023978.pdf';
+    
+    if (fs.existsSync(testFilePath)) {
+      console.log('📁 File found, serving:', testFilePath);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'inline; filename="submission.pdf"');
+      const fileStream = fs.createReadStream(testFilePath);
+      fileStream.pipe(res);
+    } else {
+      console.log('❌ File not found:', testFilePath);
+      res.status(404).json({ error: 'File not found' });
+    }
+  } catch (error) {
+    console.error('❌ Error serving file:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', authenticateToken, userRoutes);
+console.log('🔧 Mounting course routes at /api/courses');
 app.use('/api/courses', courseRoutes);
 app.use('/api/jobs', jobRoutes);
 app.use('/api/admin', authenticateToken, adminRoutes);
@@ -136,6 +171,7 @@ app.use('/api/assessments', assessmentRoutes);
 app.use('/api/certificates', certificateRoutes);
 app.use('/api/scholarships', scholarshipRoutes);
 app.use('/api/peer-learning', peerLearningRoutes);
+app.use('/api/quiz-sessions', authenticateToken, quizSessionRoutes);
 app.use('/', swaggerUi.serve, swaggerUi.setup(apiDocs));
 
 // Socket.IO connection handling

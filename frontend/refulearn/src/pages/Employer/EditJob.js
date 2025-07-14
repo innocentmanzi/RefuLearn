@@ -127,6 +127,7 @@ const EditJob = () => {
   const [successMessage, setSuccessMessage] = useState('');
   const [jobDetails, setJobDetails] = useState({
     title: '',
+    company: '',
     location: '',
     description: '',
     requirements: [],
@@ -159,9 +160,16 @@ const EditJob = () => {
       console.log('Response status:', response.status);
       const data = await response.json();
       console.log('Response data:', data);
+      console.log('Job data received:', data.data?.job);
 
       if (data.success && data.data && data.data.job) {
         const job = data.data.job;
+        console.log('Job fields check:', {
+          company: job.company,
+          application_link: job.application_link,
+          title: job.title,
+          description: job.description
+        });
         // Parse salary from salary_range if salary object doesn't exist
         let salaryData = { min: '', max: '', currency: 'USD' };
         
@@ -186,6 +194,7 @@ const EditJob = () => {
 
         setJobDetails({
           title: job.title || '',
+          company: job.company || '',
           location: job.location || '',
           description: job.description || '',
           requirements: job.required_skills || job.requirements || [],
@@ -250,6 +259,7 @@ const EditJob = () => {
     
     const jobToSend = {
       title: jobDetails.title.trim(),
+      company: jobDetails.company.trim(),
       description: jobDetails.description.trim(),
       location: jobDetails.location.trim(),
       job_type: jobDetails.employmentType,
@@ -365,6 +375,17 @@ const EditJob = () => {
               value={jobDetails.title}
               onChange={handleInputChange}
               placeholder="Job Title"
+              required
+            />
+          </FormGroup>
+          <FormGroup>
+            <Label>Company Name</Label>
+            <Input
+              type="text"
+              name="company"
+              value={jobDetails.company}
+              onChange={handleInputChange}
+              placeholder="Company Name"
               required
             />
           </FormGroup>

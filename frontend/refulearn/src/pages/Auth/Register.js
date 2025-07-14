@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useNavigate, Link } from 'react-router-dom';
 import Logo from '../../components/Logo';
 import { useTranslation } from 'react-i18next';
+import { useUser } from '../../contexts/UserContext';
 
 const Container = styled.div`
   min-height: 100vh;
@@ -166,6 +167,15 @@ const Register = () => {
   const [otp, setOtp] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
   const navigate = useNavigate();
+  const { login, isAuthenticated } = useUser();
+  
+  // Redirect authenticated users to their dashboard
+  useEffect(() => {
+    if (isAuthenticated) {
+      console.log('🔄 User already authenticated, redirecting to dashboard');
+      navigate('/dashboard');
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

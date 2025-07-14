@@ -407,7 +407,7 @@ const Jobs = () => {
   };
 
   const handleViewMore = (item, type) => {
-    navigate('/jobs/detail', { state: { ...item, type } });
+    navigate(`/jobs/detail/${type}/${item._id}`, { state: { ...item, type } });
   };
 
   if (loading) {

@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { UserProvider, useUser } from './contexts/UserContext';
 import { LanguageProvider } from './contexts/LanguageContext';
+
 import Landing from './pages/Landing/Landing';
 import Login from './pages/Auth/Login';
 import Register from './pages/Auth/Register';
@@ -50,424 +51,524 @@ import MyGrades from './pages/Refugee/MyGrades';
 import CourseDetail from './pages/Refugee/CourseDetail';
 import StudentCourseOverview from './pages/Refugee/StudentCourseOverview';
 import SharedModuleContent from './components/ModuleContent';
+import ContentItemViewer from './components/ContentItemViewer';
+import InstructorQuizPreview from './pages/Instructor/QuizPreview';
+import QuizSubmissions from './pages/Instructor/QuizSubmissions';
+
+// ROUTING & AUTHENTICATION FIX APPLIED - 2025-01-02 - v6 - NAMING CONFLICT FIXED
+// CACHE BUSTER - Force complete reload - Timestamp: 1735740000000
 
 function AppRoutes() {
-  const { isAuthenticated, userRole, logout } = useUser();
+  const { isAuthenticated, userRole, logout, loading } = useUser();
+
+  // Show loading spinner while authentication is being checked
+  if (loading) {
+    return (
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '100vh',
+        flexDirection: 'column',
+        gap: '1rem'
+      }}>
+        <div style={{ fontSize: '1.2rem', color: '#007BFF' }}>Loading...</div>
+        <div style={{ 
+          width: '40px', 
+          height: '40px', 
+          border: '4px solid #f3f3f3', 
+          borderTop: '4px solid #007BFF', 
+          borderRadius: '50%',
+          animation: 'spin 1s linear infinite'
+        }}></div>
+        <style>{`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  console.log('🔍 AppRoutes - Authentication state:', { 
+    isAuthenticated, 
+    userRole, 
+    loading,
+    currentPath: window.location.pathname 
+  });
+
+  // Add cache buster logging
+  console.log('🚨 CACHE BUSTER ACTIVE - App.js reloaded at:', Date.now());
+  console.log('🎉 NAMING CONFLICT FIX APPLIED - SharedModuleContent now has unique export name');
+  console.log('🎉 Current URL:', window.location.href);
+  console.log('🎉 If you see module content loading, the conflict is resolved!');
 
   return (
-    <Routes>
-      <Route path="/" element={<Landing />} />
-      {!isAuthenticated && (
-        <>
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-        </>
-      )}
-      {isAuthenticated && userRole === 'refugee' && (
-        <>
-          {/* Module content routes - highest priority */}
-          <Route path="/courses/:courseId/modules/:moduleId/description" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              {(() => {
-                console.log('🎯 ROUTE MATCHED: Module Description Route');
-                console.log('🎯 URL:', window.location.href);
-                return <SharedModuleContent />;
-              })()}
-            </Sidebar>
-          } />
-          <Route path="/courses/:courseId/modules/:moduleId/content" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              {(() => {
-                console.log('🎯 ROUTE MATCHED: Module Content Route');
-                console.log('🎯 URL:', window.location.href);
-                return <SharedModuleContent />;
-              })()}
-            </Sidebar>
-          } />
-          <Route path="/courses/:courseId/modules/:moduleId/video" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <SharedModuleContent />
-            </Sidebar>
-          } />
-          <Route path="/courses/:courseId/modules/:moduleId/resource/:resourceId" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <SharedModuleContent />
-            </Sidebar>
-          } />
-          <Route path="/courses/:courseId/modules/:moduleId/assessment/:assessmentId" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <SharedModuleContent />
-            </Sidebar>
-          } />
-          <Route path="/courses/:courseId/modules/:moduleId/quiz/:quizId" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <SharedModuleContent />
-            </Sidebar>
-          } />
-          <Route path="/courses/:courseId/modules/:moduleId/discussion/:discussionId" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <SharedModuleContent />
-            </Sidebar>
-          } />
-          
-          {/* Other refugee routes */}
-          <Route path="/dashboard" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <RefugeeDashboard />
-            </Sidebar>
-          } />
-          <Route path="/courses" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <BrowseCourses />
-            </Sidebar>
-          } />
-          <Route path="/courses/category/:categoryName" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <CategoryCourses />
-            </Sidebar>
-          } />
-          <Route path="/courses/:id" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <CourseDetail />
-            </Sidebar>
-          } />
-          <Route path="/course/:courseId" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <CourseDetail />
-            </Sidebar>
-          } />
-          <Route path="/courses/full/:id" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <FullCoursePage />
-            </Sidebar>
-          } />
-          <Route path="/courses/content/:id" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <CourseContentPage />
-            </Sidebar>
-          } />
-          <Route path="/courses/:courseId/overview" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <StudentCourseOverview />
-            </Sidebar>
-          } />
-          <Route path="/learning-path" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <LearningPath />
-            </Sidebar>
-          } />
-          <Route path="/certificates" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <Certificates />
-            </Sidebar>
-          } />
-          <Route path="/peer-learning" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <PeerLearning />
-            </Sidebar>
-          } />
-          <Route path="/help" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <Help />
-            </Sidebar>
-          } />
-          <Route path="/help-tickets" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <HelpTickets />
-            </Sidebar>
-          } />
-          <Route path="/jobs" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <Jobs />
-            </Sidebar>
-          } />
-          <Route path="/jobs/detail" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <DetailPage />
-            </Sidebar>
-          } />
-          <Route path="/peer-learning/group/:groupId" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <GroupDetails />
-            </Sidebar>
-          } />
-          <Route path="/courses/quiz/:id" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <CourseQuizPage />
-            </Sidebar>
-          } />
-        </>
-      )}
-      {isAuthenticated && userRole === 'instructor' && (
-        <>
-          <Route path="/dashboard" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <InstructorDashboard />
-            </Sidebar>
-          } />
-          <Route path="/instructor" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <InstructorDashboard />
-            </Sidebar>
-          } />
-          <Route path="/instructor/dashboard" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <InstructorDashboard />
-            </Sidebar>
-          } />
-          <Route path="/manage-courses" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <ManageCourses />
-            </Sidebar>
-          } />
-          <Route path="/instructor/courses" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <ManageCourses />
-            </Sidebar>
-          } />
-          <Route path="/instructor/courses/create" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <CourseBuilder />
-            </Sidebar>
-          } />
-          <Route path="/instructor/courses/:id/edit" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <CourseBuilder />
-            </Sidebar>
-          } />
-          <Route path="/instructor/courses/:courseId/overview" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <CourseOverview />
-            </Sidebar>
-          } />
-          <Route path="/instructor/courses/:courseId/grades" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <Grades />
-            </Sidebar>
-          } />
-          <Route path="/instructor/courses/:courseId/modules/:moduleId/content" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <ModuleContent />
-            </Sidebar>
-          } />
-          <Route path="/instructor/courses/:courseId/modules/:moduleId/video" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <ModuleContent />
-            </Sidebar>
-          } />
-          <Route path="/instructor/courses/:courseId/modules/:moduleId/resource/:resourceId" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <ModuleContent />
-            </Sidebar>
-          } />
-          <Route path="/instructor/courses/:courseId/modules/:moduleId/assessment/:assessmentId" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <ModuleContent />
-            </Sidebar>
-          } />
-          <Route path="/instructor/courses/:courseId/modules/:moduleId/quiz/:quizId" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <ModuleContent />
-            </Sidebar>
-          } />
-          <Route path="/instructor/courses/:courseId/modules/:moduleId/discussion/:discussionId" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <ModuleContent />
-            </Sidebar>
-          } />
-          <Route path="/instructor/courses/create/module" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <CreateModule />
-            </Sidebar>
-          } />
-          <Route path="/course/:courseId/grades" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <MyGrades />
-            </Sidebar>
-          } />
-          <Route path="/help-management" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <InstructorHelpManagement />
-            </Sidebar>
-          } />
-          <Route path="/instructor/help" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <InstructorHelpManagement />
-            </Sidebar>
-          } />
-          <Route path="/assessments" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <Assessments />
-            </Sidebar>
-          } />
-          <Route path="/instructor/assessments" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <Assessments />
-            </Sidebar>
-          } />
-          <Route path="/quizzes" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <Quizzes />
-            </Sidebar>
-          } />
-          <Route path="/instructor/quizzes" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <Quizzes />
-            </Sidebar>
-          } />
-          <Route path="/groups" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <Groups />
-            </Sidebar>
-          } />
-          <Route path="/instructor/groups" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <Groups />
-            </Sidebar>
-          } />
-          <Route path="/discussions" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <Discussions />
-            </Sidebar>
-          } />
-          <Route path="/instructor/discussions" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <Discussions />
-            </Sidebar>
-          } />
-          <Route path="/profile" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <Profile userRole={userRole} />
-            </Sidebar>
-          } />
-        </>
-      )}
-      {isAuthenticated && userRole === 'admin' && (
-        <>
-          <Route path="/dashboard" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <AdminDashboard />
-            </Sidebar>
-          } />
-          <Route path="/admin/dashboard" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <AdminDashboard />
-            </Sidebar>
-          } />
-          <Route path="/analytics" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <Analytics />
-            </Sidebar>
-          } />
-          <Route path="/admin/analytics" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <Analytics />
-            </Sidebar>
-          } />
-          <Route path="/manage-users" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <ManageUsers />
-            </Sidebar>
-          } />
-          <Route path="/admin/users" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <ManageUsers />
-            </Sidebar>
-          } />
-          <Route path="/help-management" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <AdminHelpManagement />
-            </Sidebar>
-          } />
-          <Route path="/admin/help" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <AdminHelpManagement />
-            </Sidebar>
-          } />
-          <Route path="/admin/help-management" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <AdminHelpManagement />
-            </Sidebar>
-          } />
-        </>
-      )}
-      {isAuthenticated && userRole === 'employer' && (
-        <>
-          <Route path="/dashboard" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <EmployerDashboard />
-            </Sidebar>
-          } />
-          <Route path="/employer/dashboard" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <EmployerDashboard />
-            </Sidebar>
-          } />
-          <Route path="/employer/jobs" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <EmployerJobs />
-            </Sidebar>
-          } />
-          <Route path="/employer/jobs/edit/:jobId" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <EditJob />
-            </Sidebar>
-          } />
-          <Route path="/post-jobs" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <PostJobs />
-            </Sidebar>
-          } />
-          <Route path="/employer/post-scholarship" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <PostScholarship />
-            </Sidebar>
-          } />
-          <Route path="/applicants" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <ViewApplicants />
-            </Sidebar>
-          } />
-          <Route path="/employer/applicants" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <ViewApplicants />
-            </Sidebar>
-          } />
-          <Route path="/jobs" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <EmployerJobs />
-            </Sidebar>
-          } />
-          <Route path="/employer/scholarships" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <EmployerScholarships />
-            </Sidebar>
-          } />
-          <Route path="/employer/scholarships/edit/:scholarshipId" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <EditScholarship />
-            </Sidebar>
-          } />
-        </>
-      )}
-      {isAuthenticated && (
-        <>
-          <Route path="/profile" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <Profile userRole={userRole} />
-            </Sidebar>
-          } />
-          <Route path="/account-settings" element={
-            <Sidebar role={userRole} onLogout={logout}>
-              <AccountSettings />
-            </Sidebar>
-          } />
-        </>
-      )}
-      <Route path="*" element={<div>Page not found</div>} />
-      <Route path="*" element={<Landing />} />
-    </Routes>
-  );
+      <Routes>
+        <Route path="/" element={<Landing />} />
+       
+       {/* Authentication routes - always available */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        
+
+       
+       {isAuthenticated && userRole === 'refugee' && (
+         <>
+           {/* Module content routes - MUST BE FIRST - highest priority */}
+           <Route path="/courses/:courseId/modules/:moduleId/description" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <SharedModuleContent />
+             </Sidebar>
+           } />
+           <Route path="/courses/:courseId/modules/:moduleId/content" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <SharedModuleContent />
+             </Sidebar>
+           } />
+           <Route path="/courses/:courseId/modules/:moduleId/video" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <SharedModuleContent />
+             </Sidebar>
+           } />
+           <Route path="/courses/:courseId/modules/:moduleId/resource/:resourceId" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <SharedModuleContent />
+             </Sidebar>
+           } />
+           <Route path="/courses/:courseId/modules/:moduleId/assessment/:assessmentId" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <SharedModuleContent />
+             </Sidebar>
+           } />
+           <Route path="/courses/:courseId/modules/:moduleId/quiz/:quizId" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <SharedModuleContent />
+             </Sidebar>
+           } />
+           <Route path="/courses/:courseId/modules/:moduleId/discussion/:discussionId" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <SharedModuleContent />
+             </Sidebar>
+           } />
+           <Route path="/courses/:courseId/modules/:moduleId/content-item/:itemIndex" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <ContentItemViewer />
+             </Sidebar>
+           } />
+           
+           {/* Specific course routes - higher priority than generic routes */}
+           <Route path="/courses/:courseId/overview" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <StudentCourseOverview />
+             </Sidebar>
+           } />
+           <Route path="/courses/category/:categoryName" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <CategoryCourses />
+             </Sidebar>
+           } />
+           <Route path="/courses/full/:id" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <FullCoursePage />
+             </Sidebar>
+           } />
+           <Route path="/courses/content/:id" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <CourseContentPage />
+             </Sidebar>
+           } />
+           <Route path="/courses/quiz/:id" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <CourseQuizPage />
+             </Sidebar>
+           } />
+           
+           {/* Generic course routes - lower priority */}
+           <Route path="/courses/:id" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <CourseDetail />
+             </Sidebar>
+           } />
+           <Route path="/course/:courseId" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <CourseDetail />
+             </Sidebar>
+           } />
+           
+           {/* Other refugee routes */}
+           <Route path="/dashboard" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <RefugeeDashboard />
+             </Sidebar>
+           } />
+           <Route path="/courses" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <BrowseCourses />
+             </Sidebar>
+           } />
+           <Route path="/learning-path" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <LearningPath />
+             </Sidebar>
+           } />
+           <Route path="/certificates" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <Certificates />
+             </Sidebar>
+           } />
+           <Route path="/peer-learning" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <PeerLearning />
+             </Sidebar>
+           } />
+           <Route path="/help" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <Help />
+             </Sidebar>
+           } />
+           <Route path="/help-tickets" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <HelpTickets />
+             </Sidebar>
+           } />
+           <Route path="/jobs" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <Jobs />
+             </Sidebar>
+           } />
+           <Route path="/jobs/detail/:type/:id" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <DetailPage />
+             </Sidebar>
+           } />
+           <Route path="/peer-learning/group/:groupId" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <GroupDetails />
+             </Sidebar>
+           } />
+         </>
+       )}
+       {isAuthenticated && userRole === 'instructor' && (
+         <>
+           <Route path="/dashboard" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <InstructorDashboard />
+             </Sidebar>
+           } />
+           <Route path="/instructor" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <InstructorDashboard />
+             </Sidebar>
+           } />
+           <Route path="/instructor/dashboard" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <InstructorDashboard />
+             </Sidebar>
+           } />
+           <Route path="/manage-courses" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <ManageCourses />
+             </Sidebar>
+           } />
+           <Route path="/instructor/courses" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <ManageCourses />
+             </Sidebar>
+           } />
+           <Route path="/instructor/courses/create" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <CourseBuilder />
+             </Sidebar>
+           } />
+           <Route path="/instructor/courses/:id/edit" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <CourseBuilder />
+             </Sidebar>
+           } />
+           <Route path="/instructor/courses/:courseId/overview" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <CourseOverview />
+             </Sidebar>
+           } />
+           <Route path="/instructor/courses/:courseId/grades" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <Grades />
+             </Sidebar>
+           } />
+           <Route path="/instructor/courses/:courseId/modules/:moduleId/content" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <ModuleContent />
+             </Sidebar>
+           } />
+           <Route path="/instructor/courses/:courseId/modules/:moduleId/video" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <ModuleContent />
+             </Sidebar>
+           } />
+           <Route path="/instructor/courses/:courseId/modules/:moduleId/resource/:resourceId" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <ModuleContent />
+             </Sidebar>
+           } />
+           <Route path="/instructor/courses/:courseId/modules/:moduleId/assessment/:assessmentId" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <ModuleContent />
+             </Sidebar>
+           } />
+           <Route path="/instructor/courses/:courseId/modules/:moduleId/quiz/:quizId" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <InstructorQuizPreview />
+             </Sidebar>
+           } />
+           <Route path="/instructor/courses/:courseId/modules/:moduleId/discussion/:discussionId" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <ModuleContent />
+             </Sidebar>
+           } />
+           <Route path="/instructor/courses/:courseId/modules/:moduleId/content-item/:itemIndex" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <ContentItemViewer />
+             </Sidebar>
+           } />
+           <Route path="/instructor/courses/create/module" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <CreateModule />
+             </Sidebar>
+           } />
+           <Route path="/course/:courseId/grades" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <MyGrades />
+             </Sidebar>
+           } />
+           <Route path="/help-management" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <InstructorHelpManagement />
+             </Sidebar>
+           } />
+           <Route path="/instructor/help" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <InstructorHelpManagement />
+             </Sidebar>
+           } />
+           <Route path="/assessments" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <Assessments />
+             </Sidebar>
+           } />
+           <Route path="/instructor/assessments" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <Assessments />
+             </Sidebar>
+           } />
+           <Route path="/quizzes" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <Quizzes />
+             </Sidebar>
+           } />
+           <Route path="/instructor/quizzes" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <Quizzes />
+             </Sidebar>
+           } />
+           <Route path="/instructor/quizzes/:quizId/submissions" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <QuizSubmissions />
+             </Sidebar>
+           } />
+           <Route path="/groups" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <Groups />
+             </Sidebar>
+           } />
+           <Route path="/instructor/groups" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <Groups />
+             </Sidebar>
+           } />
+           <Route path="/discussions" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <Discussions />
+             </Sidebar>
+           } />
+           <Route path="/instructor/discussions" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <Discussions />
+             </Sidebar>
+           } />
+           <Route path="/profile" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <Profile userRole={userRole} />
+             </Sidebar>
+           } />
+         </>
+       )}
+       {isAuthenticated && userRole === 'admin' && (
+         <>
+           <Route path="/dashboard" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <AdminDashboard />
+             </Sidebar>
+           } />
+           <Route path="/admin/dashboard" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <AdminDashboard />
+             </Sidebar>
+           } />
+           <Route path="/analytics" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <Analytics />
+             </Sidebar>
+           } />
+           <Route path="/admin/analytics" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <Analytics />
+             </Sidebar>
+           } />
+           <Route path="/manage-users" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <ManageUsers />
+             </Sidebar>
+           } />
+           <Route path="/admin/users" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <ManageUsers />
+             </Sidebar>
+           } />
+           <Route path="/help-management" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <AdminHelpManagement />
+             </Sidebar>
+           } />
+           <Route path="/admin/help" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <AdminHelpManagement />
+             </Sidebar>
+           } />
+           <Route path="/admin/help-management" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <AdminHelpManagement />
+             </Sidebar>
+           } />
+         </>
+       )}
+       {isAuthenticated && userRole === 'employer' && (
+         <>
+           <Route path="/dashboard" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <EmployerDashboard />
+             </Sidebar>
+           } />
+           <Route path="/employer/dashboard" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <EmployerDashboard />
+             </Sidebar>
+           } />
+           <Route path="/employer/jobs" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <EmployerJobs />
+             </Sidebar>
+           } />
+           <Route path="/employer/jobs/edit/:jobId" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <EditJob />
+             </Sidebar>
+           } />
+           <Route path="/post-jobs" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <PostJobs />
+             </Sidebar>
+           } />
+           <Route path="/employer/post-scholarship" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <PostScholarship />
+             </Sidebar>
+           } />
+           <Route path="/applicants" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <ViewApplicants />
+             </Sidebar>
+           } />
+           <Route path="/employer/applicants" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <ViewApplicants />
+             </Sidebar>
+           } />
+           <Route path="/jobs" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <EmployerJobs />
+             </Sidebar>
+           } />
+           <Route path="/employer/scholarships" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <EmployerScholarships />
+             </Sidebar>
+           } />
+           <Route path="/employer/scholarships/edit/:scholarshipId" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <EditScholarship />
+             </Sidebar>
+           } />
+         </>
+       )}
+       {isAuthenticated && (
+         <>
+           <Route path="/profile" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <Profile userRole={userRole} />
+             </Sidebar>
+           } />
+           <Route path="/account-settings" element={
+             <Sidebar role={userRole} onLogout={logout}>
+               <AccountSettings />
+             </Sidebar>
+           } />
+         </>
+       )}
+               {/* Redirect unauthenticated users trying to access protected routes */}
+        {!isAuthenticated && (
+          <Route path="*" element={<Landing />} />
+        )}
+       
+       {/* Generic fallback for authenticated users */}
+       {isAuthenticated && (
+         <Route path="*" element={
+           <div style={{ textAlign: 'center', padding: '2rem' }}>
+             <h2>Page Not Found</h2>
+             <p>The page you're looking for doesn't exist.</p>
+             <button 
+               onClick={() => window.location.href = '/dashboard'}
+               style={{ 
+                 background: '#007BFF', 
+                 color: 'white', 
+                 border: 'none', 
+                 padding: '0.75rem 1.5rem', 
+                 borderRadius: '4px', 
+                 cursor: 'pointer',
+                 marginRight: '1rem'
+               }}
+             >
+               Go to Dashboard
+             </button>
+             <button 
+               onClick={() => window.location.href = '/'}
+               style={{ 
+                 background: '#6c757d', 
+                 color: 'white', 
+                 border: 'none', 
+                 padding: '0.75rem 1.5rem', 
+                 borderRadius: '4px', 
+                 cursor: 'pointer' 
+               }}
+             >
+               Go Home
+             </button>
+           </div>
+         } />
+       )}
+     </Routes>
+ );
 }
 
 function App() {

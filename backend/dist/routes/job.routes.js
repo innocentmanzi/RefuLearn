@@ -230,6 +230,7 @@ router.get('/applications/user', auth_1.authenticateToken, (0, auth_1.authorizeR
 }));
 router.post('/', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer', 'admin'), [
     (0, express_validator_1.body)('title').trim().notEmpty().withMessage('Job title is required'),
+    (0, express_validator_1.body)('company').trim().notEmpty().withMessage('Company name is required'),
     (0, express_validator_1.body)('description').trim().notEmpty().withMessage('Job description is required'),
     (0, express_validator_1.body)('location').trim().notEmpty().withMessage('Location is required'),
     (0, express_validator_1.body)('job_type').isIn(['Full Time', 'Part Time', 'Contract', 'Internship']).withMessage('Invalid job type'),
@@ -241,11 +242,12 @@ router.post('/', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer'
     (0, express_validator_1.body)('remote_work').isBoolean().withMessage('remote_work must be a boolean'),
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     console.log('Received job creation request:', JSON.stringify(req.body, null, 2));
-    const { title, description, location, job_type, required_skills, salary_range, application_deadline, application_link, is_active, remote_work } = req.body;
+    const { title, company, description, location, job_type, required_skills, salary_range, application_deadline, application_link, is_active, remote_work } = req.body;
     const jobData = {
         _id: Date.now().toString(),
         type: 'job',
         title,
+        company,
         description,
         location,
         job_type,
@@ -269,6 +271,7 @@ router.post('/', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer'
 }));
 router.put('/:jobId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer', 'admin'), [
     (0, express_validator_1.body)('title').optional().trim(),
+    (0, express_validator_1.body)('company').optional().trim(),
     (0, express_validator_1.body)('description').optional().trim(),
     (0, express_validator_1.body)('location').optional().trim(),
     (0, express_validator_1.body)('job_type').optional().isIn(['Full Time', 'Part Time', 'Contract', 'Internship']),
@@ -294,7 +297,7 @@ router.put('/:jobId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('empl
         });
     }
     const allowedFields = [
-        'title', 'description', 'location', 'job_type', 'required_skills',
+        'title', 'company', 'description', 'location', 'job_type', 'required_skills',
         'salary_range', 'application_deadline', 'application_link', 'is_active', 'remote_work'
     ];
     allowedFields.forEach(field => {

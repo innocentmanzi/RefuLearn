@@ -1420,44 +1420,7 @@ function DiscussionComponent({ discussion, courseId, moduleId, discussionIndex }
         </div>
       </div>
 
-      {/* Connection Status */}
-      <div style={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        gap: '0.5rem', 
-        marginBottom: '1rem',
-        padding: '0.75rem 1rem',
-        backgroundColor: '#f0f9ff',
-        border: '1px solid #0ea5e9',
-        borderRadius: '6px',
-        fontSize: '0.875rem',
-        color: '#0c4a6e'
-      }}>
-        <div style={{ 
-          width: '8px', 
-          height: '8px', 
-          borderRadius: '50%', 
-          backgroundColor: '#10b981',
-          animation: 'pulse 2s infinite'
-        }}></div>
-        <span>🔗 Connected to server - All discussions are saved and visible to everyone</span>
-      </div>
 
-      {/* Persistence Guarantee */}
-      <div style={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        gap: '0.5rem', 
-        marginBottom: '1rem',
-        padding: '0.75rem 1rem',
-        backgroundColor: '#f0fdf4',
-        border: '1px solid #22c55e',
-        borderRadius: '6px',
-        fontSize: '0.875rem',
-        color: '#15803d'
-      }}>
-        <span>💾 Persistence Guarantee: Your replies are permanently saved in the database and will never be lost</span>
-      </div>
 
       {/* Post Reply Form */}
       <form onSubmit={handleSubmitReply} style={{ marginBottom: '2rem' }}>
@@ -1721,9 +1684,19 @@ function ModuleContentInner() {
   const [userRole, setUserRole] = useState(null);
 
   useEffect(() => {
-    // Get user role from localStorage or token
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
-    setUserRole(user.role || 'refugee');
+    // Get user role from localStorage or token with better debugging
+    const userStr = localStorage.getItem('user');
+    const user = userStr ? JSON.parse(userStr) : {};
+    const detectedRole = user.role || 'refugee';
+    
+    console.log('🔍 USER ROLE DEBUG:', {
+      userStr,
+      user,
+      detectedRole,
+      willSetUserRole: detectedRole
+    });
+    
+    setUserRole(detectedRole);
     
     // Add real-time debugging for URL parameters
     console.log('🔄 ModuleContent component loading with URL params:', {
@@ -1733,6 +1706,7 @@ function ModuleContentInner() {
       discussionId,
       resourceId,
       assessmentId,
+      userRole: detectedRole,
       currentURL: window.location.href,
       urlPath: window.location.pathname
     });
@@ -2002,7 +1976,10 @@ function ModuleContentInner() {
                   title: quiz.title,
                   id: quiz._id,
                   hasQuestions: !!quiz.questions && quiz.questions.length > 0,
-                  questionCount: quiz.questions?.length || 0
+                  questionCount: quiz.questions?.length || 0,
+                  dueDate: quiz.dueDate,
+                  hasDueDate: !!quiz.dueDate,
+                  allFields: Object.keys(quiz)
                 });
                 
                 items.push({
@@ -2112,55 +2089,129 @@ function ModuleContentInner() {
                 }
               }
             } else if (currentPath.includes('/assessment/')) {
-              // Match by assessment ID, not index
+              // Enhanced assessment ID matching with multiple fallbacks
               if (assessmentId) {
-                const assessmentIndex = items.findIndex(item => 
-                  item.type === 'assessment' && 
-                  (item.data._id === assessmentId || item.data.id === assessmentId)
-                );
+                console.log('🎯 Looking for assessment with ID:', assessmentId);
+                console.log('🔍 Available assessments:', items.filter(item => item.type === 'assessment').map(item => ({
+                  title: item.title,
+                  dataId: item.data._id,
+                  dataIdAlt: item.data.id
+                })));
+                
+                const assessmentIndex = items.findIndex(item => {
+                  if (item.type !== 'assessment') return false;
+                  
+                  // Try multiple ID matching strategies
+                  const matches = 
+                    item.data._id === assessmentId ||
+                    item.data.id === assessmentId ||
+                    item.data.assessmentId === assessmentId ||
+                    // Try without prefix if present
+                    (assessmentId.startsWith('assessment_') && item.data._id === assessmentId.substring(11)) ||
+                    (item.data._id && item.data._id.startsWith('assessment_') && item.data._id.substring(11) === assessmentId);
+                  
+                  console.log('🔍 Checking assessment:', {
+                    itemType: item.type,
+                    itemTitle: item.title,
+                    itemDataId: item.data._id || item.data.id,
+                    searchingFor: assessmentId,
+                    matches
+                  });
+                  
+                  return matches;
+                });
+                
                 if (assessmentIndex >= 0) {
                   initialIndex = assessmentIndex;
                   foundMatch = true;
+                  console.log('✅ Found assessment at index:', assessmentIndex);
+                } else {
+                  console.error('❌ Assessment not found with ID:', assessmentId);
+                  console.log('Available assessment IDs:', items.filter(item => item.type === 'assessment').map(item => item.data._id || item.data.id));
                 }
               }
             } else if (currentPath.includes('/quiz/')) {
-              // Match by quiz ID, not index
+              // Enhanced quiz ID matching with multiple fallbacks
               if (quizId) {
                 console.log('🎯 Looking for quiz with ID:', quizId);
+                console.log('🔍 Available quizzes:', items.filter(item => item.type === 'quiz').map(item => ({
+                  title: item.title,
+                  dataId: item.data._id,
+                  dataIdAlt: item.data.id
+                })));
+                
                 const quizIndex = items.findIndex(item => {
-                  const matches = item.type === 'quiz' && 
-                    (item.data._id === quizId || item.data.id === quizId);
+                  if (item.type !== 'quiz') return false;
+                  
+                  // Try multiple ID matching strategies
+                  const matches = 
+                    item.data._id === quizId ||
+                    item.data.id === quizId ||
+                    item.data.quizId === quizId ||
+                    // Try without prefix if present
+                    (quizId.startsWith('quiz_') && item.data._id === quizId.substring(5)) ||
+                    (item.data._id && item.data._id.startsWith('quiz_') && item.data._id.substring(5) === quizId);
+                  
                   console.log('🔍 Checking quiz:', {
                     itemType: item.type,
+                    itemTitle: item.title,
                     itemDataId: item.data._id || item.data.id,
                     searchingFor: quizId,
                     matches
                   });
+                  
                   return matches;
                 });
+                
                 if (quizIndex >= 0) {
                   initialIndex = quizIndex;
                   foundMatch = true;
+                  console.log('✅ Found quiz at index:', quizIndex);
+                } else {
+                  console.error('❌ Quiz not found with ID:', quizId);
+                  console.log('Available quiz IDs:', items.filter(item => item.type === 'quiz').map(item => item.data._id || item.data.id));
                 }
               }
             } else if (currentPath.includes('/discussion/')) {
-              // Match by discussion ID, not index
+              // Enhanced discussion ID matching with multiple fallbacks
               if (discussionId) {
                 console.log('🎯 Looking for discussion with ID:', discussionId);
+                console.log('🔍 Available discussions:', items.filter(item => item.type === 'discussion').map(item => ({
+                  title: item.title,
+                  dataId: item.data._id,
+                  dataIdAlt: item.data.id
+                })));
+                
                 const discussionIndex = items.findIndex(item => {
-                  const matches = item.type === 'discussion' && 
-                    (item.data._id === discussionId || item.data.id === discussionId);
+                  if (item.type !== 'discussion') return false;
+                  
+                  // Try multiple ID matching strategies
+                  const matches = 
+                    item.data._id === discussionId ||
+                    item.data.id === discussionId ||
+                    item.data.discussionId === discussionId ||
+                    // Try without prefix if present
+                    (discussionId.startsWith('discussion_') && item.data._id === discussionId.substring(11)) ||
+                    (item.data._id && item.data._id.startsWith('discussion_') && item.data._id.substring(11) === discussionId);
+                  
                   console.log('🔍 Checking discussion:', {
                     itemType: item.type,
+                    itemTitle: item.title,
                     itemDataId: item.data._id || item.data.id,
                     searchingFor: discussionId,
                     matches
                   });
+                  
                   return matches;
                 });
+                
                 if (discussionIndex >= 0) {
                   initialIndex = discussionIndex;
                   foundMatch = true;
+                  console.log('✅ Found discussion at index:', discussionIndex);
+                } else {
+                  console.error('❌ Discussion not found with ID:', discussionId);
+                  console.log('Available discussion IDs:', items.filter(item => item.type === 'discussion').map(item => item.data._id || item.data.id));
                 }
               }
             }
@@ -2458,9 +2509,9 @@ function ModuleContentInner() {
     
     // Navigate to next item or finish module
     if (currentIndex === contentItems.length - 1) {
-      console.log('🏁 Last item reached, navigating back to course overview');
-      // Last item - navigate back to course overview (fixed URL)
-      navigate(`/courses/${courseId}/overview`);
+      console.log('🏁 Last item reached, staying on current content');
+      // Last item - stay on current content instead of auto-redirecting
+      // User can manually navigate back using the back button
     } else {
       console.log('➡️ Moving to next item');
       handleNext();
@@ -2533,22 +2584,71 @@ function ModuleContentInner() {
   const renderContent = () => {
     if (!currentContent) {
       console.log('❌ No currentContent available');
+      console.log('🔍 Debug info:', {
+        contentItems: contentItems.length,
+        currentIndex,
+        urlParams: { quizId, discussionId, assessmentId, resourceId },
+        currentPath: window.location.pathname
+      });
+      
       return (
         <ContentBody>
           <div style={{ padding: '2rem', textAlign: 'center', color: 'red', background: '#fff5f5', border: '1px solid #fed7d7', borderRadius: '8px' }}>
             <h3>❌ No Content Available</h3>
             <p>Current content is not loaded. This usually means:</p>
             <ul style={{ textAlign: 'left', display: 'inline-block' }}>
+              <li>The content ID from the URL doesn't match any content in the module</li>
               <li>The instructor hasn't created content for this item</li>
               <li>There's a data loading issue</li>
-              <li>The content ID doesn't match what's expected</li>
             </ul>
             <div style={{ marginTop: '1rem', fontSize: '0.875rem', background: '#f7fafc', padding: '1rem', borderRadius: '4px' }}>
               <strong>Debug Info:</strong><br/>
               Content Items: {contentItems.length}<br/>
               Current Index: {currentIndex}<br/>
+              URL Assessment ID: {assessmentId || 'None'}<br/>
               URL Quiz ID: {quizId || 'None'}<br/>
-              URL Discussion ID: {discussionId || 'None'}
+              URL Discussion ID: {discussionId || 'None'}<br/>
+              Current Path: {window.location.pathname}<br/>
+              Available Content Types: {contentItems.map(item => item.type).join(', ')}<br/>
+              Available Assessment IDs: {contentItems.filter(item => item.type === 'assessment').map(item => item.data._id || item.data.id).join(', ') || 'None'}<br/>
+              Available Quiz IDs: {contentItems.filter(item => item.type === 'quiz').map(item => item.data._id || item.data.id).join(', ') || 'None'}<br/>
+              Available Discussion IDs: {contentItems.filter(item => item.type === 'discussion').map(item => item.data._id || item.data.id).join(', ') || 'None'}
+            </div>
+            <div style={{ marginTop: '1rem' }}>
+              <button 
+                onClick={() => {
+                  console.log('🔍 FULL DEBUG INFO:');
+                  console.log('Content Items:', contentItems);
+                  console.log('Current Content:', currentContent);
+                  console.log('Module:', module);
+                  console.log('Course:', course);
+                  console.log('URL Params:', { assessmentId, quizId, discussionId, resourceId });
+                }}
+                style={{ 
+                  padding: '0.5rem 1rem', 
+                  background: '#28a745', 
+                  color: 'white', 
+                  border: 'none', 
+                  borderRadius: '4px', 
+                  cursor: 'pointer' 
+                }}
+              >
+                Debug Full Data
+              </button>
+              <button 
+                onClick={() => navigate(`/courses/${courseId}/overview`)}
+                style={{ 
+                  padding: '0.5rem 1rem', 
+                  background: '#007BFF', 
+                  color: 'white', 
+                  border: 'none', 
+                  borderRadius: '4px', 
+                  cursor: 'pointer',
+                  marginLeft: '0.5rem'
+                }}
+              >
+                Back to Course Overview
+              </button>
             </div>
           </div>
         </ContentBody>
@@ -2763,7 +2863,11 @@ function ModuleContentInner() {
         }
         return (
           <QuizTaker 
-            quiz={currentContent.data}
+            quiz={{
+              ...currentContent.data,
+              courseId: courseId,
+              moduleId: moduleId
+            }}
             userRole={userRole}
             onEdit={() => {
               // Navigate to assessment edit page for instructors
@@ -2784,7 +2888,27 @@ function ModuleContentInner() {
       case 'quiz':
         console.log('🎯 Rendering quiz with data:', currentContent.data);
         console.log('Quiz data being passed to QuizTaker:', currentContent.data);
-        console.log('User role:', userRole);
+        console.log('🔍 QUIZ RENDER DEBUG - User role being passed to QuizTaker:', userRole);
+        console.log('🗓️ DUE DATE DEBUG:', {
+          rawDueDate: currentContent.data?.dueDate,
+          dueDateType: typeof currentContent.data?.dueDate,
+          hasDueDate: !!currentContent.data?.dueDate,
+          allQuizFields: Object.keys(currentContent.data || {})
+        });
+        console.log('⏰ TIME LIMIT DEBUG:', {
+          rawDuration: currentContent.data?.duration,
+          durationType: typeof currentContent.data?.duration,
+          hasDuration: !!currentContent.data?.duration,
+          timeLimit: currentContent.data?.timeLimit,
+          hasTimeLimit: !!currentContent.data?.timeLimit
+        });
+        
+        // CRITICAL DEBUG: Check if userRole is correct for quiz interaction
+        if (userRole !== 'refugee') {
+          console.warn('⚠️ WARNING: userRole is not "refugee":', userRole, '- Quiz may not show interactive elements!');
+        } else {
+          console.log('✅ userRole is "refugee" - Interactive elements should be visible');
+        }
         
         // Enhanced debugging for quiz content
         console.log('🧠 QUIZ CONTENT DEBUG:', {
@@ -2868,7 +2992,11 @@ function ModuleContentInner() {
         const quizNumber = contentItems.slice(0, currentIndex + 1).filter(item => item.type === 'quiz').length;
         return (
           <QuizTaker 
-            quiz={currentContent.data}
+            quiz={{
+              ...currentContent.data,
+              courseId: courseId,
+              moduleId: moduleId
+            }}
             userRole={userRole}
             quizNumber={quizNumber}
             onEdit={() => {
@@ -3183,34 +3311,10 @@ function ModuleContentInner() {
         </BackButton>
         <CourseInfo>
           <CourseTitle>{course.title}</CourseTitle>
-          <ModuleInfo>
-            <span>Module: {module.title}</span>
-            <span>•</span>
-            <span>Item {currentIndex + 1} of {contentItems.length}</span>
-          </ModuleInfo>
         </CourseInfo>
       </Header>
 
-      {/* Content Navigation Menu */}
-      {contentItems.length > 1 && (
-        <ContentNavigationMenu>
-          <ContentMenuTitle>Module Content ({contentItems.length} items)</ContentMenuTitle>
-          <ContentMenuGrid>
-            {contentItems.map((item, index) => (
-              <ContentMenuButton
-                key={index}
-                active={index === currentIndex}
-                onClick={() => handleDirectNavigation(index)}
-              >
-                <ContentMenuIcon active={index === currentIndex}>
-                  {getItemIcon(item.type)}
-                </ContentMenuIcon>
-                <span>{item.title}</span>
-              </ContentMenuButton>
-            ))}
-          </ContentMenuGrid>
-        </ContentNavigationMenu>
-      )}
+
 
       {renderContent()}
 
@@ -3280,21 +3384,20 @@ function ModuleContentInner() {
   );
 }
 
-// Export the component wrapped with authentication check
-export default function ModuleContent() {
-  console.log('🔍 ===== SHARED MODULE CONTENT COMPONENT LOADING =====');
-  console.log('🔍 Component rendering at:', new Date().toISOString());
-  console.log('🔍 Current URL:', window.location.href);
-  console.log('🔍 Current pathname:', window.location.pathname);
-  console.log('🔍 URL parameters:', window.location.search);
-  console.log('🔍 Component type: SharedModuleContent (from components/ModuleContent.js)');
-  
-  // Add a visual indicator that this component is loading
-  console.log('🚨 If you can see this message, the ModuleContent component IS loading!');
+// Export the component directly without authentication check (handled by App.js)
+export default function SharedModuleContent() {
+  console.log('🎉 ===== SHARED MODULE CONTENT COMPONENT LOADING - NAMING CONFLICT FIXED =====');
+  console.log('🎉 Component rendering at:', new Date().toISOString());
+  console.log('🎉 Current URL:', window.location.href);
+  console.log('🎉 Current pathname:', window.location.pathname);
+  console.log('🎉 URL parameters:', window.location.search);
+  console.log('🎉 Component type: SharedModuleContent (from components/ModuleContent.js)');
+  console.log('🎉 SUCCESS: SharedModuleContent component is now loading correctly!');
+  console.log('🎉 NAMING CONFLICT FIX APPLIED - No more conflicts with Instructor ModuleContent!');
   
   return (
-    <AuthenticationCheck>
+    <div>
       <ModuleContentInner />
-    </AuthenticationCheck>
+    </div>
   );
 } 

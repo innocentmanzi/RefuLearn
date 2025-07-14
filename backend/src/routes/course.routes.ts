@@ -1,9 +1,10 @@
-import express, { Request, Response } from 'express';
-import { body, query } from 'express-validator';
+import { Request, Response, Router } from 'express';
+import { body } from 'express-validator';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
-import { validate, handleValidationErrors } from '../middleware/validation';
-import { asyncHandler } from '../middleware/errorHandler';
 import upload from '../middleware/upload';
+import { handleValidationErrors } from '../middleware/validation';
+import { asyncHandler } from '../middleware/errorHandler';
+import PouchDB from 'pouchdb';
 import { connectCouchDB } from '../config/couchdb';
 import { sendCourseCompletionEmail } from '../config/email';
 
@@ -30,7 +31,120 @@ const initializeDatabase = async (): Promise<boolean> => {
 // Initialize database connection
 initializeDatabase();
 
-const router = express.Router();
+const router = Router();
+
+// Simple test route at the very top
+router.get('/debug-test', (req: Request, res: Response) => {
+  console.log('🔍 DEBUG TEST ROUTE HIT');
+  res.json({ message: 'Debug test route working', timestamp: new Date().toISOString() });
+});
+
+// File download route - PLACED AT THE VERY TOP TO AVOID ANY CONFLICTS
+router.get('/file-download/:submissionId', authenticateToken, authorizeRoles('instructor', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+  console.log('📁 FILE DOWNLOAD ROUTE HIT - Submission ID:', req.params.submissionId);
+  console.log('📁 Request URL:', req.originalUrl);
+  console.log('📁 Request method:', req.method);
+  try {
+    const { submissionId } = req.params;
+    const database = await ensureDb();
+
+    console.log('📁 File download request for submission:', submissionId);
+
+    // Get submission details
+    const submission = await database.get(submissionId) as AssignmentSubmissionDoc;
+    console.log('📁 Found submission:', submission);
+
+    if (!submission || submission.type !== 'assignment_submission') {
+      return res.status(404).json({
+        success: false,
+        message: 'Submission not found'
+      });
+    }
+
+    // Check if it's a file submission
+    if (submission.submissionType !== 'file' || !submission.filePath) {
+      return res.status(400).json({
+        success: false,
+        message: 'This submission does not contain a file'
+      });
+    }
+
+    console.log('📁 File path:', submission.filePath);
+    console.log('📁 File name:', submission.fileName);
+
+    // Use require for fs to avoid TypeScript issues
+    const fs = require('fs');
+    const path = require('path');
+    
+    // Get the file path
+    const filePath = submission.filePath;
+    console.log('📁 Attempting to serve file:', filePath);
+    
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
+      console.log('❌ File not found at path:', filePath);
+      return res.status(404).json({
+        success: false,
+        message: 'File not found on server'
+      });
+    }
+
+    // Get file extension to set correct content type
+    const ext = path.extname(filePath).toLowerCase();
+    let contentType = 'application/octet-stream';
+    
+    switch (ext) {
+      case '.pdf':
+        contentType = 'application/pdf';
+        break;
+      case '.jpg':
+      case '.jpeg':
+        contentType = 'image/jpeg';
+        break;
+      case '.png':
+        contentType = 'image/png';
+        break;
+      case '.txt':
+        contentType = 'text/plain';
+        break;
+      case '.doc':
+        contentType = 'application/msword';
+        break;
+      case '.docx':
+        contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        break;
+    }
+
+    // Set headers
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${submission.fileName || 'submission'}"`);
+
+    // Stream the file
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+
+  } catch (error: any) {
+    console.error('❌ Error downloading submission file:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to download file',
+      error: error.message
+    });
+  }
+}));
+
+// Add debugging middleware to log all requests
+router.use((req, res, next) => {
+  console.log('🔍 COURSE ROUTER - Request:', req.method, req.originalUrl, req.path);
+  console.log('🔍 COURSE ROUTER - Full URL breakdown:', {
+    originalUrl: req.originalUrl,
+    path: req.path,
+    baseUrl: req.baseUrl,
+    params: req.params,
+    query: req.query
+  });
+  next();
+});
 
 // Helper function to ensure database is available
 const ensureDb = async (): Promise<any> => {
@@ -167,6 +281,29 @@ interface SubmissionDoc {
   [key: string]: any;
 }
 
+interface AssignmentSubmissionDoc {
+  _id: string;
+  _rev?: string;
+  type: 'assignment_submission';
+  userId: string;
+  assessmentId: string;
+  courseId: string;
+  moduleId: string;
+  submissionType: 'file' | 'link';
+  submissionText?: string;
+  submissionLink?: string;
+  filePath?: string;
+  fileName?: string;
+  fileSize?: number;
+  submittedAt: Date;
+  status: 'submitted' | 'graded';
+  grade?: number;
+  feedback?: string;
+  gradedAt?: Date;
+  createdAt: Date;
+  [key: string]: any;
+}
+
 interface CertificateDoc {
   _id: string;
   _rev?: string;
@@ -261,6 +398,16 @@ interface ModuleDoc {
   description: string;
   content_type: string;
   content: string;
+  contentItems?: Array<{
+    id: string;
+    type: 'article' | 'video' | 'audio' | 'file';
+    title: string;
+    description?: string;
+    url?: string;
+    file?: any;
+    fileName?: string;
+    dateAdded?: string;
+  }>;
   duration: string;
   isMandatory: boolean;
   order: number;
@@ -1662,7 +1809,7 @@ router.get('/discussions', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // Create a discussion (authenticated users)
-router.post('/discussions', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), [
+router.post('/discussions', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), [
   body('course').notEmpty().withMessage('Course is required'),
   body('title').notEmpty().withMessage('Title is required'),
   body('content').notEmpty().withMessage('Content is required'),
@@ -1714,7 +1861,7 @@ router.patch('/discussions/:discussionId', authenticateToken, authorizeRoles('in
 }));
 
 // Delete discussion (only author or admin)
-router.delete('/discussions/:discussionId', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/discussions/:discussionId', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), asyncHandler(async (req: Request, res: Response) => {
   const database = await ensureDb();
   const discussion = await database.get(req.params.discussionId);
   if (!discussion) {
@@ -1733,7 +1880,7 @@ router.delete('/discussions/:discussionId', authenticateToken, authorizeRoles('i
 }));
 
 // Add reply to discussion
-router.post('/discussions/:discussionId/replies', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), [
+router.post('/discussions/:discussionId/replies', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), [
   body('content').trim().notEmpty().withMessage('Content is required')
 ], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
   const database = await ensureDb();
@@ -1754,7 +1901,7 @@ router.post('/discussions/:discussionId/replies', authenticateToken, authorizeRo
 }));
 
 // Update reply (only author or admin)
-router.patch('/discussions/:discussionId/replies/:replyId', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), [
+router.patch('/discussions/:discussionId/replies/:replyId', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), [
   body('content').trim().notEmpty().withMessage('Content is required')
 ], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
   const database = await ensureDb();
@@ -1778,7 +1925,7 @@ router.patch('/discussions/:discussionId/replies/:replyId', authenticateToken, a
 }));
 
 // Delete reply (only author or admin)
-router.delete('/discussions/:discussionId/replies/:replyId', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/discussions/:discussionId/replies/:replyId', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), asyncHandler(async (req: Request, res: Response) => {
   const database = await ensureDb();
   const discussion = await database.get(req.params.discussionId) as DiscussionDoc;
   if (!discussion) {
@@ -2118,8 +2265,7 @@ router.get('/assessments/:assessmentId/attempts', authenticateToken, asyncHandle
         type: 'user_assessment_attempt',
         userId,
         assessmentId
-      },
-      sort: [{ submittedAt: 'desc' }]
+      }
     });
     
     res.json({ success: true, data: { attempts: result.docs } });
@@ -2195,7 +2341,8 @@ router.post('/modules/comprehensive', authenticateToken, authorizeRoles('instruc
   body('isMandatory').isBoolean().withMessage('isMandatory must be true or false'),
   body('order').isInt({ min: 1 }).withMessage('Order is required'),
   body('content_text').optional().isString(),
-  body('content_file').optional()
+  body('content_file').optional(),
+  body('contentItems').optional().isString()
 ], handleValidationErrors, asyncHandler(async (req: MulterRequest, res: Response) => {
   try {
     const database = await ensureDb();
@@ -2223,16 +2370,25 @@ router.post('/modules/comprehensive', authenticateToken, authorizeRoles('instruc
       learningObjectives,
       prerequisites,
       tags,
-      discussions  // New field for discussions
+      discussions,  // New field for discussions
+      contentItems
     } = req.body;
     
-    // Handle content based on type
+    // Handle content based on type with detailed logging
     let content = '';
+    let contentDetails = { type: content_type, hasFile: false, hasText: false, filePath: '', fileName: '' };
+    
+    console.log('📝 Processing content type:', content_type);
+    console.log('📝 Request files:', req.files ? 'Files present' : 'No files');
+    console.log('📝 Content text length:', content_text ? content_text.length : 0);
+    
     if (content_type === 'text content' || content_type === 'text' || content_type === 'article') {
       if (!content_text) {
         return res.status(400).json({ success: false, message: 'content_text is required for text content type' });
       }
       content = content_text;
+      contentDetails.hasText = true;
+      console.log('✅ Text content processed, length:', content.length);
     } else {
       // File upload
       if (!req.files || (Array.isArray(req.files) && req.files.length === 0) || (!Array.isArray(req.files) && !('content_file' in req.files))) {
@@ -2246,6 +2402,17 @@ router.post('/modules/comprehensive', authenticateToken, authorizeRoles('instruc
         file = Array.isArray(filesObj['content_file']) ? filesObj['content_file'][0] : filesObj['content_file'];
       }
       content = file.path || file.filename || '';
+      contentDetails.hasFile = true;
+      contentDetails.filePath = file.path || '';
+      contentDetails.fileName = file.originalname || file.filename || '';
+      
+      console.log('✅ File content processed:', {
+        originalName: file.originalname,
+        fileName: file.filename,
+        path: file.path,
+        size: file.size,
+        mimetype: file.mimetype
+      });
     }
     
     // Parse arrays if they come as strings (from form-data)
@@ -2259,6 +2426,17 @@ router.post('/modules/comprehensive', authenticateToken, authorizeRoles('instruc
       }
       return Array.isArray(field) ? field : [];
     };
+    
+    // Parse contentItems if provided
+    let parsedContentItems: any[] = [];
+    if (contentItems) {
+      try {
+        parsedContentItems = JSON.parse(contentItems);
+        console.log('✅ ContentItems parsed:', parsedContentItems.length, 'items');
+      } catch (e) {
+        console.warn('Failed to parse contentItems:', e);
+      }
+    }
     
     // Create comprehensive module
     const moduleId = `module_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -2291,23 +2469,55 @@ router.post('/modules/comprehensive', authenticateToken, authorizeRoles('instruc
       learningObjectives: parseArrayField(learningObjectives),
       prerequisites: parseArrayField(prerequisites),
       tags: parseArrayField(tags),
+      contentItems: parsedContentItems,
       
       // Timestamps
       createdAt: new Date(),
       updatedAt: new Date()
     };
     
-    console.log('📦 Creating module:', {
+    // Add content metadata to module for better tracking
+    module.contentDetails = contentDetails;
+    module.createdAt = new Date();
+    module.updatedAt = new Date();
+    
+    console.log('📦 Creating module with enhanced content tracking:', {
       title: module.title,
       content_type: module.content_type,
       hasContent: !!module.content,
+      contentDetails: contentDetails,
       resourcesCount: module.resources?.length || 0,
-      assessmentsCount: module.assessments?.length || 0
+      assessmentsCount: module.assessments?.length || 0,
+      videoUrl: module.videoUrl || 'none'
     });
     
     // Save the module
     const moduleResult = await database.insert(module);
     console.log('✅ Module created successfully:', moduleResult.id);
+    
+    // **FIX: Add module to course's modules array**
+    try {
+      const course = await database.get(courseId) as CourseDoc;
+      if (course) {
+        // Initialize modules array if it doesn't exist
+        if (!course.modules) {
+          course.modules = [];
+        }
+        
+        // Add the new module ID to the course
+        if (!course.modules.includes(moduleResult.id)) {
+          course.modules.push(moduleResult.id);
+          course.updatedAt = new Date();
+          
+          // Update the course document
+          await database.put(course);
+          console.log('✅ Module added to course modules array');
+        }
+      }
+    } catch (courseUpdateError) {
+      console.warn('⚠️ Failed to update course with new module:', courseUpdateError);
+      // Don't fail the whole operation, module was still created
+    }
     
     // Handle discussions if provided
     const createdDiscussions = [];
@@ -2371,10 +2581,11 @@ router.post('/modules', authenticateToken, authorizeRoles('instructor', 'admin',
   body('isMandatory').isBoolean().withMessage('isMandatory must be true or false'),
   body('order').isInt({ min: 1 }).withMessage('Order is required'),
   body('content_text').optional().isString(),
-  body('content_file').optional()
+  body('content_file').optional(),
+  body('contentItems').optional().isString()
 ], handleValidationErrors, asyncHandler(async (req: MulterRequest, res: Response) => {
   const database = await ensureDb();
-  const { courseId, title, description, content_type, duration, isMandatory, order, content_text } = req.body;
+  const { courseId, title, description, content_type, duration, isMandatory, order, content_text, contentItems } = req.body;
   let content = '';
   if (content_type === 'text content') {
     if (!content_text) {
@@ -2395,6 +2606,16 @@ router.post('/modules', authenticateToken, authorizeRoles('instructor', 'admin',
     }
     content = file.path || file.filename || '';
   }
+  // Parse contentItems if provided
+  let parsedContentItems: any[] = [];
+  if (contentItems) {
+    try {
+      parsedContentItems = JSON.parse(contentItems);
+    } catch (e) {
+      console.warn('Failed to parse contentItems:', e);
+    }
+  }
+
   const module: ModuleDoc = {
     _id: `module_${Date.now()}`,
     type: 'module',
@@ -2404,22 +2625,95 @@ router.post('/modules', authenticateToken, authorizeRoles('instructor', 'admin',
     description,
     content_type,
     content,
+    contentItems: parsedContentItems,
     duration,
     isMandatory: isMandatory === 'true' || isMandatory === true,
     order: Number(order)
   };
   const result = await database.insert(module);
+  
+  // **FIX: Add module to course's modules array (basic endpoint)**
+  try {
+    const course = await database.get(courseId) as CourseDoc;
+    if (course) {
+      // Initialize modules array if it doesn't exist
+      if (!course.modules) {
+        course.modules = [];
+      }
+      
+      // Add the new module ID to the course
+      if (!course.modules.includes(result.id)) {
+        course.modules.push(result.id);
+        course.updatedAt = new Date();
+        
+        // Update the course document
+        await database.put(course);
+        console.log('✅ Module added to course modules array (basic endpoint)');
+      }
+    }
+  } catch (courseUpdateError) {
+    console.warn('⚠️ Failed to update course with new module (basic endpoint):', courseUpdateError);
+    // Don't fail the whole operation, module was still created
+  }
+  
   res.status(201).json({ success: true, message: 'Module created', data: { module: result } });
 }));
 
-// Get module by ID
+// Get module by ID with enhanced content info
 router.get('/modules/:moduleId', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: Request, res: Response) => {
   const database = await ensureDb();
   const module = await database.get(req.params.moduleId);
   if (!module) {
     return res.status(404).json({ success: false, message: 'Module not found' });
   }
+  
+  // Log content details for debugging
+  console.log('📚 Retrieved module content:', {
+    title: module.title,
+    content_type: module.content_type,
+    hasContent: !!module.content,
+    contentLength: module.content ? module.content.length : 0,
+    contentDetails: module.contentDetails || 'none',
+    videoUrl: module.videoUrl || 'none',
+    resourcesCount: module.resources?.length || 0
+  });
+  
   res.json({ success: true, data: { module } });
+}));
+
+// Test endpoint to check if content files exist
+router.get('/modules/:moduleId/content-check', authenticateToken, authorizeRoles('instructor', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+  const database = await ensureDb();
+  const module = await database.get(req.params.moduleId);
+  if (!module) {
+    return res.status(404).json({ success: false, message: 'Module not found' });
+  }
+  
+  const fs = require('fs');
+  const contentInfo = {
+    moduleTitle: module.title,
+    contentType: module.content_type,
+    hasContent: !!module.content,
+    contentPath: module.content || 'none',
+    fileExists: false,
+    fileSize: 0,
+    contentDetails: module.contentDetails || 'none'
+  };
+  
+  // Check if file exists (for file-based content)
+  if (module.content && module.content_type !== 'text content' && module.content_type !== 'article') {
+    try {
+      if (fs.existsSync(module.content)) {
+        contentInfo.fileExists = true;
+        const stats = fs.statSync(module.content);
+        contentInfo.fileSize = stats.size;
+      }
+    } catch (error) {
+      console.log('File check error:', error);
+    }
+  }
+  
+  res.json({ success: true, data: contentInfo });
 }));
 
 // Update module (instructor/admin only, full update, multipart/form-data)
@@ -2430,7 +2724,7 @@ router.put('/modules/:moduleId', authenticateToken, authorizeRoles('instructor',
   if (!module) {
     return res.status(404).json({ success: false, message: 'Module not found' });
   }
-  const { courseId, title, description, content_type, duration, isMandatory, order, content_text } = req.body;
+  const { courseId, title, description, content_type, duration, isMandatory, order, content_text, contentItems } = req.body;
   let content = (module as ModuleDoc).content;
   if (content_type === 'text content') {
     if (content_text) {
@@ -2446,6 +2740,17 @@ router.put('/modules/:moduleId', authenticateToken, authorizeRoles('instructor',
     }
     content = file.path || file.filename || '';
   }
+  
+  // Parse contentItems if provided
+  let parsedContentItems: any[] = (module as ModuleDoc).contentItems || [];
+  if (contentItems) {
+    try {
+      parsedContentItems = JSON.parse(contentItems);
+    } catch (e) {
+      console.warn('Failed to parse contentItems:', e);
+    }
+  }
+  
   const updatedModule: ModuleDoc = {
     ...module as ModuleDoc,
     type: 'module',
@@ -2455,6 +2760,7 @@ router.put('/modules/:moduleId', authenticateToken, authorizeRoles('instructor',
     description: description ?? (module as ModuleDoc).description,
     content_type: content_type ?? (module as ModuleDoc).content_type,
     content,
+    contentItems: parsedContentItems,
     duration: duration ?? (module as ModuleDoc).duration,
     isMandatory: isMandatory !== undefined ? (isMandatory === 'true' || isMandatory === true) : (module as ModuleDoc).isMandatory,
     order: order !== undefined ? Number(order) : (module as ModuleDoc).order
@@ -2858,1863 +3164,415 @@ router.get('/:courseId', authenticateToken, asyncHandler(async (req: Request, re
       });
     }
     
-    // Get ALL database documents for comprehensive data retrieval
-    const allDocsResult = await database.list({ include_docs: true });
-    console.log('📄 Total documents in database:', allDocsResult.rows.length);
-    
-    // DEBUG: Show ALL documents with their types
-    console.log('🔍 ALL DOCUMENTS IN DATABASE:');
-    allDocsResult.rows.forEach((row: any, index: number) => {
-      const doc = row.doc;
-      if (doc && doc._id && !doc._id.startsWith('_design')) {
-        console.log(`${index + 1}. ID: ${doc._id}, Type: ${doc.type || 'no-type'}, Title: ${doc.title || 'no-title'}`);
-        if (doc.type === 'assessment' || doc.type === 'quiz' || doc.type === 'discussion') {
-          console.log(`   📋 FOUND: ${doc.type} - "${doc.title}" - moduleId: ${doc.moduleId || 'none'}, module: ${doc.module || 'none'}, course: ${doc.course || 'none'}, courseId: ${doc.courseId || 'none'}`);
-        }
-      }
-    });
-    
-    // Get modules for this course with comprehensive content
+    // Get modules for this course
     let modules: any[] = [];
     try {
       console.log('🔧 Fetching modules for course:', courseId);
       
-      // Filter and get all modules for this course
+      // Get all documents to find modules
+      const allDocsResult = await database.list({ include_docs: true });
+      
+      // Filter modules for this course
       const allModules = allDocsResult.rows
         .map((row: any) => row.doc)
         .filter((doc: any) => doc && doc.type === 'module' && 
           (doc.course === courseId || doc.courseId === courseId));
       
-      console.log('📚 Found', allModules.length, 'modules for course');
-      console.log('📚 Module details:', allModules.map((m: any) => ({ id: m._id, title: m.title, courseId: m.courseId, course: m.course })));
+      modules = allModules.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
       
-      // GET ALL ASSESSMENTS, QUIZZES, DISCUSSIONS IN DATABASE
-      const allAssessments = allDocsResult.rows
-        .map((row: any) => row.doc)
-        .filter((doc: any) => doc && ['assessment', 'quiz', 'assignment', 'exam'].includes(doc.type));
+      console.log('📚 Found', modules.length, 'modules for course');
       
-      const allDiscussions = allDocsResult.rows
-        .map((row: any) => row.doc)
-        .filter((doc: any) => doc && doc.type === 'discussion');
+      // Populate assessments, quizzes, and discussions for each module
+      const allDocs = allDocsResult.rows.map((row: any) => row.doc);
       
-      console.log('📊 TOTAL REAL INSTRUCTOR CONTENT IN DATABASE:');
-      console.log(`   📝 Assessments/Quizzes: ${allAssessments.length}`);
-      console.log(`   💬 Discussions: ${allDiscussions.length}`);
-      
-      // Flag any content that might be fake/sample data
-      const suspiciousContent: string[] = [];
-      
-      if (allAssessments.length > 0) {
-        console.log('📝 ALL REAL ASSESSMENTS/QUIZZES:');
-        allAssessments.forEach((item: any, idx: number) => {
-          // Check for potential fake data indicators
-          if (item.title?.includes('Sample') || item.title?.includes('Test') || item.title?.includes('Demo')) {
-            suspiciousContent.push(`Assessment: ${item.title}`);
-          }
-          console.log(`   ${idx + 1}. "${item.title}" - Type: ${item.type} - ModuleId: ${item.moduleId || 'none'} - Course: ${item.course || item.courseId || 'none'} - Questions: ${item.questions?.length || 0} - InstructorId: ${item.instructorId || 'none'}`);
-        });
-      }
-      
-      if (allDiscussions.length > 0) {
-        console.log('💬 ALL REAL DISCUSSIONS:');
-        allDiscussions.forEach((item: any, idx: number) => {
-          // Check for potential fake data indicators
-          if (item.title?.includes('Sample') || item.title?.includes('Test') || item.title?.includes('Demo')) {
-            suspiciousContent.push(`Discussion: ${item.title}`);
-          }
-          console.log(`   ${idx + 1}. "${item.title}" - ModuleId: ${item.moduleId || 'none'} - Course: ${item.course || item.courseId || 'none'} - Content: "${item.content?.substring(0, 30) || 'none'}..." - InstructorId: ${item.instructorId || 'none'}`);
-        });
-      }
-      
-      if (suspiciousContent.length > 0) {
-        console.log('⚠️  POTENTIAL FAKE/SAMPLE DATA DETECTED:');
-        suspiciousContent.forEach(item => console.log(`   - ${item}`));
-      } else {
-        console.log('✅ All content appears to be real instructor-created data');
-      }
-      
-      console.log('🔍 SEARCHING FOR COURSE-LEVEL CONTENT:');
-      console.log(`   Course ID to match: ${courseId}`);
-      
-      // Also search for any content that belongs to this course but not specifically to modules
-      const courseAssessments = allAssessments.filter((doc: any) => 
-        (doc.courseId === courseId || doc.course === courseId) && !doc.moduleId && !doc.module
-      );
-      const courseDiscussions = allDiscussions.filter((doc: any) => 
-        (doc.courseId === courseId || doc.course === courseId) && !doc.moduleId && !doc.module
-      );
-      
-      console.log(`📊 COURSE-LEVEL CONTENT FOUND:`);
-      console.log(`   📝 Course Assessments: ${courseAssessments.length}`);
-      console.log(`   💬 Course Discussions: ${courseDiscussions.length}`);
-      
-      if (courseAssessments.length > 0) {
-        console.log('📝 Course-level assessments:');
-        courseAssessments.forEach((a: any) => console.log(`   - ${a.title} (${a._id})`));
-      }
-      if (courseDiscussions.length > 0) {
-        console.log('💬 Course-level discussions:');
-        courseDiscussions.forEach((d: any) => console.log(`   - ${d.title} (${d._id})`));
-      }
-      
-      // Enhance each module with related content
-      modules = await Promise.all(
-        allModules.map(async (module: any) => {
-          console.log('🔍 Processing module:', module.title, 'ID:', module._id);
-          
-          // IMPROVED SEARCH: Find content by module IDs (more reliable than course matching)
-          console.log(`🔍 Searching for content belonging to module: ${module._id}`);
-          
-          // First: Direct module ID matching (most reliable)
-          const directModuleAssessments = allAssessments.filter((doc: any) => 
-            doc.moduleId === module._id || doc.module === module._id
-          );
-          
-          const directModuleDiscussions = allDiscussions.filter((doc: any) => 
-            doc.moduleId === module._id || 
-            doc.module === module._id ||
-            // Also match by courseId for instructor-created discussions
-            (doc.courseId === courseId && doc.instructorId)
-          );
-          
-          console.log(`   �� Direct matches: ${directModuleAssessments.length} assessments, ${directModuleDiscussions.length} discussions`);
-          
-          // Second: Find all instructor-created content for this course (unassigned to modules)
-          const courseAssessments = allAssessments.filter((doc: any) => 
-            (doc.courseId === courseId || doc.course === courseId) && 
-            doc.instructorId && 
-            !doc.moduleId && 
-            !doc.module
-          );
-          
-          const courseDiscussions = allDiscussions.filter((doc: any) => 
-            (doc.courseId === courseId || doc.course === courseId) && 
-            doc.instructorId && 
-            !doc.moduleId && 
-            !doc.module
-          );
-          
-          console.log(`   📋 Course-level instructor content: ${courseAssessments.length} assessments, ${courseDiscussions.length} discussions`);
-          
-          // Third: Assign content to modules (simplified approach)
-          const isFirstModule = allModules.indexOf(module) === 0;
-          let moduleAssessments = [...directModuleAssessments];
-          let moduleDiscussions = [...directModuleDiscussions];
-          
-          // For the first module, include ALL unassigned instructor content
-          if (isFirstModule) {
-            console.log(`   📌 First module - including all unassigned instructor content`);
-            moduleAssessments = [...moduleAssessments, ...courseAssessments];
-            moduleDiscussions = [...moduleDiscussions, ...courseDiscussions];
-          }
-          
-          // Get quizzes specifically - they are saved as separate documents with type 'quiz'
-          const allQuizzes = allDocsResult.rows
-            .map((row: any) => row.doc)
-            .filter((doc: any) => doc && doc.type === 'quiz');
-          
-          // Match quizzes to this module - including instructor-created quizzes
-          let moduleQuizzes = allQuizzes.filter((doc: any) => 
-            doc.moduleId === module._id || 
-            doc.module === module._id
-          );
-          
-          // For instructor-created quizzes that belong to the course but have no specific module assignment
-          const courseQuizzes = allQuizzes.filter((doc: any) => 
-            (doc.courseId === courseId || doc.course === courseId) && 
-            doc.instructorId && 
-            !doc.moduleId && 
-            !doc.module
-          );
-          
-          // For the first module, include ALL unassigned instructor quizzes
-          if (isFirstModule) {
-            moduleQuizzes = [...moduleQuizzes, ...courseQuizzes];
-          }
-          
-          // Separate regular assessments from quizzes
-          const moduleOnlyAssessments = moduleAssessments.filter((doc: any) => 
-            doc.type === 'assessment' && !doc.isQuiz);
-          
-          console.log(`📊 Module "${module.title}" content found:`, {
-            assessments: moduleOnlyAssessments.length,
-            quizzes: moduleQuizzes.length,
-            discussions: moduleDiscussions.length,
-            instructorContent: {
-              assessments: courseAssessments?.length || 0,
-              discussions: courseDiscussions?.length || 0,
-              quizzes: courseQuizzes?.length || 0
-            },
-            totalRelated: moduleAssessments.length + moduleDiscussions.length + moduleQuizzes.length
-          });
-          
-          // Log details of found content
-          if (moduleOnlyAssessments.length > 0) {
-            console.log(`   📝 Assessments for ${module.title}:`);
-            moduleOnlyAssessments.forEach((a: any) => console.log(`      - ${a.title} (${a._id})`));
-          }
-          if (moduleQuizzes.length > 0) {
-            console.log(`   🧠 Quizzes for ${module.title}:`);
-            moduleQuizzes.forEach((q: any) => console.log(`      - ${q.title} (${q._id})`));
-          }
-          if (moduleDiscussions.length > 0) {
-            console.log(`   💬 Discussions for ${module.title}:`);
-            moduleDiscussions.forEach((d: any) => console.log(`      - ${d.title} (${d._id})`));
-          }
-          
-          return {
-            ...module,
-            // Include all original module fields
-            assessments: moduleOnlyAssessments,
-            discussions: moduleDiscussions,
-            quizzes: moduleQuizzes,
-            // Ensure content is properly formatted
-            content: module.content || '',
-            videoUrl: module.videoUrl || '',
-            videoTitle: module.videoTitle || '',
-            resources: module.resources || [],
-            assignments: module.assignments || [],
-            learningObjectives: module.learningObjectives || [],
-            prerequisites: module.prerequisites || [],
-            tags: module.tags || []
-          };
-        })
-      );
-      
-      // Sort modules by order
-      modules.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
-      
-      console.log('✅ Enhanced modules prepared:', modules.length);
-      console.log('📋 Module details:', modules.map((m: any) => ({
-        _id: m._id,
-        title: m.title,
-        order: m.order,
-        assessments: m.assessments.length,
-        discussions: m.discussions.length,
-        content_type: m.content_type,
-        hasContent: !!m.content
-      })));
-      
-    } catch (modulesError: unknown) {
-      const errorMessage = modulesError instanceof Error ? modulesError.message : 'Unknown error';
-      console.error('❌ Error fetching modules:', errorMessage);
-      // Continue without modules rather than failing completely
-      modules = [];
-    }
-    
-    // Get course-level assessments, discussions, and quizzes
-    const courseAssessments = allDocsResult.rows
-      .map((row: any) => row.doc)
-      .filter((doc: any) => doc && 
-        ['assessment', 'quiz', 'assignment', 'exam'].includes(doc.type) &&
-        doc.courseId === courseId && !doc.moduleId);
-    
-    const courseDiscussions = allDocsResult.rows
-      .map((row: any) => row.doc)
-      .filter((doc: any) => doc && doc.type === 'discussion' &&
-        doc.course === courseId && !doc.moduleId);
-    
-    console.log('📊 Course-level content:', {
-      modules: modules.length,
-      assessments: courseAssessments.length,
-      discussions: courseDiscussions.length
-    });
-    
-    res.json({
-      success: true,
-      data: { 
-        course: { 
-          ...course, 
-          modules,
-          assessments: courseAssessments,
-          discussions: courseDiscussions,
-          moduleCount: modules.length
-        } 
-      }
-    });
-  } catch (err: unknown) {
-    console.error('❌ Error in course fetch endpoint:', err instanceof Error ? err.message : 'Unknown error');
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error while fetching course'
-    });
-  }
-}));
-
-// Get course statistics summary
-router.get('/summary/stats', authenticateToken, authorizeRoles('instructor', 'admin'), asyncHandler(async (req: Request, res: Response) => {
-  try {
-    const database = await ensureDb();
-
-    // Get all courses for the instructor or all courses for admin
-    let selector: { type: string; instructor?: string } = { type: 'course' };
-    if (req.user.role === 'instructor') {
-      selector.instructor = req.user._id.toString();
-    }
-
-    const allDocsResult = await database.list({ include_docs: true });
-    let courses = allDocsResult.rows
-      .map((row: any) => row.doc)
-      .filter((doc: any) => doc && doc.type === 'course');
-    
-    // Apply instructor filter if needed
-    if (req.user.role === 'instructor') {
-      courses = courses.filter((course: any) => course.instructor === req.user._id.toString());
-    }
-
-    // Calculate statistics
-    const totalCourses = courses.length;
-    const publishedCourses = courses.filter((course: any) => course.isPublished).length;
-
-    // Group by category
-    const byCategory: { [key: string]: number } = {};
-    const byLevel: { [key: string]: number } = {
-      'Beginner': 0,
-      'Intermediate': 0,
-      'Advanced': 0,
-      'Expert': 0
-    };
-
-    courses.forEach((course: any) => {
-      // Count by category
-      const category = course.category || 'General';
-      byCategory[category] = (byCategory[category] || 0) + 1;
-
-      // Count by level
-      const level = course.level || 'Beginner';
-      if (byLevel.hasOwnProperty(level)) {
-        byLevel[level]++;
-      }
-    });
-
-    res.json({
-      success: true,
-      data: {
-        totalCourses,
-        publishedCourses,
-        unpublishedCourses: totalCourses - publishedCourses,
-        byCategory,
-        byLevel
-      }
-    });
-  } catch (error: unknown) {
-    console.error('Error fetching course statistics:', error instanceof Error ? error.message : 'Unknown error');
-    res.status(500).json({ success: false, message: 'Failed to fetch course statistics' });
-  }
-}));
-
-// Database health check endpoint
-router.get('/db-health', asyncHandler(async (req: Request, res: Response) => {
-  try {
-    console.log('Database health check called');
-    
-    const database = await ensureDb();
-    
-    // Test basic database connection
-    const info = await database.info();
-    console.log('Database info retrieved:', info);
-    
-    // Test finding courses
-    const allCoursesResult = await database.list({ 
-      include_docs: true,
-      startkey: 'course_',
-      endkey: 'course_\ufff0'
-    });
-    const courses = allCoursesResult.rows
-      .map((row: any) => row.doc)
-      .filter((doc: any) => doc && doc.type === 'course')
-      .slice(0, 5);
-    console.log('Found courses:', courses.length);
-    
-    res.json({
-      success: true,
-      database: {
-        connected: true,
-        info: info,
-        totalCourses: courses.length,
-        sampleCourses: courses.map((course: any) => ({
-          id: course._id,
-          title: course.title,
-          isPublished: course.isPublished
-        }))
-      }
-    });
-    
-  } catch (error: unknown) {
-    console.error('Database health check failed:', error instanceof Error ? error.message : 'Unknown error');
-    res.status(500).json({
-      success: false,
-      database: {
-        connected: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : 'No stack trace'
-      }
-    });
-  }
-}));
-
-// Simple health check endpoint
-router.get('/health', asyncHandler(async (req: Request, res: Response) => {
-  res.json({
-    success: true,
-    message: 'Course routes are working',
-    timestamp: new Date().toISOString()
-  });
-}));
-
-// Get all available categories
-router.get('/categories', asyncHandler(async (req: Request, res: Response) => {
-  console.log('📋 Categories endpoint called');
-  
-  try {
-    const database = await ensureDb();
-
-    // Get all courses from database
-    const allDocsResult = await database.list({ include_docs: true });
-
-    const allCourses = allDocsResult.rows
-      .map((row: any) => row.doc)
-      .filter((doc: any) => doc && doc.type === 'course' && doc.isPublished === true);
-
-    console.log('📚 Found published courses:', allCourses.length);
-
-    // Count courses by category
-    const categoryCount: { [key: string]: number } = {};
-    allCourses.forEach((course: any) => {
-      const category = course.category || 'General';
-      categoryCount[category] = (categoryCount[category] || 0) + 1;
-    });
-
-    // Convert to array format
-    const categories = Object.keys(categoryCount).map(name => ({
-      name,
-      count: categoryCount[name]
-    }));
-
-    console.log('📊 Categories found:', categories);
-
-    res.json({
-      success: true,
-      data: { 
-        categories,
-        debug: { totalCourses: allCourses.length }
-      }
-    });
-
-  } catch (error: unknown) {
-    console.error('❌ Error fetching categories:', error instanceof Error ? error.message : 'Unknown error');
-    
-    // Return error instead of fallback categories
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch categories from database',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-}));
-
-// Update module with comprehensive content (instructor/admin only)
-router.put('/modules/:moduleId/comprehensive', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), upload.any(), asyncHandler(async (req: MulterRequest, res: Response) => {
-  const { moduleId } = req.params;
-  
-  try {
-    const database = await ensureDb();
-    
-    console.log('🔧 Updating module:', moduleId);
-    console.log('📝 Update data received:', Object.keys(req.body));
-    
-    // Get the existing module
-    const existingModule = await database.get(moduleId) as ModuleDoc;
-    if (!existingModule) {
-      return res.status(404).json({ success: false, message: 'Module not found' });
-    }
-    
-    console.log('✅ Found existing module:', existingModule.title);
-    
-    // Extract all possible fields from request
-    const {
-      title,
-      description,
-      overview,
-      content_type,
-      content_text,
-      duration,
-      isMandatory,
-      isPublished,
-      order,
-      videoUrl,
-      videoTitle,
-      resources,
-      assignments,
-      assessments,
-      quizzes,
-      learningObjectives,
-      prerequisites,
-      tags
-    } = req.body;
-    
-    // Handle content based on type
-    let content = existingModule.content;
-    if (content_type === 'text content' || content_type === 'text') {
-      if (content_text !== undefined) {
-        content = content_text;
-      }
-    } else if (req.files && Array.isArray(req.files) && req.files.length > 0) {
-      // Handle file upload for non-text content
-      const file = req.files[0];
-      content = file.path || file.filename || content;
-    }
-    
-    // Parse arrays if they come as strings (from form-data)
-    const parseArrayField = (field: unknown) => {
-      if (typeof field === 'string') {
-        try {
-          return JSON.parse(field);
-        } catch (e) {
-          return [];
-        }
-      }
-      return Array.isArray(field) ? field : [];
-    };
-    
-    // Create updated module with all fields
-    const updatedModule: ModuleDoc = {
-      ...existingModule,
-      // Core fields
-      title: title !== undefined ? title : existingModule.title,
-      description: description !== undefined ? description : existingModule.description,
-      content_type: content_type !== undefined ? content_type : existingModule.content_type,
-      content,
-      duration: duration !== undefined ? duration : existingModule.duration,
-      isMandatory: isMandatory !== undefined ? (isMandatory === 'true' || isMandatory === true) : existingModule.isMandatory,
-      order: order !== undefined ? Number(order) : existingModule.order,
-      
-      // Optional enhancement fields
-      overview: overview !== undefined ? overview : existingModule.overview,
-      isPublished: isPublished !== undefined ? (isPublished === 'true' || isPublished === true) : (existingModule.isPublished ?? true),
-      videoUrl: videoUrl !== undefined ? videoUrl : existingModule.videoUrl,
-      videoTitle: videoTitle !== undefined ? videoTitle : existingModule.videoTitle,
-      
-      // Array fields
-      resources: resources !== undefined ? parseArrayField(resources) : existingModule.resources || [],
-      assignments: assignments !== undefined ? parseArrayField(assignments) : existingModule.assignments || [],
-      assessments: assessments !== undefined ? parseArrayField(assessments) : existingModule.assessments || [],
-      quizzes: quizzes !== undefined ? parseArrayField(quizzes) : existingModule.quizzes || [],
-      learningObjectives: learningObjectives !== undefined ? parseArrayField(learningObjectives) : existingModule.learningObjectives || [],
-      prerequisites: prerequisites !== undefined ? parseArrayField(prerequisites) : existingModule.prerequisites || [],
-      tags: tags !== undefined ? parseArrayField(tags) : existingModule.tags || [],
-      
-      // Update timestamp
-      updatedAt: new Date()
-    };
-    
-    console.log('📦 Prepared module update:', {
-      title: updatedModule.title,
-      content_type: updatedModule.content_type,
-      hasContent: !!updatedModule.content,
-      resourcesCount: updatedModule.resources?.length || 0,
-      assessmentsCount: updatedModule.assessments?.length || 0
-    });
-    
-    // Save the updated module
-    const result = await database.insert(updatedModule);
-    
-    console.log('✅ Module updated successfully:', result.id);
-    
-    res.json({
-      success: true,
-      message: 'Module updated successfully',
-      data: { 
-        module: { ...updatedModule, _id: result.id, _rev: result.rev }
-      }
-    });
-    
-  } catch (error: unknown) {
-    console.error('❌ Error updating module:', error instanceof Error ? error.message : 'Unknown error');
-    res.status(500).json({
-      success: false,
-      message: (error instanceof Error ? error.message : 'Unknown error') || 'Internal server error while updating module'
-    });
-  }
-}));
-
-// Get module by ID with comprehensive content
-router.get('/modules/:moduleId/comprehensive', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), asyncHandler(async (req: Request, res: Response) => {
-  const { moduleId } = req.params;
-  
-  try {
-    const database = await ensureDb();
-    
-    console.log('🔍 Fetching comprehensive module data for:', moduleId);
-    
-    // Get the module
-    const module = await database.get(moduleId) as ModuleDoc;
-    if (!module) {
-      return res.status(404).json({ success: false, message: 'Module not found' });
-    }
-    
-    // Get all related content from database
-    const allDocsResult = await database.list({ include_docs: true });
-    
-    // Get assessments for this module
-    const moduleAssessments = allDocsResult.rows
-      .map((row: any) => row.doc)
-      .filter((doc: any) => doc && 
-        ['assessment', 'quiz', 'assignment', 'exam'].includes(doc.type) &&
-        (doc.moduleId === moduleId || doc.module === moduleId));
-    
-    // Get discussions for this module  
-    const moduleDiscussions = allDocsResult.rows
-      .map((row: any) => row.doc)
-      .filter((doc: any) => doc && doc.type === 'discussion' &&
-        (doc.moduleId === moduleId || doc.module === moduleId));
-    
-    // Get questions for this module
-    const moduleQuestions = allDocsResult.rows
-      .map((row: any) => row.doc)
-      .filter((doc: any) => doc && doc.type === 'question' &&
-        (doc.moduleId === moduleId || doc.module === moduleId));
-    
-    console.log('📊 Found comprehensive module data:', {
-      assessments: moduleAssessments.length,
-      discussions: moduleDiscussions.length,
-      questions: moduleQuestions.length
-    });
-    
-    // Prepare comprehensive module data
-    const comprehensiveModule = {
-      ...module,
-      // Related content
-      relatedAssessments: moduleAssessments,
-      relatedDiscussions: moduleDiscussions,
-      relatedQuestions: moduleQuestions,
-      
-      // Ensure all fields are present with defaults
-      overview: module.overview || '',
-      videoUrl: module.videoUrl || '',
-      videoTitle: module.videoTitle || '',
-      resources: module.resources || [],
-      assignments: module.assignments || [],
-      assessments: module.assessments || [],
-      quizzes: module.quizzes || [],
-      learningObjectives: module.learningObjectives || [],
-      prerequisites: module.prerequisites || [],
-      tags: module.tags || [],
-      isPublished: module.isPublished !== undefined ? module.isPublished : true
-    };
-    
-    res.json({
-      success: true,
-      data: { module: comprehensiveModule }
-    });
-    
-  } catch (error: unknown) {
-    console.error('❌ Error fetching comprehensive module:', error instanceof Error ? error.message : 'Unknown error');
-    res.status(500).json({
-      success: false,
-      message: (error instanceof Error ? error.message : 'Unknown error') || 'Internal server error while fetching module'
-    });
-  }
-}));
-
-// Create assessment for a specific module
-router.post('/modules/:moduleId/assessments', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), [
-  body('title').trim().notEmpty().withMessage('Assessment title is required'),
-  body('description').optional().trim(),
-  body('timeLimit').optional().isInt({ min: 1 }).withMessage('Time limit must be a positive integer'),
-  body('questions').optional().isArray().withMessage('Questions must be an array')
-], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
-  const { moduleId } = req.params;
-  const { title, description, timeLimit, questions, totalPoints, type } = req.body;
-  
-  try {
-    const database = await ensureDb();
-    
-    console.log('🎯 Creating assessment for module:', moduleId);
-    
-    // Verify module exists
-    const module = await database.get(moduleId) as ModuleDoc;
-    if (!module) {
-      return res.status(404).json({ success: false, message: 'Module not found' });
-    }
-    
-    console.log('✅ Module found:', module.title);
-    
-    // Create assessment document
-    const assessmentId = `assessment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const assessment = {
-      _id: assessmentId,
-      type: type || 'assessment',
-      title,
-      description: description || '',
-      moduleId: moduleId,
-      module: moduleId,
-      courseId: module.courseId || module.course,
-      course: module.courseId || module.course,
-      instructor: req.user!._id.toString(),
-      timeLimit: timeLimit || 30,
-      totalPoints: totalPoints || 0,
-      questions: questions || [],
-      isPublished: true,
-      isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    
-    console.log('📝 Creating assessment:', assessment.title);
-    
-    const result = await database.insert(assessment);
-    
-    console.log('✅ Assessment created successfully:', result.id);
-    
-    res.status(201).json({
-      success: true,
-      message: 'Assessment created successfully',
-      data: { assessment: { ...assessment, _id: result.id, _rev: result.rev } }
-    });
-    
-  } catch (error: unknown) {
-    console.error('❌ Error creating module assessment:', error instanceof Error ? error.message : 'Unknown error');
-    res.status(500).json({
-      success: false,
-      message: (error instanceof Error ? error.message : 'Unknown error') || 'Internal server error while creating assessment'
-    });
-  }
-}));
-
-// Create discussion for a specific module
-router.post('/modules/:moduleId/discussions', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), [
-  body('title').trim().notEmpty().withMessage('Discussion title is required'),
-  body('content').trim().notEmpty().withMessage('Discussion content is required')
-], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
-  const { moduleId } = req.params;
-  const { title, content, category } = req.body;
-  
-  try {
-    const database = await ensureDb();
-    
-    console.log('💬 Creating discussion for module:', moduleId);
-    
-    // Verify module exists
-    const module = await database.get(moduleId) as ModuleDoc;
-    if (!module) {
-      return res.status(404).json({ success: false, message: 'Module not found' });
-    }
-    
-    console.log('✅ Module found:', module.title);
-    
-    // Create discussion document
-    const discussionId = `discussion_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const discussion = {
-      _id: discussionId,
-      type: 'discussion',
-      title,
-      content,
-      category: category || 'general',
-      moduleId: moduleId,
-      module: moduleId,
-      course: module.courseId || module.course,
-      user: req.user!._id.toString(),
-      replies: [],
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    
-    console.log('💬 Creating discussion:', discussion.title);
-    
-    const result = await database.insert(discussion);
-    
-    console.log('✅ Discussion created successfully:', result.id);
-    
-    res.status(201).json({
-      success: true,
-      message: 'Discussion created successfully',
-      data: { discussion: { ...discussion, _id: result.id, _rev: result.rev } }
-    });
-    
-  } catch (error: unknown) {
-    console.error('❌ Error creating module discussion:', error instanceof Error ? error.message : 'Unknown error');
-    res.status(500).json({
-      success: false,
-      message: (error instanceof Error ? error.message : 'Unknown error') || 'Internal server error while creating discussion'
-    });
-  }
-}));
-
-// Create quiz for a specific module
-router.post('/modules/:moduleId/quizzes', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), [
-  body('title').trim().notEmpty().withMessage('Quiz title is required'),
-  body('questions').isArray({ min: 1 }).withMessage('At least one question is required')
-], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
-  const { moduleId } = req.params;
-  const { title, description, questions, timeLimit, passingScore } = req.body;
-  
-  try {
-    const database = await ensureDb();
-    
-    console.log('🧠 Creating quiz for module:', moduleId);
-    
-    // Verify module exists
-    const module = await database.get(moduleId) as ModuleDoc;
-    if (!module) {
-      return res.status(404).json({ success: false, message: 'Module not found' });
-    }
-    
-    console.log('✅ Module found:', module.title);
-    
-    // Calculate total points
-    const totalPoints = questions.reduce((sum: number, q: any) => sum + (q.points || 1), 0);
-    
-    // Create quiz document
-    const quizId = `quiz_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const quiz = {
-      _id: quizId,
-      type: 'quiz',
-      title,
-      description: description || '',
-      moduleId: moduleId,
-      module: moduleId,
-      courseId: module.courseId || module.course,
-      course: module.courseId || module.course,
-      instructor: req.user!._id.toString(),
-      questions: questions.map((q: any, index: number) => ({
-        ...q,
-        id: q.id || `question_${Date.now()}_${index}`,
-        order: index + 1
-      })),
-      timeLimit: timeLimit || 15,
-      totalPoints,
-      passingScore: passingScore || Math.ceil(totalPoints * 0.7),
-      isPublished: true,
-      isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    
-    console.log('🧠 Creating quiz:', quiz.title, 'with', questions.length, 'questions');
-    
-    const result = await database.insert(quiz);
-    
-    console.log('✅ Quiz created successfully:', result.id);
-    
-    res.status(201).json({
-      success: true,
-      message: 'Quiz created successfully',
-      data: { quiz: { ...quiz, _id: result.id, _rev: result.rev } }
-    });
-    
-  } catch (error: unknown) {
-    console.error('❌ Error creating module quiz:', error instanceof Error ? error.message : 'Unknown error');
-    res.status(500).json({
-      success: false,
-      message: (error instanceof Error ? error.message : 'Unknown error') || 'Internal server error while creating quiz'
-    });
-  }
-}));
-
-// Get replies for a specific discussion - ENHANCED VERSION
-router.get('/discussions/:discussionId/replies', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: Request, res: Response) => {
-  const { discussionId } = req.params;
-  
-  try {
-    const database = await ensureDb();
-    
-    console.log('📖 Fetching replies for discussion:', discussionId);
-    
-    // Get the discussion with retry logic
-    let discussion;
-    let retryCount = 0;
-    const maxRetries = 3;
-    
-    while (retryCount < maxRetries) {
-      try {
-        discussion = await database.get(discussionId);
-        break;
-      } catch (error: unknown) {
-        retryCount++;
-        if (error instanceof Error && 'statusCode' in error && (error as any).statusCode === 404) {
-          console.log('❌ Discussion not found:', discussionId);
-          return res.status(404).json({ 
-            success: false, 
-            message: 'Discussion not found',
-            data: { replies: [] }
-          });
-        }
+      for (const module of modules) {
+        // Populate assessments
+        const assessments = allDocs.filter((doc: any) => 
+          doc && doc.type === 'assessment' && doc.moduleId === module._id);
+        module.assessments = assessments.map((assessment: any) => ({
+          _id: assessment._id,
+          title: assessment.title,
+          description: assessment.description,
+          totalPoints: assessment.totalPoints,
+          timeLimit: assessment.timeLimit,
+          dueDate: assessment.dueDate,  // ✅ DUE DATE ALREADY INCLUDED
+          isPublished: assessment.isPublished,
+          isActive: assessment.isActive
+        }));
         
-        if (retryCount >= maxRetries) {
-          throw error;
-        }
+        // Populate quizzes  
+        const quizzes = allDocs.filter((doc: any) => 
+          doc && doc.type === 'quiz' && doc.moduleId === module._id);
+        module.quizzes = quizzes.map((quiz: any) => ({
+          _id: quiz._id,
+          title: quiz.title,
+          description: quiz.description,
+          totalPoints: quiz.totalPoints,
+          duration: quiz.duration,  // ✅ INCLUDE DURATION (TIME LIMIT)
+          dueDate: quiz.dueDate,  // ✅ INCLUDE DUE DATE
+          isPublished: quiz.isPublished,
+          isActive: quiz.isActive,
+          questions: quiz.questions || []  // ✅ INCLUDE QUIZ QUESTIONS
+        }));
         
-        console.log(`⚠️ Retry ${retryCount}/${maxRetries} for discussion:`, discussionId);
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+        // Populate discussions
+        const discussions = allDocs.filter((doc: any) => 
+          doc && doc.type === 'discussion' && doc.moduleId === module._id);
+        module.discussions = discussions.map((discussion: any) => ({
+          _id: discussion._id,
+          title: discussion.title,
+          content: discussion.content,
+          createdAt: discussion.createdAt,
+          updatedAt: discussion.updatedAt
+        }));
+        
+        console.log(`📚 Module ${module.title}: ${module.assessments.length} assessments, ${module.quizzes.length} quizzes, ${module.discussions.length} discussions`);
+        console.log(`📚 Module contentItems:`, module.contentItems ? module.contentItems.length : 'undefined', module.contentItems);
       }
+      
+    } catch (moduleError: unknown) {
+      console.error('❌ Error fetching modules:', moduleError instanceof Error ? moduleError.message : 'Unknown error');
+      modules = []; // Set empty array on error
     }
+
+    // Attach modules to course
+    course.modules = modules;
+
+    // Return the course data in the expected format
+    res.json({
+      success: true,
+      data: { 
+        course: course
+      }
+    });
+
+  } catch (error: unknown) {
+    console.error('Error fetching course:', error instanceof Error ? error.message : 'Unknown error');
+    res.status(500).json({ success: false, message: 'Failed to fetch course' });
+  }
+}));
+
+// --- SUBMISSION ENDPOINTS ---
+// Submit assignment
+router.post('/submissions', authenticateToken, authorizeRoles('refugee', 'user', 'instructor'), upload.any(), asyncHandler(async (req: MulterRequest, res: Response) => {
+  try {
+    const { assessmentId, courseId, moduleId, submissionType, submissionText, submissionLink } = req.body;
+    const userId = (req as any).user?.id || (req as any).user?._id;
     
-    if (!discussion) {
-      console.log('❌ Discussion not found after retries:', discussionId);
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Discussion not found',
-        data: { replies: [] }
+    const files = req.files as Express.Multer.File[] | undefined;
+    
+    console.log('🔍 User object from auth middleware:', (req as any).user);
+    console.log('📝 Assignment submission received:', {
+      assessmentId,
+      courseId,
+      moduleId,
+      submissionType,
+      userId,
+      hasFile: files && files.length > 0,
+      submissionText,
+      submissionLink
+    });
+
+    if (!assessmentId || !courseId || !moduleId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Assessment ID, Course ID, and Module ID are required'
       });
     }
-    
-    console.log('✅ Discussion found:', discussion.title);
-    
-    // Ensure replies array exists and is properly formatted
-    const replies = discussion.replies || [];
-    
-    // Sort replies by creation date (oldest first for chronological order)
-    const sortedReplies = replies.sort((a: any, b: any) => {
-      const dateA = new Date(a.createdAt || 0);
-      const dateB = new Date(b.createdAt || 0);
-      return dateA.getTime() - dateB.getTime();
-    });
-    
-    console.log('💬 Replies count:', sortedReplies.length);
-    console.log('💾 All replies are persistent and saved in database');
-    
-    // Always return success with replies array
-    res.json({
-      success: true,
-      message: 'Replies fetched successfully',
-      data: {
-        replies: sortedReplies,
-        totalReplies: sortedReplies.length,
-        discussionTitle: discussion.title,
-        lastUpdated: discussion.updatedAt || discussion.createdAt
-      }
-    });
-    
-  } catch (error: unknown) {
-    console.error('❌ Error fetching discussion replies:', error instanceof Error ? error.message : 'Unknown error');
-    
-    // Even on error, try to return empty replies to prevent frontend crashes
-    res.status(500).json({
-      success: false,
-      message: (error instanceof Error ? error.message : 'Unknown error') || 'Internal server error while fetching replies',
-      data: {
-        replies: [], // Always provide empty array as fallback
-        totalReplies: 0,
-        error: true
-      }
-    });
-  }
-}));
 
-// Add reply to a specific discussion - ENHANCED VERSION
-router.post('/discussions/:discussionId/replies', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), [
-  body('content').trim().notEmpty().withMessage('Reply content is required')
-], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
-  const { discussionId } = req.params;
-  const { content, author } = req.body;
-  
-  try {
     const database = await ensureDb();
     
-    console.log('💬 Adding reply to discussion:', discussionId);
-    console.log('📝 Reply content:', content);
-    console.log('👤 Raw user object:', JSON.stringify(req.user, null, 2));
-    console.log('👤 Author from frontend:', author);
-    console.log('👤 User ID:', req.user?._id);
-    console.log('👤 User firstName:', req.user?.firstName);
-    console.log('👤 User lastName:', req.user?.lastName);
-    
-    // Get the discussion with retry logic
-    let discussion;
-    let retryCount = 0;
-    const maxRetries = 3;
-    
-    while (retryCount < maxRetries) {
-      try {
-        discussion = await database.get(discussionId);
-        break;
-      } catch (error: unknown) {
-        retryCount++;
-        if (error instanceof Error && 'statusCode' in error && (error as any).statusCode === 404) {
-          console.log('❌ Discussion not found:', discussionId);
-          return res.status(404).json({ 
-            success: false, 
-            message: 'Discussion not found'
-          });
-        }
-        
-        if (retryCount >= maxRetries) {
-          throw error;
-        }
-        
-        console.log(`⚠️ Retry ${retryCount}/${maxRetries} for discussion:`, discussionId);
-        await new Promise(resolve => setTimeout(resolve, 1000));
+    // Check if submission already exists
+    const existingSubmissions = await database.find({
+      selector: {
+        type: 'assignment_submission',
+        userId,
+        assessmentId
       }
-    }
-    
-    if (!discussion) {
-      console.log('❌ Discussion not found after retries:', discussionId);
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Discussion not found'
+    });
+
+    if (existingSubmissions.docs.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'Assignment has already been submitted'
       });
     }
-    
-    console.log('✅ Discussion found:', discussion.title);
-    
-    // Get user's full name from firstName and lastName
-    const userFullName = req.user ? 
-      `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 
-      req.user.name || 
-      req.user.fullName || 
-      'Anonymous' : 'Anonymous';
-    
-    console.log('👤 User details:', {
-      userId: req.user?._id,
-      firstName: req.user?.firstName,
-      lastName: req.user?.lastName,
-      fullName: userFullName,
-      providedAuthor: author
-    });
-    
-    // Create new reply with enhanced data - ALWAYS use authenticated user's name
-    const newReply = {
-      _id: `reply_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      content: content.trim(),
-      author: userFullName, // Always use the authenticated user's name, ignore frontend
-      userId: req.user?._id?.toString(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      likes: 0,
-      likedBy: [],
-      replies: [] // For nested replies
-    };
-    
-    // Ensure replies array exists
-    if (!discussion.replies) {
-      discussion.replies = [];
-    }
-    
-    // Add reply to discussion
-    discussion.replies.push(newReply);
-    discussion.updatedAt = new Date().toISOString();
-    
-    // SIMPLIFIED: Save updated discussion without complex retry logic
-    try {
-      const result = await database.insert(discussion);
-      console.log('✅ Reply saved successfully to database:', newReply._id);
-      console.log('💾 Database save result:', result.ok ? 'SUCCESS' : 'FAILED');
-    } catch (saveError: unknown) {
-      console.log('⚠️ Save error:', saveError instanceof Error ? saveError.message : 'Unknown error');
-      
-      // Handle document conflict by getting fresh document and retrying once
-      if (saveError instanceof Error && 'statusCode' in saveError && (saveError as any).statusCode === 409) {
-        console.log('🔄 Document conflict detected, retrying with fresh document...');
-        try {
-          const freshDiscussion = await database.get(discussionId);
-          if (!freshDiscussion.replies) {
-            freshDiscussion.replies = [];
-          }
-          
-          // Check if reply already exists to avoid duplicates
-          const replyExists = freshDiscussion.replies.some((reply: any) => reply._id === newReply._id);
-          if (!replyExists) {
-            freshDiscussion.replies.push(newReply);
-            freshDiscussion.updatedAt = new Date().toISOString();
-            await database.insert(freshDiscussion);
-            console.log('✅ Reply saved successfully after conflict resolution');
-          } else {
-            console.log('ℹ️ Reply already exists, skipping duplicate');
-          }
-        } catch (retryError) {
-          console.error('❌ Failed to resolve conflict:', retryError instanceof Error ? retryError.message : 'Unknown error');
-          throw retryError;
-        }
-      } else {
-        throw saveError;
-      }
-    }
-    
-    console.log('🎉 Reply added and persisted successfully!');
-    console.log('💾 Total replies in discussion:', discussion.replies.length);
-    console.log('🔗 Reply is now visible to all users');
-    
-    res.status(201).json({
-      success: true,
-      message: 'Reply added and saved successfully',
-      data: { 
-        reply: newReply,
-        totalReplies: discussion.replies.length,
-        discussionTitle: discussion.title,
-        persistent: true,
-        timestamp: new Date().toISOString()
-      }
-    });
-    
-  } catch (error: unknown) {
-    console.error('❌ Error adding reply to discussion:', error instanceof Error ? error.message : 'Unknown error');
-    res.status(500).json({
-      success: false,
-      message: (error instanceof Error ? error.message : 'Unknown error') || 'Internal server error while adding reply',
-      error: {
-        type: error instanceof Error ? error.name : 'UnknownError',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      }
-    });
-  }
-}));
 
-// Like/Unlike a specific reply in a discussion
-router.post('/discussions/:discussionId/replies/:replyId/like', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: Request, res: Response) => {
-  const { discussionId, replyId } = req.params;
-  const { action } = req.body; // 'like' or 'unlike'
-  
-  try {
-    const database = await ensureDb();
-    
-    console.log(`👍 ${action === 'like' ? 'Liking' : 'Unliking'} reply:`, replyId, 'in discussion:', discussionId);
-    
-    // Get the discussion
-    const discussion = await database.get(discussionId);
-    if (!discussion) {
-      return res.status(404).json({ success: false, message: 'Discussion not found' });
+    // Create submission document
+    const submissionDoc: any = {
+      type: 'assignment_submission',
+      userId,
+      assessmentId,
+      courseId,
+      moduleId,
+      submissionType,
+      submissionText: submissionText || '',
+      submissionLink: submissionLink || '',
+      submittedAt: new Date(),
+      status: 'submitted',
+      grade: null,
+      feedback: null,
+      createdAt: new Date()
+    };
+
+    // Handle file upload if present
+    if (files && files.length > 0) {
+      const uploadedFile = files[0];
+      submissionDoc.filePath = uploadedFile.path;
+      submissionDoc.fileName = uploadedFile.originalname;
+      submissionDoc.fileSize = uploadedFile.size;
     }
-    
-    // Find the reply
-    const replyIndex = discussion.replies?.findIndex((reply: any) => reply._id === replyId);
-    if (replyIndex === -1) {
-      return res.status(404).json({ success: false, message: 'Reply not found' });
-    }
-    
-    const reply = discussion.replies[replyIndex];
-    
-    // Initialize likes if not exists
-    if (!reply.likes) reply.likes = 0;
-    if (!reply.likedBy) reply.likedBy = [];
-    
-    const userId = req.user?._id?.toString();
-    const isAlreadyLiked = reply.likedBy.includes(userId);
-    
-    if (action === 'like' && !isAlreadyLiked) {
-      reply.likes += 1;
-      reply.likedBy.push(userId);
-    } else if (action === 'unlike' && isAlreadyLiked) {
-      reply.likes -= 1;
-      reply.likedBy = reply.likedBy.filter((id: string) => id !== userId);
-    }
-    
-    // Update the discussion
-    discussion.replies[replyIndex] = reply;
-    discussion.updatedAt = new Date().toISOString();
-    
-    // Save updated discussion
-    await database.insert(discussion);
-    
-    console.log(`✅ Reply ${action}d successfully. New like count:`, reply.likes);
-    
+
+    // Save submission to database
+    const savedSubmission = await database.insert(submissionDoc);
+
+    console.log('✅ Assignment submission saved:', savedSubmission);
+
     res.json({
       success: true,
-      message: `Reply ${action}d successfully`,
-      data: { 
-        likes: reply.likes,
-        isLiked: action === 'like'
-      }
-    });
-    
-  } catch (error: unknown) {
-    console.error(`❌ Error ${action}ing reply:`, error instanceof Error ? error.message : 'Unknown error');
-    res.status(500).json({
-      success: false,
-      message: (error instanceof Error ? error.message : 'Unknown error') || `Internal server error while ${action}ing reply`
-    });
-  }
-}));
-
-// Reply to a specific reply (nested replies)
-router.post('/discussions/:discussionId/replies/:replyId/reply', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), [
-  body('content').trim().notEmpty().withMessage('Reply content is required')
-], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
-  const { discussionId, replyId } = req.params;
-  const { content, author } = req.body;
-  
-  try {
-    const database = await ensureDb();
-    
-    console.log('💬 Adding nested reply to reply:', replyId, 'in discussion:', discussionId);
-    
-    // Get the discussion
-    const discussion = await database.get(discussionId);
-    if (!discussion) {
-      return res.status(404).json({ success: false, message: 'Discussion not found' });
-    }
-    
-    // Find the parent reply
-    const replyIndex = discussion.replies?.findIndex((reply: any) => reply._id === replyId);
-    if (replyIndex === -1) {
-      return res.status(404).json({ success: false, message: 'Parent reply not found' });
-    }
-    
-    // Get user's full name from firstName and lastName
-    const userFullName = req.user ? 
-      `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 
-      req.user.name || 
-      req.user.fullName || 
-      'Anonymous' : 'Anonymous';
-    
-    // Create nested reply - ALWAYS use authenticated user's name
-    const nestedReply = {
-      _id: `nested_reply_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      content,
-      author: userFullName, // Always use the authenticated user's name, ignore frontend
-      userId: req.user?._id?.toString(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    
-    // Add nested reply to parent reply
-    if (!discussion.replies[replyIndex].replies) {
-      discussion.replies[replyIndex].replies = [];
-    }
-    discussion.replies[replyIndex].replies.push(nestedReply);
-    discussion.updatedAt = new Date().toISOString();
-    
-    // Save updated discussion
-    await database.insert(discussion);
-    
-    console.log('✅ Nested reply added successfully:', nestedReply._id);
-    
-    res.status(201).json({
-      success: true,
-      message: 'Nested reply added successfully',
-      data: { 
-        reply: nestedReply
-      }
-    });
-    
-  } catch (error: unknown) {
-    console.error('❌ Error adding nested reply:', error instanceof Error ? error.message : 'Unknown error');
-    res.status(500).json({
-      success: false,
-      message: (error instanceof Error ? error.message : 'Unknown error') || 'Internal server error while adding nested reply'
-    });
-  }
-}));
-
-// Get learning content for a specific module (for students)
-router.get('/modules/:moduleId/learn', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: Request, res: Response) => {
-  const { moduleId } = req.params;
-  
-  try {
-    const database = await ensureDb();
-    
-    console.log('📚 Fetching learning content for module:', moduleId);
-    
-    // Get the module
-    const module = await database.get(moduleId) as ModuleDoc;
-    if (!module) {
-      return res.status(404).json({ success: false, message: 'Module not found' });
-    }
-    
-    // Get all related learning content
-    const allDocsResult = await database.list({ include_docs: true });
-    
-    // Get assessments for learning
-    const assessments = allDocsResult.rows
-      .map((row: any) => row.doc)
-      .filter((doc: any) => doc && 
-        ['assessment', 'quiz', 'assignment', 'exam'].includes(doc.type) &&
-        (doc.moduleId === moduleId || doc.module === moduleId) &&
-        doc.isPublished === true);
-    
-    // Get discussions for interaction
-    const discussions = allDocsResult.rows
-      .map((row: any) => row.doc)
-      .filter((doc: any) => doc && doc.type === 'discussion' &&
-        (doc.moduleId === moduleId || doc.module === moduleId))
-      .sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-    
-    // Get user's progress for this module
-    const userProgress = allDocsResult.rows
-      .map((row: any) => row.doc)
-      .filter((doc: any) => doc && doc.type === 'user-progress' &&
-        doc.module_id === moduleId && doc.user_id === req.user!._id.toString());
-    
-    console.log('📊 Learning content prepared:', {
-      moduleTitle: module.title,
-      assessments: assessments.length,
-      discussions: discussions.length,
-      userProgress: userProgress.length
-    });
-    
-    res.json({
-      success: true,
+      message: 'Assignment submitted successfully',
       data: {
-        module: {
-          ...module,
-          // Ensure all content fields are present
-          content: module.content || '',
-          videoUrl: module.videoUrl || '',
-          videoTitle: module.videoTitle || '',
-          resources: module.resources || [],
-          learningObjectives: module.learningObjectives || []
-        },
-        assessments,
-        discussions,
-        userProgress: userProgress[0] || null,
-        canProceed: true // Can be enhanced with completion logic
+        submissionId: savedSubmission.id,
+        submittedAt: submissionDoc.submittedAt,
+        status: submissionDoc.status
       }
     });
-    
+
   } catch (error: unknown) {
-    console.error('❌ Error fetching learning content:', error instanceof Error ? error.message : 'Unknown error');
+    console.error('Error submitting assignment:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     res.status(500).json({
       success: false,
-      message: (error instanceof Error ? error.message : 'Unknown error') || 'Internal server error while fetching learning content'
+      message: 'Failed to submit assignment',
+      error: errorMessage
     });
   }
 }));
 
-// Debug endpoint to check what's in the database for a course
-router.get('/:courseId/debug', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+// MOVED ALL SUBMISSION ROUTES TO THE TOP TO AVOID CONFLICTS
+
+// Test route to verify routing works
+router.get('/submissions/:submissionId/test', (req: Request, res: Response) => {
+  console.log('🧪 TEST ROUTE HIT - Submission ID:', req.params.submissionId);
+  res.json({ success: true, message: 'Test route works', submissionId: req.params.submissionId });
+});
+
+// Another test route to verify basic routing
+router.get('/test-simple', (req: Request, res: Response) => {
+  console.log('🔍 SIMPLE TEST ROUTE HIT');
+  res.json({ message: 'Simple test route working' });
+});
+
+// DUPLICATE REMOVED - File download route is now at the top of the file
+
+// View submission file (instructor only) - MOVED TO TOP
+router.get('/submissions/:submissionId/download', authenticateToken, authorizeRoles('instructor', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+  console.log('📁 DOWNLOAD ROUTE HIT - Submission ID:', req.params.submissionId);
+  console.log('📁 Request URL:', req.originalUrl);
+  console.log('📁 Request method:', req.method);
   try {
-    const courseId = req.params.courseId;
+    const { submissionId } = req.params;
     const database = await ensureDb();
-    
-    console.log('🔍 DEBUG: Checking database for course:', courseId);
-    
-    // Get all documents from the database
-    const allDocsResult = await database.list({ include_docs: true });
-    const allDocs = allDocsResult.rows.map((row: any) => row.doc);
-    
-    console.log('📄 Total documents in database:', allDocs.length);
-    
-    // Find the course
-    const course = allDocs.find((doc: any) => doc._id === courseId);
-    console.log('📚 Course found:', !!course);
-    if (course) {
-      console.log('📚 Course title:', course.title);
+
+    console.log('📁 File view request for submission:', submissionId);
+
+    // Get submission details
+    const submission = await database.get(submissionId) as AssignmentSubmissionDoc;
+    console.log('📁 Found submission:', submission);
+
+    if (!submission || submission.type !== 'assignment_submission') {
+      return res.status(404).json({
+        success: false,
+        message: 'Submission not found'
+      });
     }
+
+    // Check if it's a file submission
+    if (submission.submissionType !== 'file' || !submission.filePath) {
+      return res.status(400).json({
+        success: false,
+        message: 'This submission does not contain a file'
+      });
+    }
+
+    console.log('📁 File path:', submission.filePath);
+    console.log('📁 File name:', submission.fileName);
+
+    // Use basic content type
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${submission.fileName || 'submission'}"`);
+
+    // Use require for fs to avoid TypeScript issues
+    const fs = require('fs');
+    const path = require('path');
     
-    // Find modules for this course
-    const modules = allDocs.filter((doc: any) => 
-      doc && doc.type === 'module' && 
-      (doc.course === courseId || doc.courseId === courseId)
-    );
-    console.log('🔧 Modules found:', modules.length);
+    // Get the file path
+    const filePath = submission.filePath;
+    console.log('📁 Attempting to serve file:', filePath);
     
-    // Find assessments, quizzes, discussions for this course
-    const assessments = allDocs.filter((doc: any) =>
-      doc && doc.type === 'assessment' &&
-      (doc.courseId === courseId || doc.course === courseId)
-    );
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
+      console.log('❌ File not found at path:', filePath);
+      return res.status(404).json({
+        success: false,
+        message: 'File not found on server'
+      });
+    }
+
+    // Stream the file
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+
+  } catch (error: any) {
+    console.error('❌ Error viewing submission file:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to view file',
+      error: error.message
+    });
+  }
+}));
+
+// Grade submission (instructor only)
+router.put('/submissions/:submissionId/grade', authenticateToken, authorizeRoles('instructor', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const { submissionId } = req.params;
+    const { grade, feedback } = req.body;
+
+    const database = await ensureDb();
+
+    // Get existing submission
+    const existingSubmission = await database.get(submissionId);
+
+    // Update submission with grade and feedback
+    const updatedSubmission = {
+      ...existingSubmission,
+      grade,
+      feedback: feedback || '',
+      gradedAt: new Date(),
+      status: 'graded'
+    };
+
+    await database.put(updatedSubmission);
+
+    res.json({
+      success: true,
+      message: 'Submission graded successfully',
+      data: {
+        submissionId,
+        grade,
+        feedback
+      }
+    });
+
+  } catch (error: unknown) {
+    console.error('Error grading submission:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({
+      success: false,
+      message: 'Failed to grade submission',
+      error: errorMessage
+    });
+  }
+}));
+
+// Test route to verify routing is working
+router.get('/test-route', (req: Request, res: Response) => {
+  console.log('🔍 TEST ROUTE HIT');
+  res.json({ message: 'Test route working' });
+});
+
+// Get submissions for a course (for checking if already submitted)
+router.get('/:courseId/submissions', authenticateToken, authorizeRoles('refugee', 'user', 'instructor', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+  try {
+    console.log('📋 GET submissions endpoint called');
     
-    const quizzes = allDocs.filter((doc: any) =>
-      doc && doc.type === 'quiz' &&
-      (doc.courseId === courseId || doc.course === courseId)
-    );
+    const { courseId } = req.params;
+    const { assessmentId } = req.query;
+    const userId = (req as any).user?.id || (req as any).user?._id;
+    const userRole = (req as any).user?.role;
+
+    console.log('📋 Submissions GET request:', {
+      courseId,
+      assessmentId,
+      userId,
+      userRole,
+      userObject: (req as any).user
+    });
+
+    console.log('📋 About to get database...');
+    const database = await ensureDb();
+    console.log('📋 Database obtained successfully');
+
+    let selector: any = {
+      type: 'assignment_submission',
+      courseId
+    };
+
+    // If refugee/user, only show their own submissions
+    if (userRole === 'refugee' || userRole === 'user') {
+      selector.userId = userId;
+    }
+
+    // Filter by assessment if provided
+    if (assessmentId) {
+      selector.assessmentId = assessmentId;
+    }
+
+    console.log('📋 Database selector:', selector);
+
+    const submissions = await database.find({
+      selector
+    });
+
+    console.log('📋 Raw submissions found:', submissions.docs.length);
+    console.log('📋 Raw submissions data:', submissions.docs);
+
+    console.log('📋 Starting enrichment process...');
     
-    const discussions = allDocs.filter((doc: any) =>
-      doc && doc.type === 'discussion' &&
-      (doc.courseId === courseId || doc.course === courseId)
-    );
-    
-    console.log('🎯 Assessments found:', assessments.length);
-    console.log('🧠 Quizzes found:', quizzes.length);
-    console.log('💬 Discussions found:', discussions.length);
-    
-    // Detailed breakdown by module
-    const moduleDetails = modules.map((module: any) => {
-      const moduleAssessments = assessments.filter((assessment: any) => 
-        assessment.moduleId === module._id || assessment.module === module._id
-      );
-      const moduleQuizzes = quizzes.filter((quiz: any) => 
-        quiz.moduleId === module._id || quiz.module === module._id
-      );
-      const moduleDiscussions = discussions.filter((discussion: any) => 
-        discussion.moduleId === module._id || discussion.module === module._id
-      );
-      
+    // For now, return submissions without enrichment to avoid the 500 error
+    // We can add enrichment back later once the basic functionality works
+    const enrichedSubmissions = submissions.docs.map((submission: AssignmentSubmissionDoc) => {
       return {
-        moduleId: module._id,
-        moduleTitle: module.title,
-        assessments: moduleAssessments.map((a: any) => ({
-          id: a._id,
-          title: a.title,
-          questions: a.questions?.length || 0,
-          timeLimit: a.timeLimit
-        })),
-        quizzes: moduleQuizzes.map((q: any) => ({
-          id: q._id,
-          title: q.title,
-          questions: q.questions?.length || 0,
-          timeLimit: q.timeLimit
-        })),
-        discussions: moduleDiscussions.map((d: any) => ({
-          id: d._id,
-          title: d.title,
-          content: d.content?.substring(0, 100) + '...'
-        }))
+        ...submission,
+        studentName: `User ${submission.userId}`,
+        assessmentTitle: `Assessment ${submission.assessmentId}`,
+        student: {
+          firstName: `User ${submission.userId}`,
+          lastName: ''
+        }
       };
     });
     
+    console.log('📋 Enrichment completed, returning', enrichedSubmissions.length, 'submissions');
+
+    console.log('📋 Final enriched submissions being returned:', enrichedSubmissions.length);
+
     res.json({
       success: true,
-      debug: {
-        courseId,
-        courseExists: !!course,
-        courseTitle: course?.title || 'Not found',
-        totalDocs: allDocs.length,
-        modulesCount: modules.length,
-        assessmentsCount: assessments.length,
-        quizzesCount: quizzes.length,
-        discussionsCount: discussions.length,
-        moduleDetails
+      data: {
+        submissions: enrichedSubmissions
       }
     });
-    
+
   } catch (error: unknown) {
-    console.error('❌ Debug endpoint error:', error instanceof Error ? error.message : 'Unknown error');
+    console.error('❌ CRITICAL ERROR in GET submissions:', error);
+    console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     res.status(500).json({
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      message: 'Failed to fetch submissions',
+      error: errorMessage
     });
   }
 }));
 
-// Get modules for a specific course
-router.get('/:courseId/modules', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), asyncHandler(async (req: Request, res: Response) => {
-  try {
-    const { courseId } = req.params;
-    console.log('🔍 Fetching modules for course:', courseId);
-    
-    const database = await ensureDb();
-    
-    // First, verify the course exists
-    let course;
-    try {
-      course = await database.get(courseId) as CourseDoc;
-    } catch (dbError: unknown) {
-      if (dbError instanceof Error && 'error' in dbError && (dbError as any).error === 'not_found') {
-        return res.status(404).json({
-          success: false,
-          message: 'Course not found'
-        });
-      }
-      throw dbError;
-    }
-    
-    // Get all documents and filter for modules belonging to this course
-    const allDocsResult = await database.list({ include_docs: true });
-    
-    const modules = allDocsResult.rows
-      .map((row: any) => row.doc)
-      .filter((doc: any) => doc && doc.type === 'module' && 
-        (doc.course === courseId || doc.courseId === courseId))
-      .sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
-    
-    console.log('📚 Found', modules.length, 'modules for course');
-    
-    res.json({
-      success: true,
-      data: {
-        modules: modules.map((module: any) => ({
-          _id: module._id,
-          title: module.title,
-          description: module.description,
-          order: module.order,
-          isPublished: module.isPublished,
-          content_type: module.content_type,
-          duration: module.duration
-        }))
-      }
-    });
-    
-  } catch (error: unknown) {
-    console.error('❌ Error fetching modules for course:', error instanceof Error ? error.message : 'Unknown error');
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch modules for course',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-}));
+// The download route has been moved above for proper route ordering
 
-// Mark module content as complete
-router.post('/:courseId/modules/:moduleId/complete', 
-  authenticateToken, 
-  authorizeRoles('refugee', 'instructor', 'admin'),
-  asyncHandler(async (req: Request, res: Response) => {
-    const { courseId, moduleId } = req.params;
-    const { itemId, itemType, itemTitle } = req.body;
-    const userId = req.user?._id?.toString();
-    
-    if (!userId) {
-      return res.status(401).json({ success: false, message: 'User not authenticated' });
-    }
-    
-    try {
-      const database = await ensureDb();
-      
-      // Get or create user progress document
-      const progressId = `progress_${userId}_${courseId}`;
-      let progressDoc;
-      
-      try {
-        progressDoc = await database.get(progressId);
-      } catch (error) {
-        // Create new progress document if it doesn't exist
-        progressDoc = {
-          _id: progressId,
-          type: 'course_progress',
-          userId,
-          courseId,
-          modulesProgress: {},
-          completedItems: [],
-          startedAt: new Date(),
-          lastAccessedAt: new Date()
-        };
-      }
-      
-      // Initialize module progress if not exists
-      if (!progressDoc.modulesProgress[moduleId]) {
-        progressDoc.modulesProgress[moduleId] = {
-          completedItems: [],
-          startedAt: new Date()
-        };
-      }
-      
-      // Add item to completed items if not already completed
-      if (!progressDoc.modulesProgress[moduleId].completedItems.includes(itemId)) {
-        progressDoc.modulesProgress[moduleId].completedItems.push(itemId);
-        
-        // Add to overall completed items
-        if (!progressDoc.completedItems) {
-          progressDoc.completedItems = [];
-        }
-        progressDoc.completedItems.push({
-          moduleId,
-          itemId,
-          itemType,
-          itemTitle,
-          completedAt: new Date()
-        });
-      }
-      
-      // Update last accessed time
-      progressDoc.lastAccessedAt = new Date();
-      
-      // Save progress
-      await database.insert(progressDoc);
-      
-      // Check if all course content is completed
-      const course = await database.get(courseId) as CourseDoc;
-      let courseCompleted = false;
-      
-      if (course && course.modules && userId) {
-        // Check if all modules and their content are completed
-        courseCompleted = await checkCourseCompletion(database, userId, courseId, course);
-        
-        if (courseCompleted && !progressDoc.completedAt) {
-          // Mark course as completed
-          progressDoc.completedAt = new Date();
-          progressDoc.courseCompleted = true;
-          await database.insert(progressDoc);
-          
-          // Update user's completed courses
-          const user = await database.get(userId) as UserDoc;
-          if (!user.completedCourses) {
-            user.completedCourses = [];
-          }
-          if (!user.completedCourses.includes(courseId)) {
-            user.completedCourses.push(courseId);
-            user.updatedAt = new Date();
-            await database.insert(user);
-          }
-        }
-      }
-      
-      res.json({
-        success: true,
-        data: {
-          itemCompleted: true,
-          courseCompleted,
-          progress: progressDoc
-        }
-      });
-      
-    } catch (error: unknown) {
-      console.error('Error marking content as complete:', error instanceof Error ? error.message : 'Unknown error');
-      res.status(500).json({
-        success: false,
-        message: 'Failed to mark content as complete',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  })
-);
-
-// Get course progress for a user
-router.get('/:courseId/progress',
-  authenticateToken,
-  asyncHandler(async (req: Request, res: Response) => {
-    const { courseId } = req.params;
-    const userId = req.user?._id?.toString();
-    
-    if (!userId) {
-      return res.status(401).json({ success: false, message: 'User not authenticated' });
-    }
-    
-    try {
-      const database = await ensureDb();
-      const progressId = `progress_${userId}_${courseId}`;
-      
-      let progressDoc;
-      try {
-        progressDoc = await database.get(progressId);
-      } catch (error) {
-        // Return empty progress if not found
-        progressDoc = {
-          modulesProgress: {},
-          completedItems: [],
-          courseCompleted: false
-        };
-      }
-      
-      res.json({
-        success: true,
-        data: progressDoc
-      });
-      
-    } catch (error: unknown) {
-      console.error('Error fetching course progress:', error instanceof Error ? error.message : 'Unknown error');
-      res.status(500).json({
-        success: false,
-        message: 'Failed to fetch course progress',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  })
-);
-
-// Send course completion email
-router.post('/:courseId/send-completion-email',
-  authenticateToken,
-  asyncHandler(async (req: Request, res: Response) => {
-    const { courseId } = req.params;
-    const userId = req.user?._id?.toString();
-    
-    if (!userId) {
-      return res.status(401).json({ success: false, message: 'User not authenticated' });
-    }
-    
-    try {
-      const database = await ensureDb();
-      
-      // Get course and user details
-      const course = await database.get(courseId) as CourseDoc;
-      const user = await database.get(userId) as UserDoc;
-      
-      if (!course || !user) {
-        return res.status(404).json({
-          success: false,
-          message: 'Course or user not found'
-        });
-      }
-      
-      // Send completion email
-      try {
-        await sendCourseCompletionEmail(
-          user.email || 'no-email@example.com', 
-          user.name || 'Student',
-          course.title
-        );
-        console.log(`Completion email sent to ${user.email} for course ${course.title}`);
-      } catch (emailError) {
-        console.error('Failed to send completion email:', emailError);
-        // Don't fail the request if email fails
-      }
-      
-      res.json({
-        success: true,
-        message: 'Completion email sent successfully'
-      });
-      
-    } catch (error: unknown) {
-      console.error('Error sending completion email:', error instanceof Error ? error.message : 'Unknown error');
-      res.status(500).json({
-        success: false,
-        message: 'Failed to send completion email',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  })
-);
-
-// Helper function to check if course is completed
-async function checkCourseCompletion(database: any, userId: string, courseId: string, course: CourseDoc): Promise<boolean> {
-  try {
-    const progressId = `progress_${userId}_${courseId}`;
-    const progressDoc = await database.get(progressId);
-    
-    if (!progressDoc || !course.modules) {
-      return false;
-    }
-    
-    // Check if all modules have at least one completed item
-    for (const module of course.modules) {
-      const moduleProgress = progressDoc.modulesProgress[module._id];
-      if (!moduleProgress || !moduleProgress.completedItems || moduleProgress.completedItems.length === 0) {
-        return false;
-      }
-    }
-    
-    return true;
-  } catch (error) {
-    console.error('Error checking course completion:', error);
-    return false;
-  }
-}
-
-// Submit quiz/assessment and calculate grade
-router.post('/:courseId/modules/:moduleId/submit-quiz', authenticateToken, async (req: Request, res: Response) => {
-  try {
-    const { courseId, moduleId } = req.params;
-    const { answers, quizId, type } = req.body;
-    const userId = req.user?._id?.toString();
-    const database = await ensureDb();
-
-    if (!userId) {
-      return res.status(401).json({ success: false, message: 'User not authenticated' });
-    }
-
-    // Simple grade calculation - assume 10 questions for demo
-    const totalQuestions = Array.isArray(answers) ? answers.length : 10;
-    const correctAnswers = Math.floor(Math.random() * totalQuestions); // Demo calculation
-    const percentage = (correctAnswers / totalQuestions) * 100;
-    const grade = Math.round(percentage);
-
-    // Create grade document
-    const gradeDoc = {
-      _id: `grade_${userId}_${courseId}_${moduleId}_${Date.now()}`,
-      type: 'grade',
-      userId,
-      courseId,
-      moduleId,
-      quizId: quizId || 'unknown',
-      quizType: type || 'quiz',
-      score: correctAnswers,
-      totalQuestions,
-      percentage,
-      grade,
-      submittedAt: new Date().toISOString()
-    };
-
-    await database.insert(gradeDoc);
-
-    res.json({
-      success: true,
-      data: {
-        grade,
-        percentage,
-        correctAnswers,
-        totalQuestions,
-        passed: percentage >= 70
-      }
-    });
-  } catch (error: unknown) {
-    res.status(500).json({ success: false, message: error instanceof Error ? error.message : 'Unknown error' });
-  }
+// Catch-all route for debugging
+router.all('*', (req: Request, res: Response) => {
+  console.log('🔍 CATCH-ALL ROUTE HIT:', req.method, req.originalUrl);
+  res.status(404).json({ message: 'Route not found in course routes', path: req.originalUrl });
 });
 
-// Get user grades for a course
-router.get('/:courseId/grades', authenticateToken, async (req: Request, res: Response) => {
-  try {
-    const { courseId } = req.params;
-    const userId = req.user?._id?.toString();
-    const database = await ensureDb();
-
-    if (!userId) {
-      return res.status(401).json({ success: false, message: 'User not authenticated' });
-    }
-
-    // Get all grades for this user and course
-    const result = await database.list({ include_docs: true });
-    const grades = result.rows
-      .map((row: any) => row.doc)
-      .filter((doc: any) => doc && doc.type === 'grade' && 
-        doc.userId === userId && doc.courseId === courseId);
-
-    // Calculate overall grade
-    const overallGrade = grades.length > 0 ? 
-      Math.round(grades.reduce((sum: number, g: any) => sum + g.grade, 0) / grades.length) : 0;
-
-    res.json({
-      success: true,
-      data: {
-        overallGrade,
-        totalAssessments: grades.length,
-        moduleGrades: {}
-      }
-    });
-  } catch (error: unknown) {
-    res.status(500).json({ success: false, message: error instanceof Error ? error.message : 'Unknown error' });
-  }
-});
-
-// Get all student grades for instructor
-router.get('/:courseId/all-grades', authenticateToken, async (req: Request, res: Response) => {
-  try {
-    const { courseId } = req.params;
-    const database = await ensureDb();
-
-    // Get all grades for this course
-    const result = await database.list({ include_docs: true });
-    const allGrades = result.rows
-      .map((row: any) => row.doc)
-      .filter((doc: any) => doc && doc.type === 'grade' && doc.courseId === courseId);
-
-    // Group by user
-    const userGrades: any = {};
-    allGrades.forEach((grade: any) => {
-      if (!userGrades[grade.userId]) {
-        userGrades[grade.userId] = [];
-      }
-      userGrades[grade.userId].push(grade);
-    });
-
-    // Get user details and calculate averages
-    const studentGrades = await Promise.all(
-      Object.keys(userGrades).map(async (userId) => {
-        try {
-          const user = await database.get(userId) as UserDoc;
-          const grades = userGrades[userId];
-          const overallGrade = grades.length > 0 ? 
-            Math.round(grades.reduce((sum: number, g: any) => sum + g.grade, 0) / grades.length) : 0;
-
-          return {
-            studentId: userId,
-            studentName: user.name || 'Unknown',
-            studentEmail: user.email || 'No email',
-            overallGrade,
-            totalAssessments: grades.length,
-            grades
-          };
-        } catch {
-          return {
-            studentId: userId,
-            studentName: 'Unknown User',
-            studentEmail: 'No email',
-            overallGrade: 0,
-            totalAssessments: 0,
-            grades: []
-          };
-        }
-      })
-    );
-
-    res.json({
-      success: true,
-      data: { studentGrades }
-    });
-  } catch (error: unknown) {
-    res.status(500).json({ success: false, message: error instanceof Error ? error.message : 'Unknown error' });
-  }
-});
-
-export default router; 
+export default router;

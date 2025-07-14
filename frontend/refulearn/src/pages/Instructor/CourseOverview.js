@@ -5,7 +5,8 @@ import {
   ArrowBack, Edit, Publish, Delete, PlayArrow, Assignment, Quiz, Forum, 
   People, Schedule, Category, VisibilityOff, ExpandMore, ExpandLess, 
   VideoLibrary, Description, Link, CheckCircle, RadioButtonUnchecked, Add,
-  MenuBook, School, Star, TrendingUp, LightbulbOutlined, Psychology, Assessment
+  MenuBook, School, Star, TrendingUp, LightbulbOutlined, Psychology, Assessment,
+  Article, AudioFile, AttachFile
 } from '@mui/icons-material';
 
 const Container = styled.div`
@@ -667,6 +668,12 @@ export default function CourseOverview() {
           // Ensure modules is an array
           if (courseData.modules && Array.isArray(courseData.modules)) {
             console.log('Found', courseData.modules.length, 'modules for course');
+            courseData.modules.forEach((module, index) => {
+              console.log(`Module ${index + 1}: ${module.title}`);
+              console.log('  - contentItems:', module.contentItems ? module.contentItems.length : 'undefined', module.contentItems);
+              console.log('  - content:', module.content ? 'Yes' : 'No');
+              console.log('  - assessments:', module.assessments ? module.assessments.length : 0);
+            });
             
             // Clean up duplicate discussions in each module
             courseData.modules = courseData.modules.map(module => {
@@ -1038,6 +1045,10 @@ export default function CourseOverview() {
               totalItems++;
               itemBreakdown.push('1 video');
             }
+            if (module.contentItems && module.contentItems.length > 0) {
+              totalItems += module.contentItems.length;
+              itemBreakdown.push(`${module.contentItems.length} content item${module.contentItems.length > 1 ? 's' : ''}`);
+            }
             if (module.resources && module.resources.length > 0) {
               totalItems += module.resources.length;
               itemBreakdown.push(`${module.resources.length} resource${module.resources.length > 1 ? 's' : ''}`);
@@ -1125,6 +1136,46 @@ export default function CourseOverview() {
                           </ContentItemAction>
                         </ContentItem>
                     )}
+
+                    {/* Content Items */}
+                    {module.contentItems && module.contentItems.map((item, idx) => (
+                      <ContentItem 
+                        key={`content-item-${idx}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // Navigate to internal content viewer for all content items
+                          navigate(`/instructor/courses/${courseId}/modules/${module._id}/content-item/${idx}`, {
+                            state: { 
+                              contentItem: item,
+                              module: module,
+                              course: course,
+                              returnUrl: `/instructor/courses/${courseId}/overview`
+                            }
+                          });
+                        }}
+                      >
+                          <ContentItemIcon type={item.type}>
+                          {item.type === 'article' && <Article />}
+                          {item.type === 'video' && <VideoLibrary />}
+                          {item.type === 'audio' && <AudioFile />}
+                          {item.type === 'file' && <AttachFile />}
+                          </ContentItemIcon>
+                          <ContentItemInfo>
+                          <ContentItemTitle>{item.title}</ContentItemTitle>
+                          <ContentItemMeta>
+                            {item.type === 'article' && 'Read • Article'}
+                            {item.type === 'video' && 'Watch • Video'}
+                            {item.type === 'audio' && 'Listen • Audio'}
+                            {item.type === 'file' && 'View • File'}
+                            {item.url && ' • External Link'}
+                            {item.fileName && ` • ${item.fileName}`}
+                          </ContentItemMeta>
+                          </ContentItemInfo>
+                          <ContentItemAction>
+                          <RadioButtonUnchecked />
+                          </ContentItemAction>
+                        </ContentItem>
+                    ))}
 
                     {module.resources && module.resources.map((resource, idx) => (
                       <ContentItem 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { Delete, Add, RadioButtonChecked } from '@mui/icons-material';
+import { Delete, Add, RadioButtonChecked, Edit } from '@mui/icons-material';
 import { useUser } from '../contexts/UserContext';
 import { useNavigate } from 'react-router-dom';
 
@@ -131,6 +131,24 @@ const DeleteButton = styled.button`
   cursor: pointer;
   display: flex;
   align-items: center;
+  margin-left: 0.5rem;
+`;
+
+const EditButton = styled.button`
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  margin-left: 0.5rem;
+`;
+
+const QuestionButtons = styled.div`
+  display: flex;
+  gap: 0.5rem;
 `;
 
 export default function AssessmentCreator({ isOpen, onClose, onSave, assessment = null, isQuiz = false, returnUrl = null }) {
@@ -162,6 +180,8 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
     points: 1,
     explanation: ''
   });
+
+  const [editingQuestionIndex, setEditingQuestionIndex] = useState(null);
 
 
     // Reset form when opening/closing or when assessment prop changes
@@ -198,12 +218,68 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
         points: 1,
         explanation: ''
       });
+      
+      // Reset editing state
+      setEditingQuestionIndex(null);
     }
   }, [isOpen, assessment]);
+
+  // Add validation function for quiz questions
+  const validateQuizQuestion = (question) => {
+    if (!question || !question.question) return { valid: false, error: 'Question text is required' };
+    
+    const questionText = question.question.trim();
+    
+    // Very basic validation - just ensure it's not empty and has some content
+    if (questionText.length === 0) {
+      return { valid: false, error: 'Question text cannot be empty' };
+    }
+    
+    if (questionText.length < 3) {
+      return { valid: false, error: 'Question text should be at least 3 characters long' };
+    }
+    
+    // Only reject extremely obvious test data patterns
+    const obviousTestPatterns = [
+      /^test$/i,
+      /^abc$/i,
+      /^123$/i,
+      /^xxx+$/i,
+    ];
+    
+    if (obviousTestPatterns.some(pattern => pattern.test(questionText))) {
+      return { valid: false, error: `Please provide a meaningful question instead of "${question.question}"` };
+    }
+    
+    // Validate options for multiple choice questions
+    if (question.type === 'multiple-choice' || question.type === 'multiple_choice') {
+      if (!question.options || !Array.isArray(question.options) || question.options.length < 2) {
+        return { valid: false, error: 'Multiple choice questions must have at least 2 options' };
+      }
+      
+      // Basic validation for options - just ensure they're not empty
+      const emptyOptions = question.options.filter((option) => {
+        return !option || option.trim().length === 0;
+      });
+      
+      if (emptyOptions.length > 0) {
+        return { valid: false, error: 'All answer options must have content' };
+      }
+    }
+    
+    return { valid: true };
+  };
 
   const addQuestion = () => {
     if (!currentQuestion.question.trim()) {
       alert('Please enter a question');
+      return;
+    }
+    
+    // Validate the question
+    const questionValidation = validateQuizQuestion(currentQuestion);
+    if (!questionValidation.valid) {
+      alert(`Invalid Question: ${questionValidation.error}`);
       return;
     }
     
@@ -220,7 +296,6 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
         return;
       }
     }
-    // Short answer questions don't need additional validation
     
     const newQuestion = {
       ...currentQuestion,
@@ -251,6 +326,82 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
       questions: prev.questions.filter((_, i) => i !== index),
       totalPoints: prev.totalPoints - questionToRemove.points
     }));
+  };
+
+  const startEditingQuestion = (index) => {
+    const questionToEdit = assessmentData.questions[index];
+    setCurrentQuestion({
+      question: questionToEdit.question,
+      type: questionToEdit.type,
+      options: questionToEdit.options || ['', '', '', ''],
+      correctAnswer: questionToEdit.correctAnswer,
+      points: questionToEdit.points,
+      explanation: questionToEdit.explanation || ''
+    });
+    setEditingQuestionIndex(index);
+  };
+
+  const saveEditedQuestion = () => {
+    if (!currentQuestion.question.trim()) {
+      alert('Please enter a question');
+      return;
+    }
+    
+    // Validate based on question type
+    if (currentQuestion.type === 'multiple-choice') {
+      if (currentQuestion.options.some(opt => !opt.trim())) {
+        alert('Please fill in all answer options');
+        return;
+      }
+    } else if (currentQuestion.type === 'true-false') {
+      if (currentQuestion.correctAnswer !== 0 && currentQuestion.correctAnswer !== 1) {
+        alert('Please select True or False as the correct answer');
+        return;
+      }
+    }
+    
+    const oldQuestion = assessmentData.questions[editingQuestionIndex];
+    const updatedQuestion = {
+      ...currentQuestion,
+      id: oldQuestion.id || `q_${Date.now()}_${Math.random()}`
+    };
+    
+    setAssessmentData(prev => {
+      const newQuestions = [...prev.questions];
+      newQuestions[editingQuestionIndex] = updatedQuestion;
+      
+      // Update total points
+      const pointsDifference = currentQuestion.points - oldQuestion.points;
+      
+      return {
+        ...prev,
+        questions: newQuestions,
+        totalPoints: prev.totalPoints + pointsDifference
+      };
+    });
+    
+    // Reset form and editing state
+    setCurrentQuestion({
+      question: '',
+      type: 'multiple-choice',
+      options: ['', '', '', ''],
+      correctAnswer: 0,
+      points: 1,
+      explanation: ''
+    });
+    setEditingQuestionIndex(null);
+  };
+
+  const cancelEditing = () => {
+    setCurrentQuestion({
+      question: '',
+      type: 'multiple-choice',
+      options: ['', '', '', ''],
+      correctAnswer: 0,
+      points: 1,
+      explanation: ''
+    });
+    setEditingQuestionIndex(null);
   };
 
   const updateOption = (index, value) => {
@@ -401,7 +552,9 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
         {/* Question Creation Section */}
         <div style={{ marginTop: '2rem', padding: '1.5rem', background: '#f8f9fa', borderRadius: '8px' }}>
           <h3 style={{ color: BLUE, marginBottom: '1rem' }}>
-            {isQuiz ? 'Add Quiz Questions' : 'Add Questions'}
+            {editingQuestionIndex !== null ? 
+              (isQuiz ? 'Edit Quiz Question' : 'Edit Question') : 
+              (isQuiz ? 'Add Quiz Questions' : 'Add Questions')}
           </h3>
           
           {isQuiz && (
@@ -414,7 +567,7 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
                   type: e.target.value,
                   // Reset options and correct answer when changing type
                   options: e.target.value === 'true-false' ? ['True', 'False'] : ['', '', '', ''],
-                  correctAnswer: 0
+                  correctAnswer: e.target.value === 'short-answer' ? '' : 0
                 }))}
               >
                 <option value="multiple-choice">Multiple Choice</option>
@@ -423,6 +576,26 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
               </Select>
             </>
           )}
+          
+          {/* Add helpful guidance */}
+          <div style={{
+            background: '#e3f2fd',
+            padding: '1rem',
+            borderRadius: '8px',
+            marginBottom: '1rem',
+            border: '1px solid #bbdefb'
+          }}>
+            <h4 style={{ margin: '0 0 0.5rem 0', color: '#1976d2' }}>
+              💡 Tips for Creating Good Quiz Questions:
+            </h4>
+            <ul style={{ margin: '0', paddingLeft: '1.5rem', color: '#1976d2' }}>
+              <li>Use clear, specific question words (What, How, When, Where, Why, Which)</li>
+              <li>Avoid test data like "test123", "asdf", or random letters</li>
+              <li>Questions should be at least 10 characters and contain 3+ words</li>
+              <li>For multiple choice: provide meaningful, distinct answer options</li>
+              <li>Example: "What is the capital of France?" instead of "gfdgds"</li>
+            </ul>
+          </div>
           
           <Label>Question</Label>
           <TextArea
@@ -487,14 +660,21 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
             </>
           )}
           
-          {/* Answer Guidelines for Short Answer */}
+          {/* Correct Answer for Short Answer */}
           {isQuiz && currentQuestion.type === 'short-answer' && (
             <>
+              <Label>Expected Answer</Label>
+              <Input
+                value={currentQuestion.correctAnswer || ''}
+                onChange={e => setCurrentQuestion(prev => ({ ...prev, correctAnswer: e.target.value }))}
+                placeholder="Enter the expected correct answer"
+              />
+              
               <Label>Answer Guidelines (optional)</Label>
               <TextArea
                 value={currentQuestion.explanation}
                 onChange={e => setCurrentQuestion(prev => ({ ...prev, explanation: e.target.value }))}
-                placeholder="Provide sample answers or grading criteria for this short answer question"
+                placeholder="Provide additional grading criteria or alternative acceptable answers"
                 rows="2"
               />
             </>
@@ -513,6 +693,46 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
             </>
           )}
           
+          {/* Show type-specific guidance */}
+          {currentQuestion.type === 'multiple-choice' && (
+            <div style={{
+              background: '#f3e5f5',
+              padding: '0.75rem',
+              borderRadius: '4px',
+              marginBottom: '1rem',
+              fontSize: '0.9rem',
+              color: '#7b1fa2'
+            }}>
+              <strong>Multiple Choice Tips:</strong> Provide 4 clear, distinct answer options. Make sure only one is correct and avoid similar-sounding options.
+            </div>
+          )}
+
+          {currentQuestion.type === 'true-false' && (
+            <div style={{
+              background: '#e8f5e9',
+              padding: '0.75rem',
+              borderRadius: '4px',
+              marginBottom: '1rem',
+              fontSize: '0.9rem',
+              color: '#2e7d32'
+            }}>
+              <strong>True/False Tips:</strong> Create clear statements that are definitively true or false. Avoid ambiguous statements.
+            </div>
+          )}
+
+          {currentQuestion.type === 'short-answer' && (
+            <div style={{
+              background: '#fff3e0',
+              padding: '0.75rem',
+              borderRadius: '4px',
+              marginBottom: '1rem',
+              fontSize: '0.9rem',
+              color: '#f57c00'
+            }}>
+              <strong>Short Answer Tips:</strong> Ask for specific information that can be answered in a few words or sentences. Provide the expected answer for grading reference.
+            </div>
+          )}
+
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '1rem' }}>
             <Label style={{ margin: 0 }}>Points:</Label>
             <Input
@@ -522,9 +742,20 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
               min="1"
               style={{ width: '80px' }}
             />
-            <Button onClick={addQuestion} color="#28a745">
-              Add Question
-            </Button>
+            {editingQuestionIndex !== null ? (
+              <>
+                <Button onClick={saveEditedQuestion} color="#28a745">
+                  Save Changes
+                </Button>
+                <Button onClick={cancelEditing} color="#6c757d">
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <Button onClick={addQuestion} color="#28a745">
+                Add Question
+              </Button>
+            )}
           </div>
         </div>
 
@@ -539,9 +770,14 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
               <QuestionCard key={question.id || index}>
                 <QuestionHeader>
                   <QuestionTitle>Q{index + 1}: {question.question}</QuestionTitle>
-                  <DeleteButton onClick={() => removeQuestion(index)}>
-                    <Delete fontSize="small" />
-                  </DeleteButton>
+                  <QuestionButtons>
+                    <EditButton onClick={() => startEditingQuestion(index)}>
+                      <Edit fontSize="small" />
+                    </EditButton>
+                    <DeleteButton onClick={() => removeQuestion(index)}>
+                      <Delete fontSize="small" />
+                    </DeleteButton>
+                  </QuestionButtons>
                 </QuestionHeader>
                 
                 {isQuiz && (
@@ -643,12 +879,13 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
                     {question.type === 'short-answer' && (
                       <div style={{ 
                         padding: '0.5rem', 
-                        background: '#fff3cd', 
+                        background: question.correctAnswer ? '#e8f5e8' : '#fff3cd', 
                         borderRadius: '4px',
                         fontSize: '0.9rem',
-                        marginBottom: '1rem'
+                        marginBottom: '1rem',
+                        border: question.correctAnswer ? '2px solid #4caf50' : '1px solid #ffc107'
                       }}>
-                        <strong>Answer Type:</strong> Text input (manual grading required)
+                        <strong>✓ Correct Answer:</strong> {question.correctAnswer || 'No correct answer set'}
                       </div>
                     )}
                     

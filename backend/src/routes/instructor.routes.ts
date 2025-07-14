@@ -184,9 +184,34 @@ router.get('/courses', authenticateToken, authorizeRoles('instructor'), validate
   const result = await database.list({ include_docs: true });
   
   // Filter for courses belonging to this instructor
+  const instructorId = (req as any).user?.id || (req as any).user?._id;
+  console.log('🔍 Instructor courses request:', {
+    instructorId,
+    userObject: (req as any).user,
+    userIdType: typeof instructorId
+  });
+  
   let courses = result.rows
     .map((row: any) => row.doc)
-    .filter((doc: any) => doc && doc.type === 'course' && doc.instructor === req.user._id.toString()) as CourseDoc[];
+    .filter((doc: any) => {
+      const match = doc && doc.type === 'course' && 
+        (doc.instructor === instructorId || doc.instructor === instructorId?.toString() || 
+         doc.instructor_id === instructorId || doc.instructor_id === instructorId?.toString());
+      
+      if (doc?.type === 'course') {
+        console.log('🔍 Checking course:', {
+          courseTitle: doc.title,
+          courseInstructor: doc.instructor,
+          courseInstructorId: doc.instructor_id,
+          instructorId,
+          match
+        });
+      }
+      
+      return match;
+    }) as CourseDoc[];
+  
+  console.log('📚 Found courses for instructor:', courses.length);
   
   // Apply status filter
   if (status === 'published') {
@@ -1273,6 +1298,8 @@ router.get('/analytics', authenticateToken, authorizeRoles('instructor'), asyncH
   }
 }));
 
+// REMOVED MOCK DATA - User wants only real data from database
+
 // Get instructor dashboard
 router.get('/dashboard', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: Request, res: Response) => {
   try {
@@ -1318,30 +1345,136 @@ router.get('/dashboard', authenticateToken, authorizeRoles('instructor'), asyncH
 
     const totalStudents = allStudentIds.size;
 
-    // Calculate student progress data
+    // Calculate student progress data with REAL completion logic
     const studentProgress = courses.map(course => {
       const enrolledCount = course.enrolledStudents?.length || 0;
-      const completedCount = course.studentProgress?.filter((p: any) => p.completed).length || 0;
-      const completionPercentage = enrolledCount > 0 ? (completedCount / enrolledCount) * 100 : 0;
+      
+      // Count only students who have ACTUALLY completed (not just made progress)
+      let completedCount = 0;
+      if (course.studentProgress && course.studentProgress.length > 0) {
+        const studentsWhoCompleted = new Set<string>();
+        
+        course.studentProgress.forEach((progress: any) => {
+          // Only count if progress.completed is explicitly true
+          if (progress.completed === true && progress.student) {
+            studentsWhoCompleted.add(progress.student);
+          }
+        });
+        
+        completedCount = studentsWhoCompleted.size;
+      }
+      
+      // Calculate realistic completion percentage
+      const completionPercentage = enrolledCount > 0 ? 
+        Math.round((completedCount / enrolledCount) * 100) : 0;
+      
+      console.log(`📊 Course "${course.title}": ${enrolledCount} enrolled, ${completedCount} actually completed, ${completionPercentage}% completion`);
       
       return {
         courseName: course.title,
         courseId: course._id,
         enrolledStudents: enrolledCount,
         completedStudents: completedCount,
-        completionPercentage: Math.round(completionPercentage * 100) / 100,
+        completionPercentage,
         lastActivity: course.updatedAt || course.createdAt
       };
     });
 
-    // Calculate pending submissions
+    // Calculate all types of submissions (assessments + assignments)
     let pendingSubmissions = 0;
+    
+    // Count assessment submissions
     assessments.forEach(assessment => {
       if (assessment.submissions) {
         pendingSubmissions += assessment.submissions.filter((sub: any) => sub.status === 'submitted').length;
       }
     });
+    
+    // Count assignment submissions from course routes
+    const assignmentSubmissions = allDocsResult.rows
+      .map((row: any) => row.doc)
+      .filter((doc: any) => doc && doc.type === 'assignment_submission');
+      
+    // Filter assignment submissions for instructor's courses
+    const instructorCourseIds = courses.map(c => c._id);
+    const instructorAssignmentSubmissions = assignmentSubmissions.filter((sub: any) => 
+      instructorCourseIds.includes(sub.courseId)
+    );
+    
+    pendingSubmissions += instructorAssignmentSubmissions.length;
 
+    // Debug the actual data structure
+    console.log('🔍 DEBUGGING COURSE DATA:');
+    courses.forEach((course, index) => {
+      console.log(`Course ${index + 1}: ${course.title}`);
+      console.log('  - enrolledStudents:', course.enrolledStudents);
+      console.log('  - studentProgress:', course.studentProgress);
+      console.log('  - enrolledStudents length:', course.enrolledStudents?.length || 0);
+      console.log('  - studentProgress length:', course.studentProgress?.length || 0);
+      
+      if (course.studentProgress) {
+        course.studentProgress.forEach((progress: any, idx: number) => {
+          console.log(`    Progress ${idx + 1}:`, {
+            student: progress.student,
+            completed: progress.completed,
+            moduleId: progress.moduleId,
+            completedAt: progress.completedAt,
+            score: progress.score
+          });
+        });
+      }
+    });
+    
+    // Calculate using REAL completion data - only count truly completed students
+    let totalEnrolledStudents = 0;
+    let totalCompletedStudents = 0;
+    let activeStudents = 0;
+    
+    courses.forEach(course => {
+      // Count enrolled students
+      const enrolledCount = course.enrolledStudents?.length || 0;
+      totalEnrolledStudents += enrolledCount;
+      
+      // Count students who have ACTUALLY completed (not just started)
+      if (course.studentProgress && course.studentProgress.length > 0) {
+        const studentsWithRealCompletion = new Set();
+        const studentsWithRecentActivity = new Set();
+        
+        course.studentProgress.forEach((progress: any) => {
+          // Only count as completed if progress.completed is explicitly true
+          if (progress.completed === true && progress.student) {
+            studentsWithRealCompletion.add(progress.student);
+          }
+          
+          // Count as active if they have recent activity (last 7 days)
+          if (progress.completedAt) {
+            const lastWeek = new Date();
+            lastWeek.setDate(lastWeek.getDate() - 7);
+            if (new Date(progress.completedAt) >= lastWeek) {
+              studentsWithRecentActivity.add(progress.student);
+            }
+          }
+        });
+        
+        totalCompletedStudents += studentsWithRealCompletion.size;
+        activeStudents += studentsWithRecentActivity.size;
+      }
+    });
+    
+    // Calculate realistic completion rate
+    const completionRate = totalEnrolledStudents > 0 ? 
+      Math.min(100, (totalCompletedStudents / totalEnrolledStudents) * 100) : 0;
+    
+    console.log('📊 FINAL CALCULATIONS (Real Completion):');
+    console.log('  - totalEnrolledStudents:', totalEnrolledStudents);
+    console.log('  - totalCompletedStudents (only truly completed):', totalCompletedStudents);
+    console.log('  - activeStudents (recent activity):', activeStudents);
+    console.log('  - completionRate:', completionRate);
+
+    // Final safety check - if data looks unrealistic, provide sensible defaults
+    const safeCompletionRate = Math.min(100, Math.max(0, Math.round(completionRate)));
+    const safeActiveStudents = Math.min(totalStudents, activeStudents);
+    
     res.json({
       success: true,
       data: {
@@ -1351,7 +1484,10 @@ router.get('/dashboard', authenticateToken, authorizeRoles('instructor'), asyncH
           totalAssessments,
           publishedAssessments,
           totalStudents,
-          pendingSubmissions
+          pendingSubmissions,
+          totalSubmissions: pendingSubmissions,
+          activeStudents: safeActiveStudents,
+          completionRate: safeCompletionRate
         },
         studentProgress,
         recentCourses: courses.slice(0, 5),
@@ -1765,6 +1901,52 @@ router.get('/student-activity', authenticateToken, authorizeRoles('instructor'),
   }
 }));
 
+// Add validation function for quiz questions
+const validateQuizQuestion = (question: any) => {
+  if (!question || !question.question) return { valid: false, error: 'Question text is required' };
+  
+  const questionText = question.question.trim();
+  
+  // Very basic validation - just ensure it's not empty and has some content
+  if (questionText.length === 0) {
+    return { valid: false, error: 'Question text cannot be empty' };
+  }
+  
+  if (questionText.length < 3) {
+    return { valid: false, error: 'Question text should be at least 3 characters long' };
+  }
+  
+  // Only reject extremely obvious test data patterns
+  const obviousTestPatterns = [
+    /^test$/i,
+    /^abc$/i,
+    /^123$/i,
+    /^xxx+$/i,
+  ];
+  
+  if (obviousTestPatterns.some(pattern => pattern.test(questionText))) {
+    return { valid: false, error: `Please provide a meaningful question instead of "${question.question}"` };
+  }
+  
+  // Validate options for multiple choice questions
+  if (question.type === 'multiple_choice' || question.type === 'multiple-choice') {
+    if (!question.options || !Array.isArray(question.options) || question.options.length < 2) {
+      return { valid: false, error: 'Multiple choice questions must have at least 2 options' };
+    }
+    
+    // Basic validation for options - just ensure they're not empty
+    const emptyOptions = question.options.filter((option: string) => {
+      return !option || option.trim().length === 0;
+    });
+    
+    if (emptyOptions.length > 0) {
+      return { valid: false, error: 'All answer options must have content' };
+    }
+  }
+  
+  return { valid: true };
+};
+
 // Quiz routes
 router.get('/quizzes', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: Request, res: Response) => {
   try {
@@ -1774,23 +1956,21 @@ router.get('/quizzes', authenticateToken, authorizeRoles('instructor'), asyncHan
     const database = await ensureDb();
     const result = await database.list({ include_docs: true });
     
-    // Get all quiz documents first
-    const allQuizzes = result.rows
+    // Filter for quizzes belonging to this instructor
+    const quizzes = result.rows
       .map((row: any) => row.doc)
-      .filter((doc: any) => doc && doc.type === 'quiz');
+      .filter((doc: any) => doc && doc.type === 'quiz' && (doc.instructorId === user._id || doc.instructor === user._id));
     
-    console.log('📊 All quizzes in database:', allQuizzes.length); // Debug log
-    console.log('📋 Quiz details:', allQuizzes.length > 0 ? 'Found quizzes' : 'No quizzes'); // Debug log
+    console.log('📚 Found quizzes for instructor:', quizzes.length); // Debug log
     
-    // Filter for quizzes created by this instructor
-    const quizzes = allQuizzes.filter((doc: any) => doc.instructorId === user._id);
+    // Sort by creation date (newest first)
+    const sortedQuizzes = quizzes.sort((a: any, b: any) => {
+      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+    });
     
-    console.log('✅ Filtered quizzes for current user:', quizzes.length); // Debug log
-    console.log('📝 Quiz count for user:', quizzes.length); // Debug log
-
     res.json({
       success: true,
-      data: { quizzes }
+      data: { quizzes: sortedQuizzes }
     });
   } catch (error: any) {
     console.error('Error fetching quizzes:', error);
@@ -1801,31 +1981,35 @@ router.get('/quizzes', authenticateToken, authorizeRoles('instructor'), asyncHan
   }
 }));
 
+// Create quiz with validation
 router.post('/quizzes', authenticateToken, authorizeRoles('instructor'), [
-  body('title').notEmpty().withMessage('Quiz title is required'),
+  body('title').trim().notEmpty().withMessage('Quiz title is required'),
   body('description').optional().trim(),
   body('courseId').notEmpty().withMessage('Course selection is required'),
-  body('moduleId').optional().notEmpty().withMessage('Module selection is required'),
+  body('moduleId').optional().notEmpty().withMessage('Module selection cannot be empty if provided'),
   body('duration').optional().isInt({ min: 1 }).withMessage('Duration must be a positive integer'),
-  body('totalPoints').optional().isInt({ min: 0 }).withMessage('Total points must be a non-negative integer'),
-  body('passingScore').optional().isInt({ min: 0, max: 100 }).withMessage('Passing score must be between 0 and 100'),
-  body('dueDate').optional().isISO8601().withMessage('Due date must be a valid ISO 8601 date'),
-  body('questions').isArray({ min: 1 }).withMessage('At least one question is required')
+  body('passingScore').optional().isInt({ min: 0, max: 100 }).withMessage('Passing score must be between 0-100'),
+  body('questions').optional().isArray().withMessage('Questions must be an array'),
+  body('dueDate').optional().isISO8601().withMessage('Due date must be a valid date')
 ], validate([]), asyncHandler(async (req: Request, res: Response) => {
   try {
+    const { title, description, courseId, moduleId, duration, passingScore, questions, dueDate } = req.body;
     const user = req.user;
-    const { title, description, courseId, moduleId, duration, totalPoints, passingScore, dueDate, questions } = req.body;
-
-    console.log('🔍 Quiz creation request data:', { title, description, courseId, moduleId, duration, totalPoints, passingScore, dueDate, questionsCount: questions?.length }); // Debug log
-
-    if (!title || !courseId || !questions || questions.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Title, course, and questions are required'
-      });
+    
+    // Validate questions if provided
+    if (questions && questions.length > 0) {
+      for (let i = 0; i < questions.length; i++) {
+        const questionValidation = validateQuizQuestion(questions[i]);
+        if (!questionValidation.valid) {
+          return res.status(400).json({
+            success: false,
+            message: `Question ${i + 1}: ${questionValidation.error}`
+          });
+        }
+      }
     }
-
-    // Get course info
+    
+    // Get course name for reference
     let courseName = 'Unknown Course';
     try {
       const database = await ensureDb();
@@ -1839,6 +2023,11 @@ router.post('/quizzes', authenticateToken, authorizeRoles('instructor'), [
       });
     }
 
+    // Calculate total points from questions
+    const totalPoints = questions && questions.length > 0 
+      ? questions.reduce((sum: number, question: any) => sum + (question.points || 1), 0)
+      : 0;
+
     const quiz = {
       _id: `quiz_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       type: 'quiz',
@@ -1850,7 +2039,7 @@ router.post('/quizzes', authenticateToken, authorizeRoles('instructor'), [
       instructorId: user._id,
       instructorName: user.firstName + ' ' + user.lastName,
       duration: duration || 30,
-      totalPoints: totalPoints || 0,
+      totalPoints,
       passingScore: passingScore || 70,
       dueDate: dueDate || null,
       questions: questions || [],

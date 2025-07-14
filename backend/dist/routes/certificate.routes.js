@@ -148,8 +148,7 @@ router.post('/generate', auth_1.authenticateToken, [
     }
     const certificateNumber = `CERT-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
     const certificateData = {
-        _id: Date.now().toString(),
-        _rev: '',
+        _id: `cert_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         type: 'certificate',
         user: userId,
         course: courseId,
@@ -396,8 +395,7 @@ router.post('/', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('admin'), 
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const certificateData = {
         ...req.body,
-        _id: Date.now().toString(),
-        _rev: '',
+        _id: `cert_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         type: 'certificate',
         issuedBy: req.user._id.toString(),
         issuedAt: new Date(),

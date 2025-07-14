@@ -279,6 +279,7 @@ const InstructorDashboard = () => {
       // Track that user viewed dashboard
       await trackActivity('dashboard_view', 'Instructor viewed dashboard');
       
+      // Use mock data endpoint for realistic testing (change back to '/api/instructor/dashboard' for real data)
       const response = await fetch('/api/instructor/dashboard', {
         method: 'GET',
         headers: {
@@ -325,39 +326,70 @@ const InstructorDashboard = () => {
   // Fetch student submissions
   const fetchStudentSubmissions = async () => {
     try {
-      const response = await fetch('/api/instructor/assessments?status=published', {
-        method: 'GET',
+      console.log('🔍 Starting to fetch student submissions...');
+      
+      // First get all courses for this instructor
+      const coursesResponse = await fetch('/api/instructor/courses', {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         }
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch submissions');
+      console.log('📚 Courses response status:', coursesResponse.status);
+
+      if (!coursesResponse.ok) {
+        const errorText = await coursesResponse.text();
+        console.error('❌ Failed to fetch courses:', errorText);
+        throw new Error('Failed to fetch courses');
       }
 
-      const data = await response.json();
+      const coursesData = await coursesResponse.json();
+      console.log('📚 Courses data received:', coursesData);
+      
       const allSubmissions = [];
       
-      // Collect all submissions from all assessments
-      for (const assessment of data.data.assessments) {
-        if (assessment.submissions) {
-          for (const submission of assessment.submissions) {
-            if (submission.status === 'submitted') {
+      // For each course, fetch submissions
+      for (const course of coursesData.data.courses) {
+        console.log(`🔍 Fetching submissions for course: ${course.title} (${course._id})`);
+        
+        try {
+          const submissionsResponse = await fetch(`/api/courses/${course._id}/submissions`, {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            }
+          });
+
+          console.log(`📋 Submissions response for ${course.title}:`, submissionsResponse.status);
+
+          if (submissionsResponse.ok) {
+            const submissionsData = await submissionsResponse.json();
+            console.log(`📋 Submissions data for ${course.title}:`, submissionsData);
+            
+            // Add course info to each submission (backend now provides student and assessment details)
+            for (const submission of submissionsData.data.submissions) {
+              console.log('📝 Adding submission:', submission);
               allSubmissions.push({
                 ...submission,
-                assessmentTitle: assessment.title,
-                assessmentId: assessment._id
+                courseName: course.title,
+                courseId: course._id
               });
             }
+          } else {
+            const errorText = await submissionsResponse.text();
+            console.error(`❌ Error response for ${course.title}:`, errorText);
           }
+        } catch (submissionError) {
+          console.error(`❌ Error fetching submissions for course ${course._id}:`, submissionError);
         }
       }
       
+      console.log('📋 All submissions fetched:', allSubmissions);
+      console.log('📊 Total submissions count:', allSubmissions.length);
       setStudentSubmissions(allSubmissions);
     } catch (err) {
-      console.error('Failed to fetch submissions:', err);
+      console.error('❌ Failed to fetch submissions:', err);
     }
   };
 
@@ -544,7 +576,7 @@ const InstructorDashboard = () => {
         <OverviewGrid>
           <OverviewCard onClick={() => { setShowCoursesModal(true); trackActivity('courses_view', 'Viewed courses overview'); }} style={{ cursor: 'pointer' }}>
             <Stat>{dashboardData?.overview?.totalCourses || 0}</Stat>
-            <StatLabel>Courses Managed</StatLabel>
+            <StatLabel>Courses</StatLabel>
           </OverviewCard>
           <OverviewCard onClick={() => { setShowStudentsModal(true); trackActivity('students_view', 'Viewed students overview'); }} style={{ cursor: 'pointer' }}>
             <Stat>{dashboardData?.overview?.totalStudents || 0}</Stat>
@@ -554,9 +586,9 @@ const InstructorDashboard = () => {
             <Stat>{dashboardData?.overview?.totalAssessments || 0}</Stat>
             <StatLabel>Assessments</StatLabel>
           </OverviewCard>
-          <OverviewCard onClick={() => { setShowSubmissionsList(true); trackActivity('submissions_view', 'Viewed pending submissions'); }} style={{ cursor: 'pointer' }}>
-            <Stat>{dashboardData?.overview?.pendingSubmissions || 0}</Stat>
-            <StatLabel>Pending Submissions</StatLabel>
+          <OverviewCard onClick={() => { setShowSubmissionsList(true); trackActivity('submissions_view', 'Viewed submissions'); }} style={{ cursor: 'pointer' }}>
+            <Stat>{dashboardData?.overview?.totalSubmissions || studentSubmissions.length}</Stat>
+            <StatLabel>Submissions</StatLabel>
           </OverviewCard>
         </OverviewGrid>
 
@@ -613,9 +645,13 @@ const InstructorDashboard = () => {
         
         <SectionTitle>Recent Activity</SectionTitle>
         <DashboardGrid>
-          <Card onClick={() => setShowSubmissionsList(true)} style={{ cursor: 'pointer' }}>
+          <Card onClick={() => {
+            console.log('🎯 Opening submissions modal, current submissions:', studentSubmissions);
+            console.log('📊 Submissions count:', studentSubmissions.length);
+            setShowSubmissionsList(true);
+          }} style={{ cursor: 'pointer' }}>
             <CardTitle>New Submissions</CardTitle>
-            <p>{studentSubmissions.length} pending submissions to grade.</p>
+                            <p>{dashboardData?.overview?.totalSubmissions || studentSubmissions.length} submissions to review.</p>
             {studentActivity?.summary && (
               <p style={{ color: '#28a745', fontSize: '0.9rem', marginTop: '0.5rem' }}>
                 Total progress made this week: {studentActivity.summary.totalProgressMade}
@@ -667,11 +703,75 @@ const InstructorDashboard = () => {
               <div style={{ margin: '1rem 0', background: '#f7f7f7', padding: '1rem', borderRadius: 8 }}>
                 <b>Student's Work:</b>
                 <div style={{ marginTop: 8 }}>
-                  {selectedStudent.answers?.map((answer, idx) => (
-                    <div key={idx} style={{ marginBottom: '0.5rem' }}>
-                      <strong>Answer {idx + 1}:</strong> {answer}
+                  <div style={{ marginBottom: '0.5rem' }}>
+                    <strong>Submission Type:</strong> {selectedStudent.submissionType === 'file' ? 'File Upload' : 'Link Submission'}
+                  </div>
+                  
+                  {selectedStudent.submissionType === 'file' && selectedStudent.fileName && (
+                    <div style={{ marginBottom: '0.5rem' }}>
+                      <strong>File:</strong> {selectedStudent.fileName}
+                      {selectedStudent.fileSize && (
+                        <span style={{ color: '#666', marginLeft: '0.5rem' }}>
+                          ({(selectedStudent.fileSize / 1024 / 1024).toFixed(2)} MB)
+                        </span>
+                      )}
+                      {selectedStudent.filePath && (
+                        <div style={{ marginTop: '0.5rem' }}>
+                                                  <a 
+                          href={`/api/submission-file/${selectedStudent._id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ 
+                            color: '#007BFF', 
+                            textDecoration: 'none',
+                            padding: '0.5rem 1rem',
+                            background: '#e3f2fd',
+                            borderRadius: '4px',
+                            display: 'inline-block'
+                          }}
+                        >
+                          👁️ View File
+                        </a>
+                        </div>
+                      )}
                     </div>
-                  ))}
+                  )}
+                  
+                  {selectedStudent.submissionType === 'link' && selectedStudent.submissionLink && (
+                    <div style={{ marginBottom: '0.5rem' }}>
+                      <strong>Submitted Link:</strong>
+                      <div style={{ marginTop: '0.5rem' }}>
+                        <a 
+                          href={selectedStudent.submissionLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ 
+                            color: '#007BFF', 
+                            textDecoration: 'none',
+                            wordBreak: 'break-all'
+                          }}
+                        >
+                          🔗 {selectedStudent.submissionLink}
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {selectedStudent.submissionText && selectedStudent.submissionText.trim() && (
+                    <div style={{ marginBottom: '0.5rem' }}>
+                      <strong>Additional Comments:</strong>
+                      <div style={{ 
+                        marginTop: '0.5rem', 
+                        padding: '0.5rem', 
+                        background: '#fff', 
+                        border: '1px solid #ddd', 
+                        borderRadius: '4px',
+                        whiteSpace: 'pre-wrap'
+                      }}>
+                        {selectedStudent.submissionText}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
               <div style={{ marginTop: '1rem' }}>
@@ -768,7 +868,7 @@ const InstructorDashboard = () => {
               <ModalTitle>Student Statistics</ModalTitle>
               <div><b>Total Students:</b> {dashboardData?.overview?.totalStudents || 0}</div>
               <div><b>Completion Rate:</b> {dashboardData?.overview?.completionRate || 0}%</div>
-              <div><b>Active Students:</b> {Math.floor((dashboardData?.overview?.totalStudents || 0) * 0.8)}</div>
+              <div><b>Active Students:</b> {dashboardData?.overview?.activeStudents || 0}</div>
               <StickyFooter>
                 <ActionButton color="#888" onClick={() => setShowStudentsModal(false)}>Close</ActionButton>
               </StickyFooter>
@@ -782,7 +882,7 @@ const InstructorDashboard = () => {
               <ModalTitle>Assessment Statistics</ModalTitle>
               <div><b>Total Assessments:</b> {dashboardData?.overview?.totalAssessments || 0}</div>
               <div><b>Published Assessments:</b> {dashboardData?.overview?.publishedAssessments || 0}</div>
-              <div><b>Pending Submissions:</b> {dashboardData?.overview?.pendingSubmissions || 0}</div>
+              <div><b>Submissions:</b> {dashboardData?.overview?.totalSubmissions || studentSubmissions.length}</div>
               <StickyFooter>
                 <ActionButton color="#888" onClick={() => setShowAssessmentsModal(false)}>Close</ActionButton>
               </StickyFooter>

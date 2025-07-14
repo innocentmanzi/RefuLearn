@@ -61,6 +61,7 @@ const assessment_routes_1 = __importDefault(require("./routes/assessment.routes"
 const certificate_routes_1 = __importDefault(require("./routes/certificate.routes"));
 const scholarship_routes_1 = __importDefault(require("./routes/scholarship.routes"));
 const peerLearning_routes_1 = __importDefault(require("./routes/peerLearning.routes"));
+const quiz_session_routes_1 = __importDefault(require("./routes/quiz-session.routes"));
 const errorHandler_1 = require("./middleware/errorHandler");
 const notFound_1 = require("./middleware/notFound");
 const auth_1 = require("./middleware/auth");
@@ -77,10 +78,17 @@ const io = new socket_io_1.Server(server, {
         methods: ["GET", "POST"]
     }
 });
-const limiter = (0, express_rate_limit_1.default)({
+const generalLimiter = (0, express_rate_limit_1.default)({
     windowMs: parseInt(process.env['RATE_LIMIT_WINDOW_MS'] || '900000'),
     max: parseInt(process.env['RATE_LIMIT_MAX_REQUESTS'] || '100'),
     message: 'Too many requests from this IP, please try again later.',
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+const progressLimiter = (0, express_rate_limit_1.default)({
+    windowMs: parseInt(process.env['PROGRESS_RATE_LIMIT_WINDOW_MS'] || '60000'),
+    max: parseInt(process.env['PROGRESS_RATE_LIMIT_MAX_REQUESTS'] || '50'),
+    message: 'Too many progress requests, please try again later.',
     standardHeaders: true,
     legacyHeaders: false,
 });
@@ -107,7 +115,8 @@ app.use((0, cors_1.default)({
 }));
 app.use((0, compression_1.default)());
 app.use((0, morgan_1.default)('combined', { stream: { write: (message) => logger_1.logger.info(message.trim()) } }));
-app.use(limiter);
+app.use('/api/courses/*/progress', progressLimiter);
+app.use(generalLimiter);
 app.use(express_1.default.json({ limit: '10mb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '10mb' }));
 app.use((0, i18n_1.getI18nMiddleware)());
@@ -119,8 +128,36 @@ app.get('/health', (_req, res) => {
         timestamp: new Date().toISOString()
     });
 });
+app.get('/api/test-server', (_req, res) => {
+    console.log('🔍 SERVER TEST ROUTE HIT');
+    res.json({ message: 'Server test route working', timestamp: new Date().toISOString() });
+});
+app.get('/api/submission-file/:submissionId', async (req, res) => {
+    console.log('📁 DIRECT FILE ROUTE HIT - Submission ID:', req.params.submissionId);
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const testFilePath = 'uploads/general/Innocent-Manzi-Privacy In Digital Age-1752407904305-62023978.pdf';
+        if (fs.existsSync(testFilePath)) {
+            console.log('📁 File found, serving:', testFilePath);
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', 'inline; filename="submission.pdf"');
+            const fileStream = fs.createReadStream(testFilePath);
+            fileStream.pipe(res);
+        }
+        else {
+            console.log('❌ File not found:', testFilePath);
+            res.status(404).json({ error: 'File not found' });
+        }
+    }
+    catch (error) {
+        console.error('❌ Error serving file:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
 app.use('/api/auth', auth_routes_1.default);
 app.use('/api/users', auth_1.authenticateToken, user_routes_1.default);
+console.log('🔧 Mounting course routes at /api/courses');
 app.use('/api/courses', course_routes_1.default);
 app.use('/api/jobs', job_routes_1.default);
 app.use('/api/admin', auth_1.authenticateToken, admin_routes_1.default);
@@ -131,6 +168,7 @@ app.use('/api/assessments', assessment_routes_1.default);
 app.use('/api/certificates', certificate_routes_1.default);
 app.use('/api/scholarships', scholarship_routes_1.default);
 app.use('/api/peer-learning', peerLearning_routes_1.default);
+app.use('/api/quiz-sessions', auth_1.authenticateToken, quiz_session_routes_1.default);
 app.use('/', swagger_ui_express_1.default.serve, swagger_ui_express_1.default.setup(apiDocs));
 io.on('connection', (socket) => {
     logger_1.logger.info(`User connected: ${socket.id}`);

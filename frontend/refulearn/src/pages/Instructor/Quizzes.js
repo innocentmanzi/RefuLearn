@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { ArrowBack, Add, Edit, Delete, Quiz, Assignment } from '@mui/icons-material';
+import { ArrowBack, Add, Edit, Delete, Quiz, Assignment, Assessment } from '@mui/icons-material';
 import { useUser } from '../../contexts/UserContext';
 import AssessmentCreator from '../../components/AssessmentCreator';
 
@@ -114,6 +114,7 @@ const ActionButtons = styled.div`
 const ActionButton = styled.button`
   background: ${({ variant }) => 
     variant === 'edit' ? '#007BFF' : 
+    variant === 'submissions' ? '#28a745' :
     variant === 'delete' ? '#000000' : '#6c757d'};
   color: white;
   border: none;
@@ -464,6 +465,10 @@ const Quizzes = () => {
     setShowQuizCreator(true);
   };
 
+  const viewSubmissions = (quizId) => {
+    navigate(`/instructor/quizzes/${quizId}/submissions`);
+  };
+
   if (loading) {
     return (
       <Container>
@@ -518,6 +523,9 @@ const Quizzes = () => {
               <ActionButtons>
                 <ActionButton variant="edit" onClick={() => openEditModal(quiz)}>
                   <Edit fontSize="small" /> Edit
+                </ActionButton>
+                <ActionButton variant="submissions" onClick={() => viewSubmissions(quiz._id)}>
+                  <Assessment fontSize="small" /> Submissions
                 </ActionButton>
                 <ActionButton variant="delete" onClick={() => deleteQuiz(quiz._id)}>
                   <Delete fontSize="small" /> Delete

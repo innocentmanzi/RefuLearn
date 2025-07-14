@@ -41,14 +41,17 @@ export function UserProvider({ children }) {
     return localStorage.getItem('userRole') || 'refugee';
   });
 
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // Start with loading true
 
   // Check token validity on app start
   useEffect(() => {
     const checkAuthStatus = async () => {
       const token = localStorage.getItem('token');
+      setLoading(true);
+      
       if (token) {
         try {
+          console.log('🔍 Checking authentication status...');
           const response = await fetch('/api/auth/me', {
             headers: {
               'Authorization': `Bearer ${token}`
@@ -63,24 +66,30 @@ export function UserProvider({ children }) {
                 role: data.data.user.role || 'refugee',
                 profilePic: data.data.user.profilePic || null
               };
-              console.log('🔍 User data from /api/auth/me:', userData);
-              console.log('🔍 User ID fields - _id:', userData._id, 'id:', userData.id);
+              console.log('✅ User authenticated:', userData);
               setUser(userData);
               setUserRole(userData.role);
               setIsAuthenticated(true);
             } else {
-              // Token is invalid, clear everything
+              console.log('❌ Invalid token, logging out');
               logout();
             }
           } else {
-            // Token is invalid, clear everything
+            console.log('❌ Auth check failed, logging out');
             logout();
           }
         } catch (error) {
-          console.error('Auth check failed:', error);
+          console.error('❌ Auth check error:', error);
           logout();
         }
+      } else {
+        console.log('ℹ️ No token found, user not authenticated');
+        setIsAuthenticated(false);
+        setUser(null);
+        setUserRole('refugee');
       }
+      
+      setLoading(false);
     };
 
     checkAuthStatus();
@@ -159,9 +168,11 @@ export function UserProvider({ children }) {
   };
 
   const logout = () => {
+    console.log('🚪 Logging out user');
     setUser(null);
     setUserRole('refugee');
     setIsAuthenticated(false);
+    setLoading(false); // Ensure loading is false after logout
     
     // Clear all localStorage
     localStorage.removeItem('user');

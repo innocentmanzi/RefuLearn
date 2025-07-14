@@ -13,7 +13,10 @@ import {
   CheckCircle, 
   Add,
   RadioButtonUnchecked,
-  Edit
+  Edit,
+  Article,
+  AudioFile,
+  AttachFile
 } from '@mui/icons-material';
 
 // Import all the styled components from instructor CourseOverview for consistency
@@ -518,12 +521,7 @@ const NextModuleBanner = styled.div`
 `;
 
 const StudentCourseOverview = () => {
-  console.log('🏠 ===== STUDENT COURSE OVERVIEW COMPONENT LOADING =====');
-  console.log('🏠 Component rendering at:', new Date().toISOString());
-  console.log('🏠 Current URL:', window.location.href);
-  console.log('🏠 Current pathname:', window.location.pathname);
-  console.log('🏠 This should ONLY render on /courses/:courseId/overview URLs!');
-  console.log('🏠 If you see this during module content navigation, there is a routing problem!');
+  console.log('🏠 STUDENT COURSE OVERVIEW component loading for URL:', window.location.pathname);
   
   const { courseId } = useParams();
   const navigate = useNavigate();
@@ -631,6 +629,13 @@ const StudentCourseOverview = () => {
           }
           
           setCourse(courseData.data.course);
+          
+          // Automatically expand ALL modules for better UX (like instructor view)
+          if (courseData.data.course.modules && courseData.data.course.modules.length > 0) {
+            const allModuleIds = courseData.data.course.modules.map(module => module._id).filter(id => id);
+            setExpandedModules(new Set(allModuleIds));
+            console.log('📖 Auto-expanded all modules:', allModuleIds);
+          }
         } else {
           throw new Error('Failed to fetch course details');
         }
@@ -1001,13 +1006,21 @@ const StudentCourseOverview = () => {
       index++;
     }
     
-    // 3. Video (if exists)
+    // 3. Content Items (if exists)
+    if (module.contentItems && module.contentItems.length > 0) {
+      for (let i = 0; i < module.contentItems.length; i++) {
+        if (targetType === 'content-item' && targetIndex === i) return index;
+        index++;
+      }
+    }
+    
+    // 4. Video (if exists)
     if (module.videoUrl) {
       if (targetType === 'video') return index;
       index++;
     }
     
-    // 4. Resources
+    // 5. Resources
     if (module.resources && module.resources.length > 0) {
       for (let i = 0; i < module.resources.length; i++) {
         if (targetType === 'resource' && targetIndex === i) return index;
@@ -1015,7 +1028,7 @@ const StudentCourseOverview = () => {
       }
     }
     
-    // 5. Assessments
+    // 6. Assessments
     if (module.assessments && module.assessments.length > 0) {
       for (let i = 0; i < module.assessments.length; i++) {
         if (targetType === 'assessment' && targetIndex === i) return index;
@@ -1023,7 +1036,7 @@ const StudentCourseOverview = () => {
       }
     }
     
-    // 6. Quizzes
+    // 7. Quizzes
     if (module.quizzes && module.quizzes.length > 0) {
       for (let i = 0; i < module.quizzes.length; i++) {
         if (targetType === 'quiz' && targetIndex === i) return index;
@@ -1031,7 +1044,7 @@ const StudentCourseOverview = () => {
       }
     }
     
-    // 7. Discussions
+    // 8. Discussions
     if (module.discussions && module.discussions.length > 0) {
       for (let i = 0; i < module.discussions.length; i++) {
         if (targetType === 'discussion' && targetIndex === i) return index;
@@ -1062,6 +1075,15 @@ const StudentCourseOverview = () => {
       const itemIndex = calculateItemIndex(module, 'content');
       const completionKey = getCompletionKey(module, 'content', itemIndex);
       if (completedItems.has(completionKey)) completedCount++;
+    }
+    
+    if (module.contentItems) {
+      module.contentItems.forEach((_, idx) => {
+        totalItems++;
+        const itemIndex = calculateItemIndex(module, 'content-item', idx);
+        const completionKey = getCompletionKey(module, 'content-item', itemIndex);
+        if (completedItems.has(completionKey)) completedCount++;
+      });
     }
     
     if (module.videoUrl) {
@@ -1143,6 +1165,15 @@ const StudentCourseOverview = () => {
         const itemIndex = calculateItemIndex(module, 'content');
         const completionKey = getCompletionKey(module, 'content', itemIndex);
         if (completedItems.has(completionKey)) completedItemsCount++;
+      }
+      
+      if (module.contentItems) {
+        module.contentItems.forEach((_, idx) => {
+          totalItems++;
+          const itemIndex = calculateItemIndex(module, 'content-item', idx);
+          const completionKey = getCompletionKey(module, 'content-item', itemIndex);
+          if (completedItems.has(completionKey)) completedItemsCount++;
+        });
       }
       
       if (module.videoUrl) {
@@ -1231,6 +1262,9 @@ const StudentCourseOverview = () => {
       contentId: contentData?._id
     });
     
+    // Navigation to module content
+    console.log(`🎯 Navigating to: ${contentType.toUpperCase()} for module: ${module.title}`);
+    
     // Navigate to appropriate content based on type - no enrollment check blocking
     // Add return parameter so content pages know where to return
     const returnUrl = `/courses/${courseId}/overview`;
@@ -1241,46 +1275,65 @@ const StudentCourseOverview = () => {
       case 'description':
         navigationUrl = `/courses/${courseId}/modules/${module._id}/description?return=${encodeURIComponent(returnUrl)}`;
         console.log('📍 Navigating to MODULE DESCRIPTION:', navigationUrl);
-        navigate(navigationUrl);
+        console.log('📍 Full URL will be:', window.location.origin + navigationUrl);
+        
+        // Use window.location.href for reliable navigation
+        window.location.href = navigationUrl;
         break;
       case 'content':
         navigationUrl = `/courses/${courseId}/modules/${module._id}/content?return=${encodeURIComponent(returnUrl)}`;
         console.log('📍 Navigating to MODULE CONTENT:', navigationUrl);
-        navigate(navigationUrl);
+        console.log('📍 Full URL will be:', window.location.origin + navigationUrl);
+        
+        // Use window.location.href for reliable navigation
+        window.location.href = navigationUrl;
         break;
       case 'video':
         navigationUrl = `/courses/${courseId}/modules/${module._id}/video?return=${encodeURIComponent(returnUrl)}`;
         console.log('📍 Navigating to MODULE VIDEO:', navigationUrl);
-        navigate(navigationUrl);
+        
+        // Use window.location.href for reliable navigation
+        window.location.href = navigationUrl;
         break;
       case 'quiz':
         if (contentData && contentData._id) {
           navigationUrl = `/courses/${courseId}/modules/${module._id}/quiz/${contentData._id}?return=${encodeURIComponent(returnUrl)}`;
           console.log('📍 Navigating to QUIZ:', navigationUrl);
-          navigate(navigationUrl);
+          console.log('📍 Quiz data:', contentData);
+          
+          // Use window.location.href for reliable navigation
+          window.location.href = navigationUrl;
         } else {
           console.error('❌ Quiz navigation failed - no quiz ID:', contentData);
-          alert('Unable to navigate to quiz. Please try refreshing the page.');
+          console.log('🔍 Available contentData:', contentData);
+          alert('Unable to navigate to quiz. Missing quiz ID.');
         }
         break;
       case 'assessment':
         if (contentData && contentData._id) {
           navigationUrl = `/courses/${courseId}/modules/${module._id}/assessment/${contentData._id}?return=${encodeURIComponent(returnUrl)}`;
           console.log('📍 Navigating to ASSESSMENT:', navigationUrl);
-          navigate(navigationUrl);
+          console.log('📍 Assessment data:', contentData);
+          
+          // Use window.location.href for reliable navigation
+          window.location.href = navigationUrl;
         } else {
           console.error('❌ Assessment navigation failed - no assessment ID:', contentData);
-          alert('Unable to navigate to assessment. Please try refreshing the page.');
+          console.log('🔍 Available contentData:', contentData);
+          alert('Unable to navigate to assessment. Missing assessment ID.');
         }
         break;
       case 'discussion':
         if (contentData && contentData._id) {
           navigationUrl = `/courses/${courseId}/modules/${module._id}/discussion/${contentData._id}?return=${encodeURIComponent(returnUrl)}`;
           console.log('📍 Navigating to DISCUSSION:', navigationUrl);
-          navigate(navigationUrl);
+          
+          // Use window.location.href for reliable navigation
+          window.location.href = navigationUrl;
         } else {
           console.error('❌ Discussion navigation failed - no discussion ID:', contentData);
-          alert('Unable to navigate to discussion. Please try refreshing the page.');
+          console.log('🔍 Available contentData:', contentData);
+          alert('Unable to navigate to discussion. Missing discussion ID.');
         }
         break;
       default:
@@ -1413,6 +1466,24 @@ const StudentCourseOverview = () => {
 
   return (
     <Container>
+      {/* Add inline CSS for better clickable styling */}
+      <style>
+        {`
+          .content-item-clickable {
+            transition: all 0.2s ease !important;
+            border-left: 3px solid transparent !important;
+          }
+          .content-item-clickable:hover {
+            background: #f8f9fa !important;
+            border-left: 3px solid #007BFF !important;
+            transform: translateX(2px) !important;
+          }
+          .content-item-clickable:active {
+            background: #e9ecef !important;
+          }
+        `}
+      </style>
+      
       <BackButton onClick={() => navigate('/courses')}>
         <ArrowBack style={{ marginRight: 6 }} /> Back to Courses
       </BackButton>
@@ -1711,7 +1782,6 @@ const StudentCourseOverview = () => {
         <ModulesSection>
           <ModulesSectionHeader>
             <ModulesSectionTitle>Course Modules</ModulesSectionTitle>
-
           </ModulesSectionHeader>
           <ModulesContent>
             {course.modules.map((module, index) => {
@@ -1725,10 +1795,14 @@ const StudentCourseOverview = () => {
                 totalItems++;
                 itemBreakdown.push('1 description');
               }
-              if (module.content) {
-                totalItems++;
-                itemBreakdown.push('1 content');
-              }
+                          if (module.content) {
+              totalItems++;
+              itemBreakdown.push('1 content');
+            }
+            if (module.contentItems && module.contentItems.length > 0) {
+              totalItems += module.contentItems.length;
+              itemBreakdown.push(`${module.contentItems.length} content item${module.contentItems.length > 1 ? 's' : ''}`);
+            }
               if (module.videoUrl) {
                 totalItems++;
                 itemBreakdown.push('1 video');
@@ -1777,6 +1851,8 @@ const StudentCourseOverview = () => {
                       {/* Module Description as clickable item */}
                       {module.description && (
                         <ContentItem 
+                          className="content-item-clickable"
+                          style={{ cursor: 'pointer' }}
                           onClick={(e) => {
                             console.log('🎯 MODULE DESCRIPTION CLICK EVENT:', e);
                             console.log('🎯 MODULE DESCRIPTION CLICK:', module.title);
@@ -1842,7 +1918,12 @@ const StudentCourseOverview = () => {
                       {/* Content/Lessons */}
                       {module.content && (
                         <ContentItem 
+                          className="content-item-clickable"
                           onClick={(e) => {
+                            // Prevent event bubbling and stop any default behavior
+                            e.preventDefault();
+                            e.stopPropagation();
+                            
                             console.log('🎯 MODULE CONTENT CLICK EVENT:', e);
                             console.log('🎯 MODULE CONTENT CLICK:', module.title);
                             console.log('🎯 Module data:', {
@@ -1850,6 +1931,9 @@ const StudentCourseOverview = () => {
                               title: module.title,
                               hasContent: !!module.content
                             });
+                            
+                            // Handle content click
+                            console.log(`🎯 Accessing content for: ${module.title}`);
                             
                             // Add visual feedback (with null check)
                             if (e.currentTarget && e.currentTarget.style) {
@@ -1904,9 +1988,95 @@ const StudentCourseOverview = () => {
                         </ContentItem>
                       )}
 
+                      {/* Content Items */}
+                      {module.contentItems && module.contentItems.map((item, idx) => {
+                        const itemIndex = calculateItemIndex(module, 'content-item', idx);
+                        const completionKey = getCompletionKey(module, 'content-item', itemIndex);
+                        const isCompleted = completedItems.has(completionKey);
+                        
+                        return (
+                          <ContentItem
+                            key={`content-item-${idx}`}
+                            data-testid="content-item"
+                            className="content-item-clickable"
+                            style={{ cursor: 'pointer' }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              console.log('🎯 CONTENT ITEM CLICK:', item.title);
+                              console.log('🎯 Content item type:', item.type);
+                              console.log('🎯 Content item URL:', item.url);
+                              console.log('🎯 Content item file:', item.fileName);
+                              
+                              try {
+                                // Navigate to internal content viewer for all content items
+                                const returnUrl = `/courses/${courseId}/overview`;
+                                const contentUrl = `/courses/${courseId}/modules/${module._id}/content-item/${idx}?return=${encodeURIComponent(returnUrl)}`;
+                                console.log('🚀 Attempting navigation to:', contentUrl);
+                                
+                                // Use window.location.href for reliable navigation (same as quizzes/discussions)
+                                window.location.href = contentUrl;
+                                console.log('✅ Content item navigation command executed successfully');
+                              } catch (error) {
+                                console.error('❌ Error handling content item click:', error);
+                                alert('Navigation failed. Check console for details.');
+                              }
+                            }}
+                            completed={isCompleted}
+                          >
+                            <ContentItemIcon type={item.type}>
+                              {item.type === 'article' && <Description />}
+                              {item.type === 'video' && <VideoLibrary />}
+                              {item.type === 'audio' && <AudioFile />}
+                              {item.type === 'file' && <AttachFile />}
+                            </ContentItemIcon>
+                            <ContentItemInfo>
+                              <ContentItemTitle>{item.title}</ContentItemTitle>
+                              <ContentItemMeta>
+                                {item.type === 'article' && 'Read • Article'}
+                                {item.type === 'video' && 'Watch • Video'}
+                                {item.type === 'audio' && 'Listen • Audio'}  
+                                {item.type === 'file' && 'View • File'}
+                                {item.url && ' • External Link'}
+                                {item.fileName && ` • ${item.fileName}`}
+                              </ContentItemMeta>
+                            </ContentItemInfo>
+                            <ContentItemAction>
+                              {(() => {
+                                const itemIndex = calculateItemIndex(module, 'content-item', idx);
+                                const completionKey = getCompletionKey(module, 'content-item', itemIndex);
+                                const isCompleted = completedItems.has(completionKey);
+                                return (
+                                  <div 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleMarkComplete(module, 'content-item', itemIndex);
+                                    }}
+                                    style={{ cursor: 'pointer' }}
+                                  >
+                                    {isCompleted ? (
+                                      <CheckCircle style={{ color: '#28a745', fontSize: '1.5rem' }} />
+                                    ) : (
+                                      <div style={{ 
+                                        width: '1.5rem', 
+                                        height: '1.5rem', 
+                                        border: '2px solid #e5e7eb', 
+                                        borderRadius: '50%' 
+                                      }} />
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </ContentItemAction>
+                          </ContentItem>
+                        );
+                      })}
+
                       {/* Video Lectures */}
                       {module.videoUrl && (
-                        <ContentItem onClick={() => handleContentClick(module, 'video')}>
+                        <ContentItem 
+                          className="content-item-clickable"
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => handleContentClick(module, 'video')}>
                           <ContentItemIcon type="video">
                             <VideoLibrary />
                           </ContentItemIcon>
@@ -1956,6 +2126,8 @@ const StudentCourseOverview = () => {
                       {module.resources && module.resources.map((resource, idx) => (
                         <ContentItem 
                           key={`resource-${idx}`}
+                          className="content-item-clickable"
+                          style={{ cursor: 'pointer' }}
                           onClick={() => {
                             if (resource.url) {
                               window.open(resource.url, '_blank');
@@ -2012,6 +2184,8 @@ const StudentCourseOverview = () => {
                         <div
                           key={`quiz-${idx}`}
                           data-testid="quiz-item"
+                          className="content-item-clickable"
+                          style={{ cursor: 'pointer' }}
                           onClick={(e) => {
                             console.log('🎯 DIRECT Quiz click event:', e);
                             console.log('🎯 DIRECT Quiz click:', quiz.title, 'ID:', quiz._id);
@@ -2032,7 +2206,7 @@ const StudentCourseOverview = () => {
                               const returnUrl = `/courses/${courseId}/overview`;
                               const navigationUrl = `/courses/${courseId}/modules/${module._id}/quiz/${quiz._id}?return=${encodeURIComponent(returnUrl)}`;
                               console.log('🚀 Attempting navigation to:', navigationUrl);
-                              navigate(navigationUrl);
+                              window.location.href = navigationUrl;
                               console.log('✅ Navigate command executed successfully');
                             } catch (error) {
                               console.error('❌ Navigation error:', error);
@@ -2118,6 +2292,8 @@ const StudentCourseOverview = () => {
                       {module.assessments && module.assessments.map((assessment, idx) => (
                         <ContentItem 
                           key={`assessment-${idx}`}
+                          className="content-item-clickable"
+                          style={{ cursor: 'pointer' }}
                           onClick={() => handleContentClick(module, 'assessment', assessment)}
                         >
                           <ContentItemIcon type="assessment">
@@ -2170,6 +2346,8 @@ const StudentCourseOverview = () => {
                         <div
                           key={`discussion-${idx}`}
                           data-testid="discussion-item"
+                          className="content-item-clickable"
+                          style={{ cursor: 'pointer' }}
                           onClick={(e) => {
                             console.log('🎯 DIRECT Discussion click event:', e);
                             console.log('🎯 DIRECT Discussion click:', discussion.title, 'ID:', discussion._id);
@@ -2190,7 +2368,7 @@ const StudentCourseOverview = () => {
                               const returnUrl = `/courses/${courseId}/overview`;
                               const navigationUrl = `/courses/${courseId}/modules/${module._id}/discussion/${discussion._id}?return=${encodeURIComponent(returnUrl)}`;
                               console.log('🚀 Attempting navigation to:', navigationUrl);
-                              navigate(navigationUrl);
+                              window.location.href = navigationUrl;
                               console.log('✅ Navigate command executed successfully');
                             } catch (error) {
                               console.error('❌ Navigation error:', error);

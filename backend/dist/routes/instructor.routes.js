@@ -69,9 +69,30 @@ router.get('/courses', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('ins
     const { status, page = 1, limit = 100 } = req.query;
     const database = await ensureDb();
     const result = await database.list({ include_docs: true });
+    const instructorId = req.user?.id || req.user?._id;
+    console.log('🔍 Instructor courses request:', {
+        instructorId,
+        userObject: req.user,
+        userIdType: typeof instructorId
+    });
     let courses = result.rows
         .map((row) => row.doc)
-        .filter((doc) => doc && doc.type === 'course' && doc.instructor === req.user._id.toString());
+        .filter((doc) => {
+        const match = doc && doc.type === 'course' &&
+            (doc.instructor === instructorId || doc.instructor === instructorId?.toString() ||
+                doc.instructor_id === instructorId || doc.instructor_id === instructorId?.toString());
+        if (doc?.type === 'course') {
+            console.log('🔍 Checking course:', {
+                courseTitle: doc.title,
+                courseInstructor: doc.instructor,
+                courseInstructorId: doc.instructor_id,
+                instructorId,
+                match
+            });
+        }
+        return match;
+    });
+    console.log('📚 Found courses for instructor:', courses.length);
     if (status === 'published') {
         courses = courses.filter(c => c.isPublished === true);
     }
@@ -983,14 +1004,25 @@ router.get('/dashboard', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('i
         const totalStudents = allStudentIds.size;
         const studentProgress = courses.map(course => {
             const enrolledCount = course.enrolledStudents?.length || 0;
-            const completedCount = course.studentProgress?.filter((p) => p.completed).length || 0;
-            const completionPercentage = enrolledCount > 0 ? (completedCount / enrolledCount) * 100 : 0;
+            let completedCount = 0;
+            if (course.studentProgress && course.studentProgress.length > 0) {
+                const studentsWhoCompleted = new Set();
+                course.studentProgress.forEach((progress) => {
+                    if (progress.completed === true && progress.student) {
+                        studentsWhoCompleted.add(progress.student);
+                    }
+                });
+                completedCount = studentsWhoCompleted.size;
+            }
+            const completionPercentage = enrolledCount > 0 ?
+                Math.round((completedCount / enrolledCount) * 100) : 0;
+            console.log(`📊 Course "${course.title}": ${enrolledCount} enrolled, ${completedCount} actually completed, ${completionPercentage}% completion`);
             return {
                 courseName: course.title,
                 courseId: course._id,
                 enrolledStudents: enrolledCount,
                 completedStudents: completedCount,
-                completionPercentage: Math.round(completionPercentage * 100) / 100,
+                completionPercentage,
                 lastActivity: course.updatedAt || course.createdAt
             };
         });
@@ -1000,6 +1032,65 @@ router.get('/dashboard', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('i
                 pendingSubmissions += assessment.submissions.filter((sub) => sub.status === 'submitted').length;
             }
         });
+        const assignmentSubmissions = allDocsResult.rows
+            .map((row) => row.doc)
+            .filter((doc) => doc && doc.type === 'assignment_submission');
+        const instructorCourseIds = courses.map(c => c._id);
+        const instructorAssignmentSubmissions = assignmentSubmissions.filter((sub) => instructorCourseIds.includes(sub.courseId));
+        pendingSubmissions += instructorAssignmentSubmissions.length;
+        console.log('🔍 DEBUGGING COURSE DATA:');
+        courses.forEach((course, index) => {
+            console.log(`Course ${index + 1}: ${course.title}`);
+            console.log('  - enrolledStudents:', course.enrolledStudents);
+            console.log('  - studentProgress:', course.studentProgress);
+            console.log('  - enrolledStudents length:', course.enrolledStudents?.length || 0);
+            console.log('  - studentProgress length:', course.studentProgress?.length || 0);
+            if (course.studentProgress) {
+                course.studentProgress.forEach((progress, idx) => {
+                    console.log(`    Progress ${idx + 1}:`, {
+                        student: progress.student,
+                        completed: progress.completed,
+                        moduleId: progress.moduleId,
+                        completedAt: progress.completedAt,
+                        score: progress.score
+                    });
+                });
+            }
+        });
+        let totalEnrolledStudents = 0;
+        let totalCompletedStudents = 0;
+        let activeStudents = 0;
+        courses.forEach(course => {
+            const enrolledCount = course.enrolledStudents?.length || 0;
+            totalEnrolledStudents += enrolledCount;
+            if (course.studentProgress && course.studentProgress.length > 0) {
+                const studentsWithRealCompletion = new Set();
+                const studentsWithRecentActivity = new Set();
+                course.studentProgress.forEach((progress) => {
+                    if (progress.completed === true && progress.student) {
+                        studentsWithRealCompletion.add(progress.student);
+                    }
+                    if (progress.completedAt) {
+                        const lastWeek = new Date();
+                        lastWeek.setDate(lastWeek.getDate() - 7);
+                        if (new Date(progress.completedAt) >= lastWeek) {
+                            studentsWithRecentActivity.add(progress.student);
+                        }
+                    }
+                });
+                totalCompletedStudents += studentsWithRealCompletion.size;
+                activeStudents += studentsWithRecentActivity.size;
+            }
+        });
+        const completionRate = totalEnrolledStudents > 0 ?
+            Math.min(100, (totalCompletedStudents / totalEnrolledStudents) * 100) : 0;
+        console.log('📊 FINAL CALCULATIONS (Real Completion):');
+        console.log('  - totalEnrolledStudents:', totalEnrolledStudents);
+        console.log('  - totalCompletedStudents (only truly completed):', totalCompletedStudents);
+        console.log('  - activeStudents (recent activity):', activeStudents);
+        console.log('  - completionRate:', completionRate);
+        const safeCompletionRate = Math.min(100, Math.max(0, Math.round(completionRate)));
+        const safeActiveStudents = Math.min(totalStudents, activeStudents);
         res.json({
             success: true,
             data: {
@@ -1009,7 +1100,10 @@ router.get('/dashboard', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('i
                     totalAssessments,
                     publishedAssessments,
                     totalStudents,
-                    pendingSubmissions
+                    pendingSubmissions,
+                    totalSubmissions: pendingSubmissions,
+                    activeStudents: safeActiveStudents,
+                    completionRate: safeCompletionRate
                 },
                 studentProgress,
                 recentCourses: courses.slice(0, 5),
@@ -1353,23 +1447,54 @@ router.get('/student-activity', auth_1.authenticateToken, (0, auth_1.authorizeRo
         });
     }
 }));
+const validateQuizQuestion = (question) => {
+    if (!question || !question.question)
+        return { valid: false, error: 'Question text is required' };
+    const questionText = question.question.trim();
+    if (questionText.length === 0) {
+        return { valid: false, error: 'Question text cannot be empty' };
+    }
+    if (questionText.length < 3) {
+        return { valid: false, error: 'Question text should be at least 3 characters long' };
+    }
+    const obviousTestPatterns = [
+        /^test$/i,
+        /^abc$/i,
+        /^123$/i,
+        /^xxx+$/i,
+    ];
+    if (obviousTestPatterns.some(pattern => pattern.test(questionText))) {
+        return { valid: false, error: `Please provide a meaningful question instead of "${question.question}"` };
+    }
+    if (question.type === 'multiple_choice' || question.type === 'multiple-choice') {
+        if (!question.options || !Array.isArray(question.options) || question.options.length < 2) {
+            return { valid: false, error: 'Multiple choice questions must have at least 2 options' };
+        }
+        const emptyOptions = question.options.filter((option) => {
+            return !option || option.trim().length === 0;
+        });
+        if (emptyOptions.length > 0) {
+            return { valid: false, error: 'All answer options must have content' };
+        }
+    }
+    return { valid: true };
+};
 router.get('/quizzes', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
         const user = req.user;
         console.log('🔍 Fetching quizzes for user:', user._id);
         const database = await ensureDb();
         const result = await database.list({ include_docs: true });
-        const allQuizzes = result.rows
+        const quizzes = result.rows
             .map((row) => row.doc)
-            .filter((doc) => doc && doc.type === 'quiz');
-        console.log('📊 All quizzes in database:', allQuizzes.length);
-        console.log('📋 Quiz details:', allQuizzes.length > 0 ? 'Found quizzes' : 'No quizzes');
-        const quizzes = allQuizzes.filter((doc) => doc.instructorId === user._id);
-        console.log('✅ Filtered quizzes for current user:', quizzes.length);
-        console.log('📝 Quiz count for user:', quizzes.length);
+            .filter((doc) => doc && doc.type === 'quiz' && (doc.instructorId === user._id || doc.instructor === user._id));
+        console.log('📚 Found quizzes for instructor:', quizzes.length);
+        const sortedQuizzes = quizzes.sort((a, b) => {
+            return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+        });
         res.json({
             success: true,
-            data: { quizzes }
+            data: { quizzes: sortedQuizzes }
         });
     }
     catch (error) {
@@ -1381,25 +1506,28 @@ router.get('/quizzes', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('ins
     }
 }));
 router.post('/quizzes', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor'), [
-    (0, express_validator_1.body)('title').notEmpty().withMessage('Quiz title is required'),
+    (0, express_validator_1.body)('title').trim().notEmpty().withMessage('Quiz title is required'),
     (0, express_validator_1.body)('description').optional().trim(),
     (0, express_validator_1.body)('courseId').notEmpty().withMessage('Course selection is required'),
-    (0, express_validator_1.body)('moduleId').optional().notEmpty().withMessage('Module selection is required'),
+    (0, express_validator_1.body)('moduleId').optional().notEmpty().withMessage('Module selection cannot be empty if provided'),
     (0, express_validator_1.body)('duration').optional().isInt({ min: 1 }).withMessage('Duration must be a positive integer'),
-    (0, express_validator_1.body)('totalPoints').optional().isInt({ min: 0 }).withMessage('Total points must be a non-negative integer'),
-    (0, express_validator_1.body)('passingScore').optional().isInt({ min: 0, max: 100 }).withMessage('Passing score must be between 0 and 100'),
-    (0, express_validator_1.body)('dueDate').optional().isISO8601().withMessage('Due date must be a valid ISO 8601 date'),
-    (0, express_validator_1.body)('questions').isArray({ min: 1 }).withMessage('At least one question is required')
+    (0, express_validator_1.body)('passingScore').optional().isInt({ min: 0, max: 100 }).withMessage('Passing score must be between 0-100'),
+    (0, express_validator_1.body)('questions').optional().isArray().withMessage('Questions must be an array'),
+    (0, express_validator_1.body)('dueDate').optional().isISO8601().withMessage('Due date must be a valid date')
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
+        const { title, description, courseId, moduleId, duration, passingScore, questions, dueDate } = req.body;
         const user = req.user;
-        const { title, description, courseId, moduleId, duration, totalPoints, passingScore, dueDate, questions } = req.body;
-        console.log('🔍 Quiz creation request data:', { title, description, courseId, moduleId, duration, totalPoints, passingScore, dueDate, questionsCount: questions?.length });
-        if (!title || !courseId || !questions || questions.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Title, course, and questions are required'
-            });
+        if (questions && questions.length > 0) {
+            for (let i = 0; i < questions.length; i++) {
+                const questionValidation = validateQuizQuestion(questions[i]);
+                if (!questionValidation.valid) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Question ${i + 1}: ${questionValidation.error}`
+                    });
+                }
+            }
         }
         let courseName = 'Unknown Course';
         try {
@@ -1414,6 +1542,9 @@ router.post('/quizzes', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('in
                 message: 'Course not found'
             });
         }
+        const totalPoints = questions && questions.length > 0
+            ? questions.reduce((sum, question) => sum + (question.points || 1), 0)
+            : 0;
         const quiz = {
             _id: `quiz_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             type: 'quiz',
@@ -1425,7 +1556,7 @@ router.post('/quizzes', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('in
             instructorId: user._id,
             instructorName: user.firstName + ' ' + user.lastName,
             duration: duration || 30,
-            totalPoints: totalPoints || 0,
+            totalPoints,
             passingScore: passingScore || 70,
             dueDate: dueDate || null,
             questions: questions || [],
