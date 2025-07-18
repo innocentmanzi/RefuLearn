@@ -15,6 +15,7 @@ import {
 import PageContainer from '../../components/PageContainer';
 import ContentWrapper from '../../components/ContentWrapper';
 import { useTranslation } from 'react-i18next';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 ChartJS.register(
   CategoryScale,
@@ -478,36 +479,85 @@ const EmployerDashboard = () => {
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [lastRequestTime, setLastRequestTime] = useState(0);
 
   useEffect(() => {
     const fetchDashboardData = async (isRefresh = false) => {
+      // Rate limiting protection - prevent requests more frequent than 30 seconds
+      const now = Date.now();
+      if (isRefresh && (now - lastRequestTime) < 30000) {
+        console.log('⏰ Rate limiting: Skipping refresh request (too soon)');
+        return;
+      }
+      
       if (!isRefresh) setLoading(true);
       setError('');
-      try {
-        const response = await fetch('/api/employer/dashboard', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
-            'Content-Type': 'application/json'
+      setLastRequestTime(now);
+      
+      const isOnline = navigator.onLine;
+      let dashboardData = null;
+
+      if (isOnline) {
+        try {
+          // Try online API calls first (preserving existing behavior)
+          console.log('🌐 Online mode: Fetching employer dashboard from API...');
+          
+          const response = await fetch('/api/employer/dashboard', {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (!response.ok) {
+            if (response.status === 429) {
+              console.warn('⚠️ Rate limited by server, using cached data');
+              // For rate limiting, use cached data instead of throwing error
+              dashboardData = await offlineIntegrationService.getEmployerDashboard();
+              if (dashboardData) {
+                setDashboardData(dashboardData);
+                if (!isRefresh) setLoading(false);
+                return;
+              }
+            }
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
           }
-        });
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
+          const data = await response.json();
 
-        const data = await response.json();
-
-        if (data.success) {
-          setDashboardData(data.data);
-          if (isRefresh) {
-            console.log('🔄 Dashboard charts auto-updated with latest database changes');
+          if (data.success) {
+            dashboardData = data.data;
+            
+            // Store dashboard data for offline use
+            await offlineIntegrationService.storeEmployerDashboard(dashboardData);
+            console.log('✅ Employer dashboard stored for offline use');
+            
+            if (isRefresh) {
+              console.log('🔄 Dashboard charts auto-updated with latest database changes');
+            } else {
+              console.log('✅ Dashboard data loaded from database');
+            }
           } else {
-            console.log('✅ Dashboard data loaded from database');
+            throw new Error(data.message || 'Failed to fetch dashboard data');
           }
-        } else {
-          console.error('❌ Dashboard API failed:', data.message);
-          setError(data.message || 'Failed to fetch dashboard data');
+        } catch (onlineError) {
+          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+          
+          // Fall back to offline data if online fails
+          dashboardData = await offlineIntegrationService.getEmployerDashboard();
+          
+          if (!dashboardData && !isRefresh) {
+            throw onlineError;
+          }
         }
+      } else {
+        // Offline mode: use offline services
+        console.log('📴 Offline mode: Using offline employer dashboard data...');
+        dashboardData = await offlineIntegrationService.getEmployerDashboard();
+      }
+
+      try {
+        setDashboardData(dashboardData);
       } catch (err) {
         console.error('❌ Dashboard fetch error:', err);
         if (!isRefresh) {
@@ -521,15 +571,19 @@ const EmployerDashboard = () => {
     // Initial load
     fetchDashboardData();
 
-    // Auto-refresh every 15 seconds for real-time chart updates
+    // Auto-refresh every 60 seconds for real-time chart updates (reduced frequency to prevent rate limiting)
     const refreshInterval = setInterval(() => {
       fetchDashboardData(true);
-    }, 15000);
+    }, 60000);
 
-    // Refresh when window becomes visible (user returns to tab)
+    // Refresh when window becomes visible (user returns to tab) - with rate limiting
     const handleVisibilityChange = () => {
       if (!document.hidden) {
-        fetchDashboardData(true);
+        // Only refresh if it's been more than 30 seconds since last request
+        const now = Date.now();
+        if (now - lastRequestTime > 30000) {
+          fetchDashboardData(true);
+        }
       }
     };
 
@@ -778,14 +832,14 @@ const EmployerDashboard = () => {
           </DashboardGrid>
 
           <SectionTitle>Quick Actions</SectionTitle>
-          <QuickActionLink to="/post-jobs">Post New Job</QuickActionLink>
-          <QuickActionLink to="/applicants">View Applicants</QuickActionLink>
+          <QuickActionLink to="/employer/post-jobs">Post New Job</QuickActionLink>
+          <QuickActionLink to="/employer/applicants">View Applicants</QuickActionLink>
           <QuickActionLink to="/employer/post-scholarship">Post Scholarship</QuickActionLink>
 
           <SectionContainer>
             <SectionHeader>
               <SectionTitle>Recent Applicants</SectionTitle>
-              <ViewAllLink onClick={() => navigate('/applicants')}>
+              <ViewAllLink onClick={() => navigate('/employer/applicants')}>
                 View All Applications →
               </ViewAllLink>
             </SectionHeader>
@@ -819,7 +873,7 @@ const EmployerDashboard = () => {
                     </ItemContent>
                     
                     <ItemActions>
-                      <ActionButton primary onClick={() => navigate(`/applicants?jobId=${app.jobId}`)}>Review Application</ActionButton>
+                      <ActionButton primary onClick={() => navigate(`/employer/applicants?jobId=${app.jobId}`)}>Review Application</ActionButton>
                     </ItemActions>
                   </ItemCard>
                 ))}
@@ -829,7 +883,7 @@ const EmployerDashboard = () => {
                 <div className="icon">👥</div>
                 <div className="title">No Recent Applicants</div>
                 <div className="subtitle">Applications will appear here once candidates start applying to your jobs</div>
-                <EmptyStateButton onClick={() => navigate('/post-jobs')}>
+                <EmptyStateButton onClick={() => navigate('/employer/post-jobs')}>
                   Post Your First Job
                 </EmptyStateButton>
               </EmptyState>
@@ -930,7 +984,7 @@ const EmployerDashboard = () => {
                     </ItemContent>
                     
                     <ItemActions>
-                      <ActionButton primary onClick={() => navigate(`/applicants?scholarshipId=${app.scholarshipId}`)}>Review Application</ActionButton>
+                      <ActionButton primary onClick={() => navigate(`/employer/applicants?scholarshipId=${app.scholarshipId}`)}>Review Application</ActionButton>
                     </ItemActions>
                   </ItemCard>
                 ))}

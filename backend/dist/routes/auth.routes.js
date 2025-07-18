@@ -4,6 +4,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
+const ensureAuth = (req) => {
+    if (!req.user?._id) {
+        throw new Error('User authentication required');
+    }
+    return {
+        userId: req.user._id.toString(),
+        user: req.user
+    };
+};
 const express_validator_1 = require("express-validator");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const crypto_1 = __importDefault(require("crypto"));
@@ -316,8 +325,9 @@ router.post('/login', (0, validation_1.validate)(loginValidation), (0, errorHand
     });
 }));
 router.get('/me', auth_1.authenticateToken, (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const database = await ensureDb();
-    const user = await database.get(req.user._id);
+    const user = await database.get(userId);
     const { password, ...userWithoutPassword } = user;
     res.json({
         success: true,
@@ -430,8 +440,9 @@ router.post('/change-password', auth_1.authenticateToken, [
     (0, express_validator_1.body)('confirm_new_password').custom((value, { req }) => value === req.body.new_password).withMessage('Passwords do not match')
 ], (0, validation_1.validate)([(0, express_validator_1.body)('old_password'), (0, express_validator_1.body)('new_password'), (0, express_validator_1.body)('confirm_new_password')]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { old_password, new_password } = req.body;
+    const { userId } = ensureAuth(req);
     const database = await ensureDb();
-    const user = await database.get(req.user._id);
+    const user = await database.get(userId);
     if (!user) {
         res.status(404).json({ success: false, message: 'User not found' });
         return;
@@ -448,8 +459,9 @@ router.post('/change-password', auth_1.authenticateToken, [
     res.json({ success: true, message: 'Password changed successfully' });
 }));
 router.get('/settings', auth_1.authenticateToken, (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const database = await ensureDb();
-    const user = await database.get(req.user._id);
+    const user = await database.get(userId);
     if (!user) {
         return res.status(404).json({ success: false, message: 'User not found' });
     }
@@ -482,8 +494,9 @@ router.put('/settings', auth_1.authenticateToken, [
     (0, express_validator_1.body)('notifications').optional().isObject().withMessage('Notifications must be an object'),
     (0, express_validator_1.body)('privacy').optional().isObject().withMessage('Privacy must be an object')
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const database = await ensureDb();
-    const user = await database.get(req.user._id);
+    const user = await database.get(userId);
     if (!user) {
         return res.status(404).json({ success: false, message: 'User not found' });
     }
@@ -538,8 +551,9 @@ router.put('/settings', auth_1.authenticateToken, [
 }));
 const upload = (0, multer_1.default)({ dest: 'uploads/' });
 router.patch('/profile', auth_1.authenticateToken, upload.single('profile_picture'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const database = await ensureDb();
-    const user = await database.get(req.user._id);
+    const user = await database.get(userId);
     if (!user) {
         return res.status(404).json({ success: false, message: 'User not found' });
     }

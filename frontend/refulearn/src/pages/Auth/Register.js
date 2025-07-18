@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useNavigate, Link } from 'react-router-dom';
+import { FaEye, FaEyeSlash } from 'react-icons/fa';
 import Logo from '../../components/Logo';
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../../contexts/UserContext';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   min-height: 100vh;
@@ -153,6 +155,55 @@ const OTPInput = styled.input`
   }
 `;
 
+const PasswordWrapper = styled.div`
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+`;
+
+const PasswordInput = styled.input`
+  width: 100%;
+  padding: 0.75rem 3rem 0.75rem 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+  
+  &:disabled {
+    background: #f5f5f5;
+    cursor: not-allowed;
+  }
+`;
+
+const PasswordToggle = styled.button`
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #666;
+  font-size: 1rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  
+  &:hover {
+    color: ${({ theme }) => theme.colors.primary};
+  }
+  
+  &:focus {
+    outline: none;
+    color: ${({ theme }) => theme.colors.primary};
+  }
+`;
+
 const Register = () => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -166,16 +217,13 @@ const Register = () => {
   const [showOTP, setShowOTP] = useState(false);
   const [otp, setOtp] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const navigate = useNavigate();
-  const { login, isAuthenticated } = useUser();
+  const { login, isAuthenticated, userRole } = useUser();
   
-  // Redirect authenticated users to their dashboard
-  useEffect(() => {
-    if (isAuthenticated) {
-      console.log('🔄 User already authenticated, redirecting to dashboard');
-      navigate('/dashboard');
-    }
-  }, [isAuthenticated, navigate]);
+  // Allow access to register page even if authenticated
+  // (Users can register new accounts even if already logged in)
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -207,32 +255,68 @@ const Register = () => {
     setLoading(true);
     
     try {
-      const response = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          firstName,
-          lastName,
-          email,
-          password,
-          confirmPassword,
-          role
-        }),
-      });
+      // First try online registration
+      let registrationSuccess = false;
+      
+      try {
+        const response = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            firstName,
+            lastName,
+            email,
+            password,
+            confirmPassword,
+            role
+          }),
+        });
 
-      const data = await response.json();
+        const data = await response.json();
 
-      if (response.ok) {
-        setSuccess(data.message || 'Registration successful! Please check your email for OTP verification.');
-        setShowOTP(true);
-      } else {
-        setError(data.message || 'Registration failed');
+        if (response.ok) {
+          setSuccess(data.message || 'Registration successful! Please check your email for OTP verification.');
+          setShowOTP(true);
+          registrationSuccess = true;
+          console.log('✅ Online registration successful');
+        } else {
+          setError(data.message || 'Registration failed');
+        }
+      } catch (onlineError) {
+        console.log('❌ Online registration failed, trying offline registration...');
+        
+        // Try offline registration
+        try {
+          const offlineResult = await offlineIntegrationService.register?.({
+            firstName,
+            lastName,
+            email,
+            password,
+            role
+          });
+          
+          if (offlineResult?.success) {
+            setSuccess('Registration successful offline! Account will be synced when online.');
+            registrationSuccess = true;
+            console.log('✅ Offline registration successful');
+            
+            // Auto-login after successful offline registration
+            setTimeout(() => {
+              navigate('/login');
+            }, 2000);
+          } else {
+            setError('Registration failed');
+          }
+        } catch (offlineError) {
+          console.error('❌ Offline registration also failed:', offlineError);
+          setError('Registration failed. Please try again.');
+        }
       }
     } catch (err) {
       console.error('Registration error:', err);
-      setError('Network error. Please try again.');
+      setError('Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -403,22 +487,40 @@ const Register = () => {
             disabled={loading}
             required
           />
-          <Input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            disabled={loading}
-            required
-          />
-          <Input
-            type="password"
-            placeholder="Confirm Password"
-            value={confirmPassword}
-            onChange={e => setConfirmPassword(e.target.value)}
-            disabled={loading}
-            required
-          />
+          <PasswordWrapper>
+            <PasswordInput
+              type={showPassword ? "text" : "password"}
+              placeholder="Password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              disabled={loading}
+              required
+            />
+            <PasswordToggle
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              disabled={loading}
+            >
+              {showPassword ? <FaEyeSlash /> : <FaEye />}
+            </PasswordToggle>
+          </PasswordWrapper>
+          <PasswordWrapper>
+            <PasswordInput
+              type={showConfirmPassword ? "text" : "password"}
+              placeholder="Confirm Password"
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+              disabled={loading}
+              required
+            />
+            <PasswordToggle
+              type="button"
+              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+              disabled={loading}
+            >
+              {showConfirmPassword ? <FaEyeSlash /> : <FaEye />}
+            </PasswordToggle>
+          </PasswordWrapper>
           <Select 
             value={role} 
             onChange={e => setRole(e.target.value)}

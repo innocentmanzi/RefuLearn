@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useUser } from '../../contexts/UserContext';
 import { useParams } from 'react-router-dom';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
@@ -133,39 +134,70 @@ const Label = styled.label`
 `;
 
 const Submissions = () => {
-  const { token } = useUser();
-  const { courseId } = useParams();
+  const { user } = useUser();
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [grade, setGrade] = useState('');
+  const [feedback, setFeedback] = useState('');
   const [gradingSubmission, setGradingSubmission] = useState(null);
-
-  useEffect(() => {
-    fetchSubmissions();
-  }, [courseId]);
+  
+  const token = localStorage.getItem('token');
 
   const fetchSubmissions = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/courses/${courseId}/submissions`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      setError('');
+      
+      const isOnline = navigator.onLine;
+      
+      let submissionsData = [];
 
-      if (response.ok) {
-        const data = await response.json();
-        setSubmissions(data.data.submissions || []);
+      if (isOnline) {
+        try {
+          // Try online API calls first (preserving existing behavior)
+          console.log('🌐 Online mode: Fetching submissions from API...');
+          
+          const response = await fetch('/api/instructor/submissions', {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token')}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            submissionsData = data.data.submissions || [];
+            console.log('✅ Submissions data received:', submissionsData.length);
+            
+            // Store submissions for offline use
+            await offlineIntegrationService.storeSubmissions(submissionsData);
+          } else {
+            throw new Error('Failed to fetch submissions');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+          // Fall back to offline data if online fails
+          submissionsData = await offlineIntegrationService.getSubmissions();
+        }
       } else {
-        throw new Error('Failed to fetch submissions');
+        // Offline mode: use offline services
+        console.log('📴 Offline mode: Using offline submissions data...');
+        submissionsData = await offlineIntegrationService.getSubmissions();
       }
+
+      setSubmissions(submissionsData);
     } catch (err) {
-      setError(err.message);
+      console.error('❌ Error fetching submissions:', err);
+      setError('Failed to load submissions');
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchSubmissions();
+  }, []);
 
   const handleGrade = async (submissionId, grade, feedback) => {
     try {

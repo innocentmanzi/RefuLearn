@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowBack, CheckCircle, Cancel, Assessment, Quiz } from '@mui/icons-material';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   max-width: 900px;
@@ -202,38 +203,96 @@ export default function MyGrades() {
   const fetchCourse = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/courses/${courseId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const isOnline = navigator.onLine;
+      
+      let courseData = null;
 
-      if (response.ok) {
-        const data = await response.json();
-        setCourse(data.data.course);
+      if (isOnline) {
+        try {
+          // Try online API calls first (preserving existing behavior)
+          console.log('🌐 Online mode: Fetching course data for grades...');
+          
+          const response = await fetch(`/api/courses/${courseId}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            courseData = data.data.course;
+            console.log('✅ Course data received for grades:', courseData);
+            
+            // Store course data for offline use
+            await offlineIntegrationService.storeCourseData(courseId, courseData);
+          } else {
+            throw new Error('Failed to fetch course');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+          // Fall back to offline data if online fails
+          courseData = await offlineIntegrationService.getCourseData(courseId);
+        }
+      } else {
+        // Offline mode: use offline services
+        console.log('📴 Offline mode: Using offline course data for grades...');
+        courseData = await offlineIntegrationService.getCourseData(courseId);
+      }
+
+      if (courseData) {
+        setCourse(courseData);
       }
     } catch (error) {
-      console.error('Error fetching course:', error);
+      console.error('❌ Error fetching course:', error);
     }
   };
 
   const fetchGrades = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/courses/${courseId}/grades`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const isOnline = navigator.onLine;
+      
+      let gradesData = null;
 
-      if (response.ok) {
-        const data = await response.json();
-        setGrades(data.data);
+      if (isOnline) {
+        try {
+          // Try online API calls first (preserving existing behavior)
+          console.log('🌐 Online mode: Fetching grades from API...');
+          
+          const response = await fetch(`/api/courses/${courseId}/grades`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            gradesData = data.data;
+            console.log('✅ Grades data received:', gradesData);
+            
+            // Store grades data for offline use
+            await offlineIntegrationService.storeGradesData(courseId, gradesData);
+          } else {
+            throw new Error('Failed to fetch grades');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+          // Fall back to offline data if online fails
+          gradesData = await offlineIntegrationService.getGradesData(courseId);
+        }
+      } else {
+        // Offline mode: use offline services
+        console.log('📴 Offline mode: Using offline grades data...');
+        gradesData = await offlineIntegrationService.getGradesData(courseId);
+      }
+
+      if (gradesData) {
+        setGrades(gradesData);
       }
     } catch (error) {
-      console.error('Error fetching grades:', error);
+      console.error('❌ Error fetching grades:', error);
     } finally {
       setLoading(false);
     }

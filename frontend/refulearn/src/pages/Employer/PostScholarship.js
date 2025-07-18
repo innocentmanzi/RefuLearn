@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import styled from 'styled-components';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
@@ -114,23 +115,59 @@ const PostScholarship = () => {
     setError('');
     setSuccess(false);
 
-    try {
-      const response = await fetch('/api/scholarships', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-        },
-        body: JSON.stringify({
-          ...form,
-          requirements: form.requirements ? form.requirements.split(',').map(req => req.trim()) : [],
-          deadline: new Date(form.deadline).toISOString()
-        })
-      });
+    const isOnline = navigator.onLine;
+    
+    if (isOnline) {
+      try {
+        console.log('🌐 Online mode: Posting scholarship...');
+        
+        const response = await fetch('/api/scholarships', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+          },
+          body: JSON.stringify({
+            ...form,
+            requirements: form.requirements ? form.requirements.split(',').map(req => req.trim()) : [],
+            deadline: new Date(form.deadline).toISOString()
+          })
+        });
 
-      const data = await response.json();
+        const data = await response.json();
 
-      if (data.success) {
+        if (data.success) {
+          setSuccess(true);
+          setForm({
+            title: '',
+            description: '',
+            provider: '',
+            location: '',
+            benefits: '',
+            link: '',
+            requirements: '',
+            deadline: '',
+            isActive: true
+          });
+          setTimeout(() => {
+            navigate('/employer/scholarships');
+          }, 2000);
+        } else {
+          throw new Error(data.message || 'Failed to post scholarship');
+        }
+      } catch (onlineError) {
+        console.warn('⚠️ Online scholarship posting failed, queuing for offline sync:', onlineError);
+        
+        // Queue action for offline sync
+        await offlineIntegrationService.queueEmployerScholarshipAction({
+          action: 'create',
+          data: {
+            ...form,
+            requirements: form.requirements ? form.requirements.split(',').map(req => req.trim()) : [],
+            deadline: new Date(form.deadline).toISOString()
+          }
+        });
+        
         setSuccess(true);
         setForm({
           title: '',
@@ -146,15 +183,38 @@ const PostScholarship = () => {
         setTimeout(() => {
           navigate('/employer/scholarships');
         }, 2000);
-      } else {
-        setError(data.message || 'Failed to post scholarship');
       }
-    } catch (err) {
-      console.error('Scholarship posting error:', err);
-      setError('Network error. Please try again.');
-    } finally {
-      setLoading(false);
+    } else {
+      // Offline mode: queue action for sync
+      console.log('📴 Offline mode: Queuing scholarship posting for sync...');
+      
+      await offlineIntegrationService.queueEmployerScholarshipAction({
+        action: 'create',
+        data: {
+          ...form,
+          requirements: form.requirements ? form.requirements.split(',').map(req => req.trim()) : [],
+          deadline: new Date(form.deadline).toISOString()
+        }
+      });
+      
+      setSuccess(true);
+      setForm({
+        title: '',
+        description: '',
+        provider: '',
+        location: '',
+        benefits: '',
+        link: '',
+        requirements: '',
+        deadline: '',
+        isActive: true
+      });
+      setTimeout(() => {
+        navigate('/employer/scholarships');
+      }, 2000);
     }
+    
+    setLoading(false);
   };
 
   return (

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import styled from 'styled-components';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 1.5rem;
@@ -377,44 +378,78 @@ const DetailPage = () => {
       try {
         setLoading(true);
         const token = localStorage.getItem('token');
+        const isOnline = navigator.onLine;
         
-        let endpoint = '';
-        if (type === 'job') {
-          endpoint = `/api/jobs/${id}`;
-        } else if (type === 'scholarship') {
-          endpoint = `/api/scholarships/${id}`;
+        let itemData = null;
+
+        if (isOnline) {
+          try {
+            // Try online API calls first (preserving existing behavior)
+            console.log('🌐 Online mode: Fetching detail data from API...');
+            
+            let endpoint = '';
+            if (type === 'job') {
+              endpoint = `/api/jobs/${id}`;
+            } else if (type === 'scholarship') {
+              endpoint = `/api/scholarships/${id}`;
+            }
+
+            const response = await fetch(endpoint, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (response.ok) {
+              const responseData = await response.json();
+              console.log('✅ API Response:', responseData);
+              
+              if (type === 'job') {
+                itemData = responseData.data.job || responseData.data;
+                // Store job details for offline use
+                await offlineIntegrationService.storeJobDetails(id, itemData);
+              } else if (type === 'scholarship') {
+                itemData = responseData.data.scholarship || responseData.data;
+                // Store scholarship details for offline use
+                await offlineIntegrationService.storeScholarshipDetails(id, itemData);
+              } else {
+                itemData = responseData.data;
+              }
+              
+              console.log('✅ Processed item data:', itemData);
+            } else {
+              const errorText = await response.text();
+              console.error('❌ API Error:', response.status, errorText);
+              throw new Error(`Failed to load details: ${response.status}`);
+            }
+          } catch (onlineError) {
+            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+            // Fall back to offline data if online fails
+            if (type === 'job') {
+              itemData = await offlineIntegrationService.getJobDetails(id);
+            } else if (type === 'scholarship') {
+              itemData = await offlineIntegrationService.getScholarshipDetails(id);
+            }
+          }
+        } else {
+          // Offline mode: use offline services
+          console.log('📴 Offline mode: Using offline detail data...');
+          if (type === 'job') {
+            itemData = await offlineIntegrationService.getJobDetails(id);
+          } else if (type === 'scholarship') {
+            itemData = await offlineIntegrationService.getScholarshipDetails(id);
+          }
         }
 
-        const response = await fetch(endpoint, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (response.ok) {
-          const responseData = await response.json();
-          console.log('API Response:', responseData);
-          
-          let itemData;
-          if (type === 'job') {
-            itemData = responseData.data.job || responseData.data;
-          } else if (type === 'scholarship') {
-            itemData = responseData.data.scholarship || responseData.data;
-          } else {
-            itemData = responseData.data;
-          }
-          
-          console.log('Processed item data:', itemData);
+        if (itemData) {
           setData(itemData);
         } else {
-          const errorText = await response.text();
-          console.error('API Error:', response.status, errorText);
-          setError(`Failed to load details: ${response.status}`);
+          setError('Details not available offline');
         }
       } catch (err) {
-        console.error('Error fetching details:', err);
+        console.error('❌ Error fetching details:', err);
         setError('Failed to load details');
       } finally {
         setLoading(false);
@@ -435,29 +470,73 @@ const DetailPage = () => {
     try {
       setApplying(true);
       const token = localStorage.getItem('token');
+      const isOnline = navigator.onLine;
       
-      let endpoint = '';
-      if (type === 'scholarship') {
-        endpoint = `/api/scholarships/${id}/apply`;
+      let success = false;
+
+      if (isOnline) {
+        try {
+          // Try online application first (preserving existing behavior)
+          console.log('🌐 Online mode: Submitting scholarship application...');
+          
+          const endpoint = `/api/scholarships/${id}/apply`;
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.ok) {
+            success = true;
+            console.log('✅ Online scholarship application successful');
+            alert('Application submitted successfully!');
+            navigate(-1);
+          } else {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Failed to submit application');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online application failed, using offline:', onlineError);
+          // Fall back to offline application
+          const result = await offlineIntegrationService.submitScholarshipApplicationOffline(id, {
+            applicationDate: new Date().toISOString(),
+            status: 'pending'
+          });
+          
+          if (result.success) {
+            success = true;
+            console.log('✅ Offline scholarship application successful');
+            alert('Application submitted offline! Will sync when online.');
+            navigate(-1);
+          } else {
+            throw new Error('Failed to submit application offline');
+          }
+        }
+      } else {
+        // Offline application
+        console.log('📴 Offline mode: Submitting scholarship application offline...');
+        const result = await offlineIntegrationService.submitScholarshipApplicationOffline(id, {
+          applicationDate: new Date().toISOString(),
+          status: 'pending'
+        });
+        
+        if (result.success) {
+          success = true;
+          console.log('✅ Offline scholarship application successful');
+          alert('Application submitted offline! Will sync when online.');
+          navigate(-1);
+        } else {
+          throw new Error('Failed to submit application offline');
+        }
       }
 
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        alert('Application submitted successfully!');
-        navigate(-1);
-      } else {
-        const errorData = await response.json();
-        alert(errorData.message || 'Failed to submit application');
+      if (!success) {
+        alert('Failed to submit application');
       }
     } catch (error) {
-      console.error('Error submitting application:', error);
+      console.error('❌ Error submitting application:', error);
       alert('Failed to submit application');
     } finally {
       setApplying(false);
@@ -475,32 +554,90 @@ const DetailPage = () => {
     try {
       setApplying(true);
       const token = localStorage.getItem('token');
+      const isOnline = navigator.onLine;
       
-      const formData = new FormData();
-      formData.append('coverLetter', applicationData.coverLetterFile);
-      formData.append('resume', applicationData.resumeFile);
-      if (applicationData.expectedSalary) {
-        formData.append('expectedSalary', applicationData.expectedSalary);
+      let success = false;
+
+      if (isOnline) {
+        try {
+          // Try online application first (preserving existing behavior)
+          console.log('🌐 Online mode: Submitting job application...');
+          
+          const formData = new FormData();
+          formData.append('coverLetter', applicationData.coverLetterFile);
+          formData.append('resume', applicationData.resumeFile);
+          if (applicationData.expectedSalary) {
+            formData.append('expectedSalary', applicationData.expectedSalary);
+          }
+
+          const response = await fetch(`/api/jobs/${id}/apply`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`
+            },
+            body: formData
+          });
+
+          if (response.ok) {
+            success = true;
+            console.log('✅ Online job application successful');
+            alert('Job application submitted successfully!');
+            setShowApplicationModal(false);
+            navigate(-1);
+          } else {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Failed to submit application');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online job application failed, using offline:', onlineError);
+          // Fall back to offline application
+          const result = await offlineIntegrationService.submitJobApplicationOffline(id, {
+            coverLetter: applicationData.coverLetter,
+            expectedSalary: applicationData.expectedSalary,
+            resumeFileName: applicationData.resumeFile?.name,
+            coverLetterFileName: applicationData.coverLetterFile?.name,
+            applicationDate: new Date().toISOString(),
+            status: 'pending'
+          });
+          
+          if (result.success) {
+            success = true;
+            console.log('✅ Offline job application successful');
+            alert('Job application submitted offline! Will sync when online.');
+            setShowApplicationModal(false);
+            navigate(-1);
+          } else {
+            throw new Error('Failed to submit application offline');
+          }
+        }
+      } else {
+        // Offline application
+        console.log('📴 Offline mode: Submitting job application offline...');
+        const result = await offlineIntegrationService.submitJobApplicationOffline(id, {
+          coverLetter: applicationData.coverLetter,
+          expectedSalary: applicationData.expectedSalary,
+          resumeFileName: applicationData.resumeFile?.name,
+          coverLetterFileName: applicationData.coverLetterFile?.name,
+          applicationDate: new Date().toISOString(),
+          status: 'pending'
+        });
+        
+        if (result.success) {
+          success = true;
+          console.log('✅ Offline job application successful');
+          alert('Job application submitted offline! Will sync when online.');
+          setShowApplicationModal(false);
+          navigate(-1);
+        } else {
+          throw new Error('Failed to submit application offline');
+        }
       }
 
-      const response = await fetch(`/api/jobs/${id}/apply`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: formData
-      });
-
-      if (response.ok) {
-        alert('Job application submitted successfully!');
-        setShowApplicationModal(false);
-        navigate(-1);
-      } else {
-        const errorData = await response.json();
-        alert(errorData.message || 'Failed to submit application');
+      if (!success) {
+        alert('Failed to submit application');
       }
     } catch (error) {
-      console.error('Error submitting job application:', error);
+      console.error('❌ Error submitting job application:', error);
       alert('Failed to submit application');
     } finally {
       setApplying(false);

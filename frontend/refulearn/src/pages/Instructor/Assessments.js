@@ -3,6 +3,7 @@ import styled from 'styled-components';
 import { useUser } from '../../contexts/UserContext';
 import { theme } from '../../theme';
 import AssessmentCreator from '../../components/AssessmentCreator';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
@@ -1030,29 +1031,52 @@ const Assessments = () => {
   const [editingQuestionId, setEditingQuestionId] = useState(null);
   const [editingQuestionData, setEditingQuestionData] = useState({});
 
-  // Fetch assessments
+  // Fetch assessments - COMPLETE OFFLINE APPROACH (TOKEN INDEPENDENT)
   const fetchAssessments = async () => {
     try {
       setLoading(true);
       setError('');
       
-      const response = await fetch('/api/instructor/assessments', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+      // ALWAYS LOAD OFFLINE DATA IMMEDIATELY - NO TOKEN REQUIRED
+      console.log('📱 Loading offline instructor assessments...');
+      let assessmentsData = await offlineIntegrationService.getInstructorAssessments();
+
+      console.log('✅ Setting offline assessments data:', assessmentsData);
+      setAssessments(assessmentsData || []);
+      setLoading(false);
+
+      // Background API update (optional, non-blocking) - ONLY if token exists
+      if (navigator.onLine && token) {
+        console.log('🔄 Attempting optional background assessments update...');
+        try {
+          const response = await Promise.race([
+            fetch('/api/instructor/assessments', {
+              method: 'GET',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              }
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('API timeout')), 2000))
+          ]);
+
+          if (response.ok) {
+            const data = await response.json();
+            console.log('✅ Background assessments update successful');
+            setAssessments(data.data?.assessments || []);
+            await offlineIntegrationService.storeInstructorAssessments(data.data?.assessments || []);
+          }
+        } catch (bgError) {
+          console.log('📱 Background assessments update failed (normal offline):', bgError.message);
         }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch assessments');
+      } else if (!token) {
+        console.log('📱 No token - using offline-only mode');
       }
-
-      const data = await response.json();
-      setAssessments(data.data?.assessments || []);
     } catch (err) {
-      setError(err.message || 'Failed to load assessments');
-    } finally {
+      console.error('❌ Assessments fetch failed:', err);
+      // Ensure we always have some data
+      const fallbackAssessments = await offlineIntegrationService.getInstructorAssessments();
+      setAssessments(fallbackAssessments || []);
       setLoading(false);
     }
   };
@@ -1060,39 +1084,61 @@ const Assessments = () => {
   // Fetch ALL courses for dropdown (both published and unpublished courses from database)
   const fetchCourses = async () => {
     try {
-      const response = await fetch('/api/instructor/courses', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+      const isOnline = navigator.onLine;
+      let coursesData = [];
+
+      if (isOnline) {
+        try {
+          // Try online API calls first (preserving existing behavior)
+          console.log('🌐 Online mode: Fetching instructor courses for assessments...');
+          
+          const response = await fetch('/api/instructor/courses', {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            }
+          });
+
+          if (!response.ok) {
+            throw new Error('Failed to fetch courses');
+          }
+
+          const data = await response.json();
+          console.log('🔍 FULL API Response:', data); // Debug log
+          console.log('📚 Fetched ALL courses from database:', data.data?.courses); // Debug log
+          
+          // Use all courses returned from the database (both published and unpublished)
+          coursesData = data.data?.courses || [];
+          
+          console.log('📊 Course details:', coursesData.map(c => ({ 
+            id: c._id, 
+            title: c.title, 
+            published: c.isPublished,
+            instructor: c.instructor 
+          })));
+          
+          if (coursesData.length === 0) {
+            console.warn('❌ No courses found. Create some courses first.');
+          } else {
+            console.log(`✅ Found ${coursesData.length} courses total`);
+          }
+          
+          // Store courses data for offline use
+          await offlineIntegrationService.storeInstructorCourses(coursesData);
+          
+        } catch (onlineError) {
+          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+          // Fall back to offline data if online fails
+          coursesData = await offlineIntegrationService.getInstructorCourses();
         }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch courses');
-      }
-
-      const data = await response.json();
-      console.log('🔍 FULL API Response:', data); // Debug log
-      console.log('📚 Fetched ALL courses from database:', data.data?.courses); // Debug log
-      
-      // Use all courses returned from the database (both published and unpublished)
-      const allCourses = data.data?.courses || [];
-      
-      console.log('📊 Course details:', allCourses.map(c => ({ 
-        id: c._id, 
-        title: c.title, 
-        published: c.isPublished,
-        instructor: c.instructor 
-      })));
-      
-      if (allCourses.length === 0) {
-        console.warn('❌ No courses found. Create some courses first.');
       } else {
-        console.log(`✅ Found ${allCourses.length} courses total`);
+        // Offline mode: use offline services
+        console.log('📴 Offline mode: Using offline instructor courses for assessments...');
+        coursesData = await offlineIntegrationService.getInstructorCourses();
       }
-      
-      setCourses(allCourses);
+
+      setCourses(coursesData || []);
     } catch (err) {
       console.error('Failed to fetch courses:', err);
       setCourses([]); // Set empty array on error
@@ -1104,37 +1150,87 @@ const Assessments = () => {
     try {
       console.log('Creating assessment with data:', assessmentData); // Debug log
       
-      const response = await fetch('/api/instructor/assessments', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(assessmentData)
-      });
+      const isOnline = navigator.onLine;
+      let result = null;
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Assessment creation failed:', errorData); // Debug log
-        throw new Error(errorData.message || `HTTP ${response.status}: Failed to create assessment`);
+      if (isOnline) {
+        try {
+          // Try online assessment creation first (preserving existing behavior)
+          console.log('🌐 Online mode: Creating assessment...');
+          
+          const response = await fetch('/api/instructor/assessments', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(assessmentData)
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            console.error('Assessment creation failed:', errorData); // Debug log
+            throw new Error(errorData.message || `HTTP ${response.status}: Failed to create assessment`);
+          }
+
+          result = await response.json();
+          console.log('✅ Assessment created successfully:', result); // Debug log
+          
+          setSuccess('Assessment created and published successfully');
+          fetchAssessments();
+          closeModal();
+          
+          setTimeout(() => setSuccess(''), 3000);
+          
+          // Return the result with courseId for navigation
+          return {
+            courseId: result.data?.courseId || assessmentData.courseId,
+            assessment: result.data?.assessment
+          };
+        } catch (onlineError) {
+          console.warn('⚠️ Online assessment creation failed, using offline:', onlineError);
+          // Fall back to offline assessment creation
+          const offlineResult = await offlineIntegrationService.storeAssessmentCreation(assessmentData);
+          
+          if (offlineResult.success) {
+            console.log('✅ Assessment creation queued for offline sync');
+            setSuccess('Assessment created offline! Will sync when online.');
+            fetchAssessments();
+            closeModal();
+            
+            setTimeout(() => setSuccess(''), 3000);
+            
+            return {
+              courseId: assessmentData.courseId,
+              assessment: { ...assessmentData, _id: offlineResult.assessmentId }
+            };
+          } else {
+            throw new Error('Failed to create assessment offline');
+          }
+        }
+      } else {
+        // Offline assessment creation
+        console.log('📴 Offline mode: Creating assessment offline...');
+        const offlineResult = await offlineIntegrationService.storeAssessmentCreation(assessmentData);
+        
+        if (offlineResult.success) {
+          console.log('✅ Assessment creation queued for offline sync');
+          setSuccess('Assessment created offline! Will sync when online.');
+          fetchAssessments();
+          closeModal();
+          
+          setTimeout(() => setSuccess(''), 3000);
+          
+          return {
+            courseId: assessmentData.courseId,
+            assessment: { ...assessmentData, _id: offlineResult.assessmentId }
+          };
+        } else {
+          throw new Error('Failed to create assessment offline');
+        }
       }
-
-      const result = await response.json();
-      console.log('Assessment created successfully:', result); // Debug log
-      
-      setSuccess('Assessment created and published successfully');
-      fetchAssessments();
-      closeModal();
-      
-      setTimeout(() => setSuccess(''), 3000);
-      
-      // Return the result with courseId for navigation
-      return {
-        courseId: result.data?.courseId || assessmentData.courseId,
-        assessment: result.data?.assessment
-      };
     } catch (err) {
-      console.error('Create assessment error:', err); // Debug log
+      console.error('❌ Create assessment error:', err); // Debug log
       setError(err.message || 'Failed to create assessment');
       setTimeout(() => setError(''), 3000);
       throw err; // Re-throw to handle in calling function
@@ -1144,25 +1240,74 @@ const Assessments = () => {
   // Update assessment
   const updateAssessment = async (assessmentId, assessmentData) => {
     try {
-      const response = await fetch(`/api/instructor/assessments/${assessmentId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(assessmentData)
-      });
+      const isOnline = navigator.onLine;
+      let success = false;
 
-      if (!response.ok) {
-        throw new Error('Failed to update assessment');
+      if (isOnline) {
+        try {
+          // Try online assessment update first (preserving existing behavior)
+          console.log('🌐 Online mode: Updating assessment...');
+          
+          const response = await fetch(`/api/instructor/assessments/${assessmentId}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(assessmentData)
+          });
+
+          if (!response.ok) {
+            throw new Error('Failed to update assessment');
+          }
+
+          success = true;
+          console.log('✅ Assessment updated successfully');
+          setSuccess('Assessment updated successfully');
+          fetchAssessments();
+          closeModal();
+          
+          setTimeout(() => setSuccess(''), 3000);
+        } catch (onlineError) {
+          console.warn('⚠️ Online assessment update failed, using offline:', onlineError);
+          // Fall back to offline assessment update
+          const offlineResult = await offlineIntegrationService.storeAssessmentUpdate(assessmentId, assessmentData);
+          
+          if (offlineResult.success) {
+            success = true;
+            console.log('✅ Assessment update queued for offline sync');
+            setSuccess('Assessment updated offline! Will sync when online.');
+            fetchAssessments();
+            closeModal();
+            
+            setTimeout(() => setSuccess(''), 3000);
+          } else {
+            throw new Error('Failed to update assessment offline');
+          }
+        }
+      } else {
+        // Offline assessment update
+        console.log('📴 Offline mode: Updating assessment offline...');
+        const offlineResult = await offlineIntegrationService.storeAssessmentUpdate(assessmentId, assessmentData);
+        
+        if (offlineResult.success) {
+          success = true;
+          console.log('✅ Assessment update queued for offline sync');
+          setSuccess('Assessment updated offline! Will sync when online.');
+          fetchAssessments();
+          closeModal();
+          
+          setTimeout(() => setSuccess(''), 3000);
+        } else {
+          throw new Error('Failed to update assessment offline');
+        }
       }
 
-      setSuccess('Assessment updated successfully');
-      fetchAssessments();
-      closeModal();
-      
-      setTimeout(() => setSuccess(''), 3000);
+      if (!success) {
+        throw new Error('Failed to update assessment');
+      }
     } catch (err) {
+      console.error('❌ Update assessment error:', err);
       setError(err.message || 'Failed to update assessment');
       setTimeout(() => setError(''), 3000);
     }
@@ -1276,11 +1421,10 @@ const Assessments = () => {
   };
 
   useEffect(() => {
-    if (token) {
-      fetchAssessments();
-      fetchCourses();
-    }
-  }, [token]);
+    // Always fetch data, regardless of token status
+    fetchAssessments();
+    fetchCourses();
+  }, []);
 
   // Close dropdown when clicking outside
   useEffect(() => {

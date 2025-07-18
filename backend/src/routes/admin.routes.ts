@@ -779,27 +779,74 @@ router.get('/statistics', authenticateToken, authorizeRoles('admin'), asyncHandl
 
 // Admin dashboard endpoint for frontend compatibility
 router.get('/dashboard', authenticateToken, authorizeRoles('admin'), asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  console.log('🔍 Admin Dashboard: Starting data fetch...');
+  
   // Get analytics data (reuse logic from /analytics)
   const daysAgo = new Date();
   daysAgo.setDate(daysAgo.getDate() - 30);
 
+  try {
+    // Debug: Check what's actually in the database
+    const allDocs = await db.allDocs({ include_docs: true });
+    console.log('📊 Total documents in database:', allDocs.rows.length);
+    
+    // Debug: Check document types
+    const docTypes = allDocs.rows.map(row => (row.doc as any)?.type).filter(Boolean);
+    console.log('📋 Document types found:', [...new Set(docTypes)]);
+    
+    // Debug: Check for users specifically
+    const allUsers = allDocs.rows.filter(row => {
+      const doc = row.doc as any;
+      return doc?.type === 'user' || doc?.email || doc?.firstName || doc?.role;
+    });
+    console.log('👥 Users found:', allUsers.length);
+    console.log('👥 Sample user data:', allUsers[0]?.doc);
+
+  } catch (debugError) {
+    console.error('❌ Debug queries failed:', debugError);
+  }
+
   // User statistics
-  const totalUsers = await db.find({ selector: { type: 'user' } }).then(result => result.docs.length);
-  const activeUsers = await db.find({ selector: { type: 'user', lastLogin: { $gte: daysAgo } } }).then(result => result.docs.length);
+  const totalUsers = await db.find({ selector: { type: 'user' } }).then(result => {
+    console.log('👥 User query result:', result.docs.length, 'users found');
+    return result.docs.length;
+  });
+  
+  const activeUsers = await db.find({ selector: { type: 'user', lastLogin: { $gte: daysAgo } } }).then(result => {
+    console.log('🟢 Active users result:', result.docs.length, 'active users found');
+    return result.docs.length;
+  });
+  
   const usersByRole = await db.find({ selector: { type: 'user' } }).then(result => {
-    return result.docs.reduce((acc: Record<string, number>, user: any) => {
+    const roles = result.docs.reduce((acc: Record<string, number>, user: any) => {
       acc[user.role] = (acc[user.role] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
+    console.log('👥 Users by role:', roles);
+    return roles;
   });
 
   // Course statistics
-  const totalCourses = await db.find({ selector: { type: 'course' } }).then(result => result.docs.length);
-  const publishedCourses = await db.find({ selector: { type: 'course', isActive: true } }).then(result => result.docs.length);
+  const totalCourses = await db.find({ selector: { type: 'course' } }).then(result => {
+    console.log('📚 Course query result:', result.docs.length, 'courses found');
+    return result.docs.length;
+  });
+  
+  const publishedCourses = await db.find({ selector: { type: 'course', isActive: true } }).then(result => {
+    console.log('📚 Published courses result:', result.docs.length, 'published courses found');
+    return result.docs.length;
+  });
 
   // Job statistics
-  const totalJobs = await db.find({ selector: { type: 'job' } }).then(result => result.docs.length);
-  const activeJobs = await db.find({ selector: { type: 'job', isActive: true } }).then(result => result.docs.length);
+  const totalJobs = await db.find({ selector: { type: 'job' } }).then(result => {
+    console.log('💼 Job query result:', result.docs.length, 'jobs found');
+    return result.docs.length;
+  });
+  
+  const activeJobs = await db.find({ selector: { type: 'job', isActive: true } }).then(result => {
+    console.log('💼 Active jobs result:', result.docs.length, 'active jobs found');
+    return result.docs.length;
+  });
 
   // Recent activity
   const recentUsers = await db.find({ selector: { type: 'user' } })

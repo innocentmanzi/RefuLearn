@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import styled from 'styled-components';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
@@ -178,72 +179,92 @@ const PostJobs = () => {
     setError('');
     setSuccessMessage('');
 
-    // Ensure date is in proper format
-    const deadline = jobDetails.applicationDeadline ? new Date(jobDetails.applicationDeadline).toISOString() : null;
+    if (!jobDetails.title || !jobDetails.location || !jobDetails.description) {
+      setError('Please fill in all required fields');
+      setLoading(false);
+      return;
+    }
+
+    const isOnline = navigator.onLine;
     
-    const jobToSend = {
-      title: jobDetails.title.trim(),
-      description: jobDetails.description.trim(),
-      location: jobDetails.location.trim(),
-      job_type: jobDetails.employmentType,
-      required_skills: Array.isArray(jobDetails.requirements) ? jobDetails.requirements : [],
-      salary_range: (jobDetails.salary.min && jobDetails.salary.max) 
-        ? `$${jobDetails.salary.min.toString().trim()} - $${jobDetails.salary.max.toString().trim()}` 
-        : 'Competitive',
-      application_deadline: deadline,
-      application_link: jobDetails.applicationLink || '',
-      is_active: Boolean(jobDetails.isActive),
-      remote_work: Boolean(false)
-    };
-
-    try {
-      console.log('Sending job data:', jobToSend);
-      const response = await fetch('/api/jobs', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-        },
-        body: JSON.stringify(jobToSend)
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setSuccessMessage('Job posted successfully!');
-        setJobDetails({
-          title: '',
-          location: '',
-          description: '',
-          requirements: [],
-          salary: {
-            min: '',
-            max: '',
-            currency: 'USD'
+    if (isOnline) {
+      try {
+        console.log('🌐 Online mode: Posting job...');
+        
+        const response = await fetch('/api/jobs', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
           },
-          employmentType: 'Full Time',
-          applicationDeadline: '',
-          applicationLink: '',
-          isActive: true
+          body: JSON.stringify({
+            ...jobDetails,
+            salary: jobDetails.salary.min && jobDetails.salary.max ? jobDetails.salary : null
+          })
         });
+
+        const data = await response.json();
+
+        if (data.success) {
+          setSuccessMessage('Job posted successfully!');
+          setJobDetails({
+            title: '',
+            location: '',
+            description: '',
+            requirements: [],
+            salary: {
+              min: '',
+              max: '',
+              currency: 'USD'
+            },
+            employmentType: 'Full Time',
+            applicationDeadline: '',
+            applicationLink: '',
+            isActive: true
+          });
+          
+          setTimeout(() => {
+            navigate('/employer/jobs');
+          }, 2000);
+        } else {
+          throw new Error(data.message || 'Failed to post job');
+        }
+      } catch (onlineError) {
+        console.warn('⚠️ Online job posting failed, queuing for offline sync:', onlineError);
+        
+        // Queue action for offline sync
+        await offlineIntegrationService.queueEmployerJobAction({
+          action: 'create',
+          data: {
+            ...jobDetails,
+            salary: jobDetails.salary.min && jobDetails.salary.max ? jobDetails.salary : null
+          }
+        });
+        
+        setSuccessMessage('Job posting queued for sync when online');
         setTimeout(() => {
           navigate('/employer/jobs');
         }, 2000);
-      } else {
-        // Handle validation errors
-        if (data.errors && Array.isArray(data.errors)) {
-          const errorMessages = data.errors.map(err => `${err.field}: ${err.message}`).join(', ');
-          setError(`Validation failed: ${errorMessages}`);
-        } else {
-          setError(data.message || 'Failed to post job');
-        }
       }
-    } catch (err) {
-      console.error('Job posting error:', err);
-      setError('Network error. Please try again.');
-    } finally {
-      setLoading(false);
+    } else {
+      // Offline mode: queue action for sync
+      console.log('📴 Offline mode: Queuing job posting for sync...');
+      
+      await offlineIntegrationService.queueEmployerJobAction({
+        action: 'create',
+        data: {
+          ...jobDetails,
+          salary: jobDetails.salary.min && jobDetails.salary.max ? jobDetails.salary : null
+        }
+      });
+      
+      setSuccessMessage('Job posting queued for sync when online');
+      setTimeout(() => {
+        navigate('/employer/jobs');
+      }, 2000);
     }
+    
+    setLoading(false);
   };
 
   return (

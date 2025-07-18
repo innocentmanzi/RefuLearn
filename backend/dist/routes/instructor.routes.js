@@ -4,6 +4,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
+const ensureAuth = (req) => {
+    if (!req.user?._id) {
+        throw new Error('User authentication required');
+    }
+    return {
+        userId: req.user._id.toString(),
+        user: req.user
+    };
+};
 const express_validator_1 = require("express-validator");
 const auth_1 = require("../middleware/auth");
 const validation_1 = require("../middleware/validation");
@@ -36,13 +45,14 @@ const ensureDb = async () => {
 };
 router.get('/courses/active', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
+        const { userId } = ensureAuth(req);
         const database = await ensureDb();
         const result = await database.list({ include_docs: true });
         const activeCourses = result.rows
             .map((row) => row.doc)
             .filter((doc) => doc &&
             doc.type === 'course' &&
-            doc.instructor === req.user._id.toString() &&
+            doc.instructor === userId &&
             doc.isPublished === true);
         activeCourses.sort((a, b) => a.title.localeCompare(b.title));
         res.json({
@@ -67,26 +77,24 @@ router.get('/courses', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('ins
     (0, express_validator_1.query)('limit').optional().isInt({ min: 1, max: 100 })
 ]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { status, page = 1, limit = 100 } = req.query;
+    const { userId } = ensureAuth(req);
     const database = await ensureDb();
     const result = await database.list({ include_docs: true });
-    const instructorId = req.user?.id || req.user?._id;
     console.log('🔍 Instructor courses request:', {
-        instructorId,
-        userObject: req.user,
-        userIdType: typeof instructorId
+        userId,
+        userIdType: typeof userId
     });
     let courses = result.rows
         .map((row) => row.doc)
         .filter((doc) => {
         const match = doc && doc.type === 'course' &&
-            (doc.instructor === instructorId || doc.instructor === instructorId?.toString() ||
-                doc.instructor_id === instructorId || doc.instructor_id === instructorId?.toString());
+            (doc.instructor === userId || doc.instructor_id === userId);
         if (doc?.type === 'course') {
             console.log('🔍 Checking course:', {
                 courseTitle: doc.title,
                 courseInstructor: doc.instructor,
                 courseInstructorId: doc.instructor_id,
-                instructorId,
+                userId,
                 match
             });
         }
@@ -140,13 +148,14 @@ router.get('/assessments', auth_1.authenticateToken, (0, auth_1.authorizeRoles)(
     (0, express_validator_1.query)('limit').optional().isInt({ min: 1, max: 50 })
 ]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { status, page = 1, limit = 10 } = req.query;
+    const { userId } = ensureAuth(req);
     const database = await ensureDb();
     const result = await database.list({ include_docs: true });
     let assessments = result.rows
         .map((row) => row.doc)
         .filter((doc) => doc &&
         ['assessment', 'quiz', 'assignment', 'exam'].includes(doc.type) &&
-        doc.instructor === req.user._id.toString());
+        doc.instructor === userId);
     if (status) {
         assessments = assessments.filter(a => a.status === status);
     }
@@ -209,6 +218,7 @@ router.post('/assessments', auth_1.authenticateToken, (0, auth_1.authorizeRoles)
     (0, express_validator_1.body)('dueDate').optional().isISO8601().withMessage('Due date must be a valid date')
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { courseId, timeLimit, ...assessmentData } = req.body;
+    const { userId } = ensureAuth(req);
     try {
         console.log('Creating assessment with data:', { courseId, timeLimit, ...assessmentData });
         const database = await ensureDb();
@@ -222,7 +232,7 @@ router.post('/assessments', auth_1.authenticateToken, (0, auth_1.authorizeRoles)
                         message: 'Course not found'
                     });
                 }
-                if (course.instructor !== req.user._id.toString()) {
+                if (course.instructor !== userId) {
                     return res.status(403).json({
                         success: false,
                         message: 'Not authorized to create assessment for this course'
@@ -260,7 +270,7 @@ router.post('/assessments', auth_1.authenticateToken, (0, auth_1.authorizeRoles)
             course: finalCourseId,
             courseId: finalCourseId,
             moduleId: assessmentData.moduleId || '',
-            instructor: req.user._id.toString(),
+            instructor: userId,
             status: 'published',
             duration: timeLimit || assessmentData.duration || 60,
             totalPoints: totalPoints,
@@ -308,6 +318,7 @@ router.put('/assessments/:assessmentId', auth_1.authenticateToken, (0, auth_1.au
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { assessmentId } = req.params;
     const { courseId, timeLimit, ...updates } = req.body;
+    const { userId } = ensureAuth(req);
     try {
         const database = await ensureDb();
         const assessment = await database.get(assessmentId);
@@ -317,7 +328,7 @@ router.put('/assessments/:assessmentId', auth_1.authenticateToken, (0, auth_1.au
                 message: 'Assessment not found'
             });
         }
-        if (assessment.instructor !== req.user._id.toString()) {
+        if (assessment.instructor !== userId) {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to update this assessment'
@@ -331,7 +342,7 @@ router.put('/assessments/:assessmentId', auth_1.authenticateToken, (0, auth_1.au
                     message: 'Course not found'
                 });
             }
-            if (course.instructor !== req.user._id.toString()) {
+            if (course.instructor !== userId) {
                 return res.status(403).json({
                     success: false,
                     message: 'Not authorized to assign assessment to this course'
@@ -421,6 +432,7 @@ router.post('/assessments/:assessmentId/questions', auth_1.authenticateToken, (0
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { assessmentId } = req.params;
     const { question, type, points, options, correctAnswer, explanation } = req.body;
+    const { userId } = ensureAuth(req);
     try {
         const database = await ensureDb();
         const assessment = await database.get(assessmentId);
@@ -430,7 +442,7 @@ router.post('/assessments/:assessmentId/questions', auth_1.authenticateToken, (0
                 message: 'Assessment not found'
             });
         }
-        if (assessment.instructor !== req.user._id.toString()) {
+        if (assessment.instructor !== userId) {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to add questions to this assessment'
@@ -494,6 +506,7 @@ router.put('/assessments/:assessmentId/questions/:questionId', auth_1.authentica
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { assessmentId, questionId } = req.params;
     const updates = req.body;
+    const { userId } = ensureAuth(req);
     try {
         const database = await ensureDb();
         const assessment = await database.get(assessmentId);
@@ -503,7 +516,7 @@ router.put('/assessments/:assessmentId/questions/:questionId', auth_1.authentica
                 message: 'Assessment not found'
             });
         }
-        if (assessment.instructor !== req.user._id.toString()) {
+        if (assessment.instructor !== userId) {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to update questions in this assessment'
@@ -584,6 +597,7 @@ router.put('/assessments/:assessmentId/questions/:questionId', auth_1.authentica
 }));
 router.delete('/assessments/:assessmentId/questions/:questionId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { assessmentId, questionId } = req.params;
+    const { userId } = ensureAuth(req);
     try {
         const database = await ensureDb();
         const assessment = await database.get(assessmentId);
@@ -593,7 +607,7 @@ router.delete('/assessments/:assessmentId/questions/:questionId', auth_1.authent
                 message: 'Assessment not found'
             });
         }
-        if (assessment.instructor !== req.user._id.toString()) {
+        if (assessment.instructor !== userId) {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to delete questions from this assessment'
@@ -630,22 +644,23 @@ router.delete('/assessments/:assessmentId/questions/:questionId', auth_1.authent
     }
 }));
 router.get('/test-auth', auth_1.authenticateToken, (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId, user } = ensureAuth(req);
     console.log('🧪 TEST AUTH ROUTE CALLED');
-    console.log('   User from token:', req.user ? req.user._id : 'NO USER');
+    console.log('   User from token:', userId);
     console.log('   Auth header:', req.headers.authorization ? 'Present' : 'Missing');
     res.json({
         success: true,
         message: 'Authentication working',
-        user: req.user ? req.user._id : 'No user'
+        user: userId
     });
 }));
 router.delete('/assessments/:assessmentId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { assessmentId } = req.params;
+    const { userId } = ensureAuth(req);
     try {
         console.log('🗑️ DELETE REQUEST RECEIVED');
         console.log('   Assessment ID:', assessmentId);
-        console.log('   User from token:', req.user ? req.user._id : 'NO USER');
-        console.log('   User object:', req.user);
+        console.log('   User from token:', userId);
         console.log('   Auth header:', req.headers.authorization ? 'Present' : 'Missing');
         const database = await ensureDb();
         let assessment;
@@ -665,8 +680,8 @@ router.delete('/assessments/:assessmentId', auth_1.authenticateToken, (0, auth_1
         }
         console.log('🔍 Instructor check:');
         console.log('   Assessment instructor:', assessment.instructor);
-        console.log('   User ID:', req.user._id.toString());
-        console.log('   Match:', assessment.instructor === req.user._id.toString());
+        console.log('   User ID:', userId);
+        console.log('   Match:', assessment.instructor === userId);
         try {
             await database.destroy(assessment._id, assessment._rev);
             console.log('✅ Assessment deleted successfully');
@@ -699,6 +714,7 @@ router.get('/assessments/:assessmentId/submissions', auth_1.authenticateToken, (
 ]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { assessmentId } = req.params;
     const { status, page = 1, limit = 10 } = req.query;
+    const { userId } = ensureAuth(req);
     try {
         const database = await ensureDb();
         const assessment = await database.get(assessmentId);
@@ -708,7 +724,7 @@ router.get('/assessments/:assessmentId/submissions', auth_1.authenticateToken, (
                 message: 'Assessment not found'
             });
         }
-        if (assessment.instructor !== req.user._id.toString()) {
+        if (assessment.instructor !== userId) {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to view submissions for this assessment'
@@ -775,6 +791,7 @@ router.put('/assessments/:assessmentId/submissions/:submissionId/grade', auth_1.
 ]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { assessmentId, submissionId } = req.params;
     const { score, feedback, comments } = req.body;
+    const { userId } = ensureAuth(req);
     try {
         const database = await ensureDb();
         const assessment = await database.get(assessmentId);
@@ -784,7 +801,7 @@ router.put('/assessments/:assessmentId/submissions/:submissionId/grade', auth_1.
                 message: 'Assessment not found'
             });
         }
-        if (assessment.instructor !== req.user._id.toString()) {
+        if (assessment.instructor !== userId) {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to grade submissions for this assessment'
@@ -825,6 +842,7 @@ router.put('/assessments/:assessmentId/submissions/:submissionId/grade', auth_1.
 }));
 router.get('/courses/:courseId/analytics', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { courseId } = req.params;
+    const { userId } = ensureAuth(req);
     try {
         const database = await ensureDb();
         const course = await database.get(courseId);
@@ -834,7 +852,7 @@ router.get('/courses/:courseId/analytics', auth_1.authenticateToken, (0, auth_1.
                 message: 'Course not found'
             });
         }
-        if (course.instructor !== req.user._id.toString()) {
+        if (course.instructor !== userId) {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to view analytics for this course'
@@ -907,13 +925,14 @@ router.get('/courses/:courseId/analytics', auth_1.authenticateToken, (0, auth_1.
 router.get('/analytics', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
         const { period = '30' } = req.query;
+        const { userId } = ensureAuth(req);
         const daysAgo = new Date();
         daysAgo.setDate(daysAgo.getDate() - Number(period));
         const database = await ensureDb();
         const allDocsResult = await database.list({ include_docs: true });
         const courses = allDocsResult.rows
             .map((row) => row.doc)
-            .filter((doc) => doc && doc.type === 'course' && doc.instructor === req.user._id.toString());
+            .filter((doc) => doc && doc.type === 'course' && doc.instructor === userId);
         const totalCourses = courses.length;
         const publishedCourses = courses.filter(c => c.isPublished).length;
         const newCourses = courses.filter(c => c.createdAt && new Date(c.createdAt) >= daysAgo).length;
@@ -921,7 +940,7 @@ router.get('/analytics', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('i
             .map((row) => row.doc)
             .filter((doc) => doc &&
             ['assessment', 'quiz', 'assignment', 'exam'].includes(doc.type) &&
-            doc.instructor === req.user._id.toString());
+            doc.instructor === userId);
         const totalAssessments = assessments.length;
         const publishedAssessments = assessments.filter(a => a.status === 'published').length;
         const newAssessments = assessments.filter(a => a.createdAt && new Date(a.createdAt) >= daysAgo).length;
@@ -976,20 +995,21 @@ router.get('/analytics', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('i
 router.get('/dashboard', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
         const { period = '30' } = req.query;
+        const { userId } = ensureAuth(req);
         const daysAgo = new Date();
         daysAgo.setDate(daysAgo.getDate() - Number(period));
         const database = await ensureDb();
         const allDocsResult = await database.list({ include_docs: true });
         const courses = allDocsResult.rows
             .map((row) => row.doc)
-            .filter((doc) => doc && doc.type === 'course' && doc.instructor === req.user._id.toString());
+            .filter((doc) => doc && doc.type === 'course' && doc.instructor === userId);
         const totalCourses = courses.length;
         const publishedCourses = courses.filter(c => c.isPublished).length;
         const assessments = allDocsResult.rows
             .map((row) => row.doc)
             .filter((doc) => doc &&
             ['assessment', 'quiz', 'assignment', 'exam'].includes(doc.type) &&
-            doc.instructor === req.user._id.toString());
+            doc.instructor === userId);
         const totalAssessments = assessments.length;
         const publishedAssessments = assessments.filter(a => a.status === 'published').length;
         const users = allDocsResult.rows
@@ -1205,6 +1225,7 @@ router.post('/help-tickets/:ticketId/respond', auth_1.authenticateToken, (0, aut
 ]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { ticketId } = req.params;
     const { message, isInternal = false } = req.body;
+    const { userId } = ensureAuth(req);
     try {
         const database = await ensureDb();
         const ticket = await database.get(ticketId);
@@ -1214,7 +1235,7 @@ router.post('/help-tickets/:ticketId/respond', auth_1.authenticateToken, (0, aut
                 message: 'Help ticket not found'
             });
         }
-        if (ticket.assignedTo !== req.user._id.toString() && ticket.user !== req.user._id.toString()) {
+        if (ticket.assignedTo !== userId && ticket.user !== userId) {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to respond to this ticket'
@@ -1225,7 +1246,7 @@ router.post('/help-tickets/:ticketId/respond', auth_1.authenticateToken, (0, aut
         }
         const response = {
             _id: Date.now().toString(),
-            sender: req.user._id.toString(),
+            sender: userId,
             message,
             isInternal,
             createdAt: new Date()
@@ -1255,6 +1276,7 @@ router.patch('/help-tickets/:ticketId/status', auth_1.authenticateToken, (0, aut
 ]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { ticketId } = req.params;
     const { status } = req.body;
+    const { userId } = ensureAuth(req);
     try {
         const database = await ensureDb();
         const ticket = await database.get(ticketId);
@@ -1264,7 +1286,7 @@ router.patch('/help-tickets/:ticketId/status', auth_1.authenticateToken, (0, aut
                 message: 'Help ticket not found'
             });
         }
-        if (ticket.assignedTo !== req.user._id.toString()) {
+        if (ticket.assignedTo !== userId) {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to update this ticket'
@@ -1291,8 +1313,9 @@ router.patch('/help-tickets/:ticketId/status', auth_1.authenticateToken, (0, aut
 }));
 router.get('/profile', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
+        const { userId } = ensureAuth(req);
         const database = await ensureDb();
-        const user = await database.get(req.user._id);
+        const user = await database.get(userId);
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -1322,9 +1345,10 @@ router.put('/profile', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('ins
     (0, express_validator_1.body)('language_preference').optional().trim()
 ]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
+        const { userId } = ensureAuth(req);
         const updates = req.body;
         const database = await ensureDb();
-        const user = await database.get(req.user._id);
+        const user = await database.get(userId);
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -1355,13 +1379,14 @@ router.put('/profile', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('ins
 router.get('/student-activity', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
         const { period = '7' } = req.query;
+        const { userId } = ensureAuth(req);
         const daysAgo = new Date();
         daysAgo.setDate(daysAgo.getDate() - Number(period));
         const database = await ensureDb();
         const allDocsResult = await database.list({ include_docs: true });
         const courses = allDocsResult.rows
             .map((row) => row.doc)
-            .filter((doc) => doc && doc.type === 'course' && doc.instructor === req.user._id.toString());
+            .filter((doc) => doc && doc.type === 'course' && doc.instructor === userId);
         const enrolledUserIds = new Set();
         courses.forEach(course => {
             if (course.enrolledStudents) {
@@ -1481,7 +1506,7 @@ const validateQuizQuestion = (question) => {
 };
 router.get('/quizzes', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
-        const user = req.user;
+        const { userId, user } = ensureAuth(req);
         console.log('🔍 Fetching quizzes for user:', user._id);
         const database = await ensureDb();
         const result = await database.list({ include_docs: true });
@@ -1517,7 +1542,7 @@ router.post('/quizzes', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('in
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
         const { title, description, courseId, moduleId, duration, passingScore, questions, dueDate } = req.body;
-        const user = req.user;
+        const { userId, user } = ensureAuth(req);
         if (questions && questions.length > 0) {
             for (let i = 0; i < questions.length; i++) {
                 const questionValidation = validateQuizQuestion(questions[i]);
@@ -1594,7 +1619,7 @@ router.put('/quizzes/:quizId', auth_1.authenticateToken, (0, auth_1.authorizeRol
     (0, express_validator_1.body)('questions').optional().isArray().withMessage('Questions must be an array')
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
-        const user = req.user;
+        const { userId, user } = ensureAuth(req);
         const { quizId } = req.params;
         const { title, description, courseId, moduleId, duration, totalPoints, passingScore, dueDate, questions } = req.body;
         const database = await ensureDb();
@@ -1646,7 +1671,7 @@ router.put('/quizzes/:quizId', auth_1.authenticateToken, (0, auth_1.authorizeRol
 }));
 router.delete('/quizzes/:quizId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
-        const user = req.user;
+        const { userId, user } = ensureAuth(req);
         const { quizId } = req.params;
         const database = await ensureDb();
         const quiz = await database.get(quizId);
@@ -1672,7 +1697,7 @@ router.delete('/quizzes/:quizId', auth_1.authenticateToken, (0, auth_1.authorize
 }));
 router.get('/discussions', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
-        const user = req.user;
+        const { userId, user } = ensureAuth(req);
         const database = await ensureDb();
         const result = await database.list({ include_docs: true });
         const discussions = result.rows
@@ -1699,7 +1724,7 @@ router.post('/discussions', auth_1.authenticateToken, (0, auth_1.authorizeRoles)
     (0, express_validator_1.body)('questions').optional().isArray().withMessage('Questions must be an array')
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
-        const user = req.user;
+        const { userId, user } = ensureAuth(req);
         const { title, content, courseId, category, questions } = req.body;
         if (!title || !content || !courseId) {
             return res.status(400).json({
@@ -1759,7 +1784,7 @@ router.put('/discussions/:discussionId', auth_1.authenticateToken, (0, auth_1.au
     (0, express_validator_1.body)('questions').optional().isArray().withMessage('Questions must be an array')
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
-        const user = req.user;
+        const { userId, user } = ensureAuth(req);
         const { discussionId } = req.params;
         const { title, content, courseId, category, questions } = req.body;
         const database = await ensureDb();
@@ -1806,7 +1831,7 @@ router.put('/discussions/:discussionId', auth_1.authenticateToken, (0, auth_1.au
 }));
 router.delete('/discussions/:discussionId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
-        const user = req.user;
+        const { userId, user } = ensureAuth(req);
         const { discussionId } = req.params;
         const database = await ensureDb();
         const discussion = await database.get(discussionId);
@@ -1832,7 +1857,7 @@ router.delete('/discussions/:discussionId', auth_1.authenticateToken, (0, auth_1
 }));
 router.get('/groups', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
-        const user = req.user;
+        const { userId, user } = ensureAuth(req);
         const database = await ensureDb();
         const result = await database.list({ include_docs: true });
         const groups = result.rows
@@ -1860,7 +1885,7 @@ router.post('/groups', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('ins
     (0, express_validator_1.body)('allowSelfJoin').optional().isBoolean().withMessage('allowSelfJoin must be a boolean')
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
-        const user = req.user;
+        const { userId, user } = ensureAuth(req);
         const { name, description, courseId, maxMembers, isPrivate, allowSelfJoin } = req.body;
         if (!name || !courseId) {
             return res.status(400).json({
@@ -1923,7 +1948,7 @@ router.put('/groups/:groupId', auth_1.authenticateToken, (0, auth_1.authorizeRol
     (0, express_validator_1.body)('allowSelfJoin').optional().isBoolean().withMessage('allowSelfJoin must be a boolean')
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
-        const user = req.user;
+        const { userId, user } = ensureAuth(req);
         const { groupId } = req.params;
         const { name, description, courseId, maxMembers, isPrivate, allowSelfJoin } = req.body;
         const database = await ensureDb();
@@ -1972,7 +1997,7 @@ router.put('/groups/:groupId', auth_1.authenticateToken, (0, auth_1.authorizeRol
 }));
 router.delete('/groups/:groupId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
-        const user = req.user;
+        const { userId, user } = ensureAuth(req);
         const { groupId } = req.params;
         const database = await ensureDb();
         const group = await database.get(groupId);

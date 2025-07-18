@@ -3,6 +3,7 @@ import styled from 'styled-components';
 import { useUser } from '../../contexts/UserContext';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowBack, AccessTime, Person, Grade, CheckCircle, Cancel } from '@mui/icons-material';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
@@ -204,48 +205,101 @@ const EmptyState = styled.div`
 `;
 
 const QuizSubmissions = () => {
-  const { token } = useUser();
   const { quizId } = useParams();
   const navigate = useNavigate();
+  const { token } = useUser();
+  const [quiz, setQuiz] = useState(null);
   const [submissions, setSubmissions] = useState([]);
-  const [quizInfo, setQuizInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetchSubmissions();
-  }, [quizId]);
+    const fetchQuizSubmissions = async () => {
+      try {
+        setLoading(true);
+        setError('');
+        
+        const isOnline = navigator.onLine;
+        
+        let quizData = null;
+        let submissionsData = [];
 
-  const fetchSubmissions = async () => {
-    try {
-      setLoading(true);
-      setError('');
-      
-      const response = await fetch(`/api/quiz-sessions/quiz/${quizId}/submissions`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+        if (isOnline) {
+          try {
+            // Try online API calls first (preserving existing behavior)
+            console.log('🌐 Online mode: Fetching quiz submissions from API...');
+            
+            // Fetch quiz data
+            const quizResponse = await fetch(`/api/instructor/quizzes/${quizId}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (quizResponse.ok) {
+              const quizApiData = await quizResponse.json();
+              quizData = quizApiData.data.quiz;
+              console.log('✅ Quiz data received');
+              
+              // Store quiz data for offline use
+              await offlineIntegrationService.storeQuizData(quizId, quizData);
+            } else {
+              throw new Error('Failed to fetch quiz data');
+            }
+
+            // Fetch quiz submissions
+            const submissionsResponse = await fetch(`/api/instructor/quizzes/${quizId}/submissions`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (submissionsResponse.ok) {
+              const submissionsApiData = await submissionsResponse.json();
+              submissionsData = submissionsApiData.data.submissions || [];
+              console.log('✅ Quiz submissions data received:', submissionsData.length);
+              
+              // Store quiz submissions for offline use
+              await offlineIntegrationService.storeQuizSubmissions(quizId, submissionsData);
+            } else {
+              throw new Error('Failed to fetch quiz submissions');
+            }
+
+          } catch (onlineError) {
+            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+            
+            // Fall back to offline data if online fails
+            quizData = await offlineIntegrationService.getQuizData(quizId);
+            submissionsData = await offlineIntegrationService.getQuizSubmissions(quizId);
+            
+            if (!quizData) {
+              throw onlineError;
+            }
+          }
+        } else {
+          // Offline mode: use offline services
+          console.log('📴 Offline mode: Using offline quiz submissions data...');
+          quizData = await offlineIntegrationService.getQuizData(quizId);
+          submissionsData = await offlineIntegrationService.getQuizSubmissions(quizId);
         }
-      });
 
-      if (response.ok) {
-        const data = await response.json();
-        setQuizInfo({
-          title: data.data.quizTitle,
-          totalSubmissions: data.data.totalSubmissions
-        });
-        setSubmissions(data.data.submissions || []);
-      } else {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to fetch submissions');
+        setQuiz(quizData);
+        setSubmissions(submissionsData);
+
+      } catch (err) {
+        console.error('❌ Error fetching quiz submissions:', err);
+        setError(err.message || 'Failed to load quiz submissions');
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      console.error('Error fetching quiz submissions:', err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
+    };
+
+    if (quizId && token) {
+      fetchQuizSubmissions();
     }
-  };
+  }, [quizId, token]);
 
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleString();
@@ -298,7 +352,90 @@ const QuizSubmissions = () => {
         <ErrorContainer>
           <h3>Error Loading Submissions</h3>
           <p>{error}</p>
-          <button onClick={fetchSubmissions} style={{ marginTop: '1rem', padding: '0.5rem 1rem', background: '#dc2626', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+          <button onClick={() => {
+            const fetchQuizSubmissions = async () => {
+              try {
+                setLoading(true);
+                setError('');
+                
+                const isOnline = navigator.onLine;
+                
+                let quizData = null;
+                let submissionsData = [];
+
+                if (isOnline) {
+                  try {
+                    // Try online API calls first (preserving existing behavior)
+                    console.log('🌐 Online mode: Fetching quiz submissions from API...');
+                    
+                    // Fetch quiz data
+                    const quizResponse = await fetch(`/api/instructor/quizzes/${quizId}`, {
+                      headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                      }
+                    });
+
+                    if (quizResponse.ok) {
+                      const quizApiData = await quizResponse.json();
+                      quizData = quizApiData.data.quiz;
+                      console.log('✅ Quiz data received');
+                      
+                      // Store quiz data for offline use
+                      await offlineIntegrationService.storeQuizData(quizId, quizData);
+                    } else {
+                      throw new Error('Failed to fetch quiz data');
+                    }
+
+                    // Fetch quiz submissions
+                    const submissionsResponse = await fetch(`/api/instructor/quizzes/${quizId}/submissions`, {
+                      headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                      }
+                    });
+
+                    if (submissionsResponse.ok) {
+                      const submissionsApiData = await submissionsResponse.json();
+                      submissionsData = submissionsApiData.data.submissions || [];
+                      console.log('✅ Quiz submissions data received:', submissionsData.length);
+                      
+                      // Store quiz submissions for offline use
+                      await offlineIntegrationService.storeQuizSubmissions(quizId, submissionsData);
+                    } else {
+                      throw new Error('Failed to fetch quiz submissions');
+                    }
+
+                  } catch (onlineError) {
+                    console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+                    
+                    // Fall back to offline data if online fails
+                    quizData = await offlineIntegrationService.getQuizData(quizId);
+                    submissionsData = await offlineIntegrationService.getQuizSubmissions(quizId);
+                    
+                    if (!quizData) {
+                      throw onlineError;
+                    }
+                  }
+                } else {
+                  // Offline mode: use offline services
+                  console.log('📴 Offline mode: Using offline quiz submissions data...');
+                  quizData = await offlineIntegrationService.getQuizData(quizId);
+                  submissionsData = await offlineIntegrationService.getQuizSubmissions(quizId);
+                }
+
+                setQuiz(quizData);
+                setSubmissions(submissionsData);
+
+              } catch (err) {
+                console.error('❌ Error fetching quiz submissions:', err);
+                setError(err.message || 'Failed to load quiz submissions');
+              } finally {
+                setLoading(false);
+              }
+            };
+            fetchQuizSubmissions();
+          }} style={{ marginTop: '1rem', padding: '0.5rem 1rem', background: '#dc2626', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
             Try Again
           </button>
         </ErrorContainer>
@@ -314,7 +451,7 @@ const QuizSubmissions = () => {
           Back to Quizzes
         </BackButton>
         
-        <Title>Quiz Submissions: {quizInfo?.title}</Title>
+        <Title>Quiz Submissions: {quiz?.title}</Title>
         
         <QuizInfo>
           <InfoCard>

@@ -13,6 +13,15 @@ const router = express.Router();
 PouchDB.plugin(PouchDBFind);
 const db = new PouchDB('http://Manzi:Clarisse101@localhost:5984/refulearn');
 
+interface AuthenticatedRequest extends Request {
+  user?: { _id: string; role?: string; [key: string]: any; };
+}
+
+const ensureAuth = (req: AuthenticatedRequest): { userId: string; user: NonNullable<AuthenticatedRequest['user']> } => {
+  if (!req.user?._id) throw new Error('User authentication required');
+  return { userId: req.user._id.toString(), user: req.user as NonNullable<AuthenticatedRequest['user']> };
+};
+
 interface ScholarshipDoc {
   _id: string;
   _rev?: string;
@@ -138,10 +147,10 @@ router.get('/:scholarshipId', asyncHandler(async (req: Request, res: Response) =
 // Apply for scholarship
 router.post('/:scholarshipId/apply', authenticateToken, uploadAny, handleUploadError, [
   body('essayReason').trim().notEmpty().withMessage('Essay explaining why you are applying is required')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { scholarshipId } = req.params;
   const { essayReason } = req.body;
-  const userId = req.user._id.toString();
+  const { userId } = ensureAuth(req);
   
   // Check for required files
   const files = req.files as Express.Multer.File[];
@@ -234,8 +243,8 @@ router.post('/:scholarshipId/apply', authenticateToken, uploadAny, handleUploadE
 }));
 
 // Debug endpoint to check user applications
-router.get('/debug/user-applications', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user._id.toString();
+router.get('/debug/user-applications', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId, user } = ensureAuth(req);
   
   // Get all scholarships
   const result = await db.find({ 
@@ -247,7 +256,7 @@ router.get('/debug/user-applications', authenticateToken, authorizeRoles('employ
   const scholarships = result.docs;
   const debug = {
     currentUserId: userId,
-    currentUserRole: req.user.role,
+    currentUserRole: user.role,
     totalScholarships: scholarships.length,
     scholarshipsWithApplications: scholarships.filter((s: any) => s.applications && s.applications.length > 0).length,
     allApplications: scholarships.map((s: any) => ({
@@ -261,8 +270,9 @@ router.get('/debug/user-applications', authenticateToken, authorizeRoles('employ
 }));
 
 // Get all scholarship applications (employer/admin only)
-router.get('/applications/user', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/applications/user', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { page = 1, limit = 10 } = req.query;
+  const { userId, user } = ensureAuth(req);
 
   // Get all scholarships and return all applications from all users
   const result = await db.find({ 
@@ -324,12 +334,13 @@ router.post('/', authenticateToken, authorizeRoles('employer', 'admin'), [
   body('requirements').optional().isArray().withMessage('Requirements must be an array'),
   body('deadline').isISO8601().withMessage('Valid deadline is required'),
   body('isActive').optional().isBoolean()
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId, user } = ensureAuth(req);
   const scholarship: ScholarshipDoc = {
     ...req.body,
     _id: Date.now().toString(),
     type: 'scholarship',
-    employer: req.user._id.toString(),
+    employer: userId,
     applications: [],
     createdAt: new Date(),
     updatedAt: new Date()
@@ -354,9 +365,10 @@ router.put('/:scholarshipId', authenticateToken, authorizeRoles('employer', 'adm
   body('requirements').optional().isArray(),
   body('deadline').optional().isISO8601(),
   body('isActive').optional().isBoolean()
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { scholarshipId } = req.params;
   const updates = req.body;
+  const { userId, user } = ensureAuth(req);
   
   const scholarship = await db.get(scholarshipId) as ScholarshipDoc;
   if (!scholarship) {
@@ -368,7 +380,7 @@ router.put('/:scholarshipId', authenticateToken, authorizeRoles('employer', 'adm
   }
   
   // Check if user owns this scholarship or is admin
-  if (scholarship.employer !== req.user._id.toString() && req.user.role !== 'admin') {
+  if (scholarship.employer !== userId && user.role !== 'admin') {
     res.status(403).json({
       success: false,
       message: 'You can only update your own scholarships'
@@ -390,8 +402,9 @@ router.put('/:scholarshipId', authenticateToken, authorizeRoles('employer', 'adm
 }));
 
 // Delete scholarship (employer only)
-router.delete('/:scholarshipId', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/:scholarshipId', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { scholarshipId } = req.params;
+  const { userId, user } = ensureAuth(req);
   
   const scholarship = await db.get(scholarshipId) as ScholarshipDoc;
   if (!scholarship) {
@@ -403,7 +416,7 @@ router.delete('/:scholarshipId', authenticateToken, authorizeRoles('employer', '
   }
   
   // Check if user owns this scholarship or is admin
-  if (scholarship.employer !== req.user._id.toString() && req.user.role !== 'admin') {
+  if (scholarship.employer !== userId && user.role !== 'admin') {
     res.status(403).json({
       success: false,
       message: 'You can only delete your own scholarships'
@@ -421,11 +434,12 @@ router.delete('/:scholarshipId', authenticateToken, authorizeRoles('employer', '
 }));
 
 // Get employer's scholarships
-router.get('/employer/scholarships', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/employer/scholarships', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { page = 1, limit = 10, status } = req.query;
+  const { userId, user } = ensureAuth(req);
   const skip = (Number(page) - 1) * Number(limit);
   
-  const query: any = { type: 'scholarship', employer: req.user._id.toString() };
+  const query: any = { type: 'scholarship', employer: userId };
   
   if (status) {
     query.isActive = status === 'active';
@@ -458,9 +472,10 @@ router.get('/employer/scholarships', authenticateToken, authorizeRoles('employer
 }));
 
 // Get scholarship applications (employer only)
-router.get('/:scholarshipId/applications', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/:scholarshipId/applications', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { scholarshipId } = req.params;
   const { page = 1, limit = 10, status } = req.query;
+  const { userId, user } = ensureAuth(req);
   const skip = (Number(page) - 1) * Number(limit);
   
   const scholarship = await db.get(scholarshipId) as ScholarshipDoc;
@@ -474,7 +489,7 @@ router.get('/:scholarshipId/applications', authenticateToken, authorizeRoles('em
   }
   
   // Check if user owns this scholarship or is admin
-  if (scholarship.employer !== req.user._id.toString() && req.user.role !== 'admin') {
+  if (scholarship.employer !== userId && user.role !== 'admin') {
     res.status(403).json({
       success: false,
       message: 'You can only view applications for your own scholarships'
@@ -528,9 +543,10 @@ router.get('/:scholarshipId/applications', authenticateToken, authorizeRoles('em
 router.put('/:scholarshipId/applications/:applicationId', authenticateToken, authorizeRoles('employer', 'admin'), [
   body('status').isIn(['pending', 'accepted', 'rejected', 'shortlisted', 'reviewed', 'hired', 'closed']).withMessage('Invalid status'),
   body('feedback').optional().trim()
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { scholarshipId, applicationId } = req.params;
   const { status, feedback } = req.body;
+  const { userId, user } = ensureAuth(req);
   
   const scholarship = await db.get(scholarshipId) as ScholarshipDoc;
   if (!scholarship) {
@@ -542,7 +558,7 @@ router.put('/:scholarshipId/applications/:applicationId', authenticateToken, aut
   }
   
   // Check if user owns this scholarship or is admin
-  if (scholarship.employer !== req.user._id.toString() && req.user.role !== 'admin') {
+  if (scholarship.employer !== userId && user.role !== 'admin') {
     res.status(403).json({
       success: false,
       message: 'You can only update applications for your own scholarships'
@@ -581,8 +597,9 @@ router.put('/:scholarshipId/applications/:applicationId', authenticateToken, aut
 }));
 
 // Get scholarship analytics (employer only)
-router.get('/:scholarshipId/analytics', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/:scholarshipId/analytics', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { scholarshipId } = req.params;
+  const { userId, user } = ensureAuth(req);
   
   const scholarship = await db.get(scholarshipId) as ScholarshipDoc;
   if (!scholarship) {
@@ -594,7 +611,7 @@ router.get('/:scholarshipId/analytics', authenticateToken, authorizeRoles('emplo
   }
   
   // Check if user owns this scholarship or is admin
-  if (scholarship.employer !== req.user._id.toString() && req.user.role !== 'admin') {
+  if (scholarship.employer !== userId && user.role !== 'admin') {
     res.status(403).json({
       success: false,
       message: 'You can only view analytics for your own scholarships'
@@ -641,7 +658,8 @@ router.post('/admin', authenticateToken, authorizeRoles('admin'), [
   body('employer').notEmpty().withMessage('Valid employer ID is required'),
   body('deadline').optional().isISO8601(),
   body('isActive').optional().isBoolean(),
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId, user } = ensureAuth(req);
   const scholarship: ScholarshipDoc = {
     ...req.body,
     _id: Date.now().toString(),
@@ -656,7 +674,8 @@ router.post('/admin', authenticateToken, authorizeRoles('admin'), [
 }));
 
 // Admin: Get all scholarships
-router.get('/admin/all', authenticateToken, authorizeRoles('admin'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/admin/all', authenticateToken, authorizeRoles('admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId, user } = ensureAuth(req);
   const result = await db.find({ selector: { type: 'scholarship' } });
   const scholarships = result.docs as ScholarshipDoc[];
   
@@ -688,7 +707,8 @@ router.get('/admin/all', authenticateToken, authorizeRoles('admin'), asyncHandle
 }));
 
 // Admin: Get scholarship by ID
-router.get('/admin/:scholarshipId', authenticateToken, authorizeRoles('admin'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/admin/:scholarshipId', authenticateToken, authorizeRoles('admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId, user } = ensureAuth(req);
   const scholarship = await db.get(req.params.scholarshipId) as ScholarshipDoc;
   if (!scholarship) {
     return res.status(404).json({ success: false, message: 'Scholarship not found' });
@@ -727,9 +747,10 @@ router.put('/admin/:scholarshipId', authenticateToken, authorizeRoles('admin'), 
   body('link').optional().trim().notEmpty(),
   body('deadline').optional().isISO8601(),
   body('isActive').optional().isBoolean(),
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { scholarshipId } = req.params;
   const updates = req.body;
+  const { userId, user } = ensureAuth(req);
   
   const scholarship = await db.get(scholarshipId) as ScholarshipDoc;
   if (!scholarship) {
@@ -747,8 +768,9 @@ router.put('/admin/:scholarshipId', authenticateToken, authorizeRoles('admin'), 
 }));
 
 // Admin: Delete scholarship
-router.delete('/admin/:scholarshipId', authenticateToken, authorizeRoles('admin'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/admin/:scholarshipId', authenticateToken, authorizeRoles('admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { scholarshipId } = req.params;
+  const { userId, user } = ensureAuth(req);
   const scholarship = await db.get(scholarshipId) as ScholarshipDoc;
   if (!scholarship) {
     return res.status(404).json({ success: false, message: 'Scholarship not found' });

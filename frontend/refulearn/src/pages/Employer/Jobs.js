@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 import { useTranslation } from 'react-i18next';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
@@ -382,28 +383,57 @@ const Jobs = () => {
   const fetchJobs = async () => {
     setLoading(true);
     setError('');
-    try {
-      console.log('🔍 Fetching employer jobs from: /api/jobs/employer/jobs');
-      const token = localStorage.getItem('token');
-      console.log('🔑 Token exists:', !!token);
-      
-      const response = await fetch('/api/jobs/employer/jobs', {
-        headers: {
-          'Authorization': `Bearer ${token || ''}`
+    
+    const isOnline = navigator.onLine;
+    let jobsData = [];
+
+    if (isOnline) {
+      try {
+        // Try online API calls first (preserving existing behavior)
+        console.log('🌐 Online mode: Fetching employer jobs from API...');
+        console.log('🔍 Fetching employer jobs from: /api/jobs/employer/jobs');
+        
+        const token = localStorage.getItem('token');
+        console.log('🔑 Token exists:', !!token);
+        
+        const response = await fetch('/api/jobs/employer/jobs', {
+          headers: {
+            'Authorization': `Bearer ${token || ''}`
+          }
+        });
+
+        console.log('📊 Response status:', response.status);
+        const data = await response.json();
+        console.log('📋 Response data:', data);
+
+        if (data.success) {
+          jobsData = data.data.jobs || [];
+          console.log('✅ Jobs found:', jobsData.length);
+          
+          // Store jobs data for offline use
+          await offlineIntegrationService.storeEmployerJobs(jobsData);
+          console.log('✅ Employer jobs stored for offline use');
+        } else {
+          throw new Error(data.message || 'Failed to fetch jobs');
         }
-      });
-
-      console.log('📊 Response status:', response.status);
-      const data = await response.json();
-      console.log('📋 Response data:', data);
-
-      if (data.success) {
-        console.log('✅ Jobs found:', data.data.jobs?.length || 0);
-        setJobs(data.data.jobs || []);
-      } else {
-        console.error('❌ API returned error:', data.message);
-        setError(data.message || 'Failed to fetch jobs');
+      } catch (onlineError) {
+        console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+        
+        // Fall back to offline data if online fails
+        jobsData = await offlineIntegrationService.getEmployerJobs();
+        
+        if (jobsData.length === 0) {
+          throw onlineError;
+        }
       }
+    } else {
+      // Offline mode: use offline services
+      console.log('📴 Offline mode: Using offline employer jobs data...');
+      jobsData = await offlineIntegrationService.getEmployerJobs();
+    }
+
+    try {
+      setJobs(jobsData);
     } catch (err) {
       console.error('❌ Jobs fetch error:', err);
       setError('Network error. Please try again.');
@@ -412,27 +442,50 @@ const Jobs = () => {
     }
   };
 
-
-
   const handleEdit = job => {
-    navigate(`/employer/jobs/edit/${job._id}`);
+    navigate(`/employer/jobs/${job._id}/edit`);
   };
 
   const handleDelete = async (jobId) => {
-    try {
-      const response = await fetch(`/api/employer/jobs/${jobId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      });
-      if (response.ok) fetchJobs();
-      else {
-        const errMsg = await response.text();
-        setErrorToast('Failed to delete job: ' + errMsg);
-        setTimeout(() => setErrorToast(''), 4000);
+    const isOnline = navigator.onLine;
+    
+    if (isOnline) {
+      try {
+        console.log('🌐 Online mode: Deleting job...');
+        
+        const response = await fetch(`/api/employer/jobs/${jobId}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        
+        if (response.ok) {
+          fetchJobs();
+        } else {
+          throw new Error('Failed to delete job');
+        }
+      } catch (onlineError) {
+        console.warn('⚠️ Online delete failed, queuing for offline sync:', onlineError);
+        
+        // Queue action for offline sync
+        await offlineIntegrationService.queueEmployerJobAction({
+          action: 'delete',
+          jobId: jobId
+        });
+        
+        setSuccessMessage('Job deletion queued for sync when online');
+        setTimeout(() => setSuccessMessage(''), 3000);
       }
-    } catch (err) {
-      setErrorToast('Network error. Please try again.');
-      setTimeout(() => setErrorToast(''), 4000);
+    } else {
+      // Offline mode: queue action for sync
+      console.log('📴 Offline mode: Queuing job deletion for sync...');
+      
+      await offlineIntegrationService.queueEmployerJobAction({
+        action: 'delete',
+        jobId: jobId
+      });
+      
+      setSuccessMessage('Job deletion queued for sync when online');
+      setTimeout(() => setSuccessMessage(''), 3000);
     }
   };
   const toggleJobStatus = async (jobId, currentStatus) => {
@@ -467,7 +520,7 @@ const Jobs = () => {
       <Container>
         <HeaderRow>
           <Title>Jobs</Title>
-          <PostButton onClick={() => navigate('/post-jobs')}>Post New Job</PostButton>
+          <PostButton onClick={() => navigate('/employer/post-jobs')}>Post New Job</PostButton>
         </HeaderRow>
         <LoadingSpinner>Loading jobs...</LoadingSpinner>
       </Container>
@@ -478,7 +531,7 @@ const Jobs = () => {
     <Container>
       <HeaderRow>
         <Title>Jobs</Title>
-        <PostButton onClick={() => navigate('/post-jobs')}>Post New Job</PostButton>
+        <PostButton onClick={() => navigate('/employer/post-jobs')}>Post New Job</PostButton>
       </HeaderRow>
 
       {error && <ErrorMessage>{error}</ErrorMessage>}

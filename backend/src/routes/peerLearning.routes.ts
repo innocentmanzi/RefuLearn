@@ -12,6 +12,15 @@ const router = express.Router();
 PouchDB.plugin(PouchDBFind);
 const db = new PouchDB('http://Manzi:Clarisse101@localhost:5984/refulearn');
 
+interface AuthenticatedRequest extends Request {
+  user?: { _id: string; role?: string; name?: string; [key: string]: any; };
+}
+
+const ensureAuth = (req: AuthenticatedRequest): { userId: string; user: NonNullable<AuthenticatedRequest['user']> } => {
+  if (!req.user?._id) throw new Error('User authentication required');
+  return { userId: req.user._id.toString(), user: req.user as NonNullable<AuthenticatedRequest['user']> };
+};
+
 interface PeerGroupDoc {
   _id: string;
   _rev?: string;
@@ -149,13 +158,14 @@ router.get('/groups', [
 }));
 
 // Create a peer learning group
-router.post('/groups', authenticateToken, authorizeRoles('refugee'), validate(createGroupValidation), asyncHandler(async (req: Request, res: Response) => {
+router.post('/groups', authenticateToken, authorizeRoles('refugee'), validate(createGroupValidation), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { name, description, category, maxMembers, tags } = req.body;
+  const { userId, user } = ensureAuth(req);
 
   // Check if user has sufficient activity
-  if (req.user.role !== 'refugee') {
+  if (user.role !== 'refugee') {
     // Check user's activity level (posts, comments, etc.)
-    const userActivity = await getUserActivity(req.user._id.toString());
+    const userActivity = await getUserActivity(userId);
     if (userActivity.totalPosts < 5) {
       return res.status(403).json({
         success: false,
@@ -169,7 +179,7 @@ router.post('/groups', authenticateToken, authorizeRoles('refugee'), validate(cr
     selector: { 
       type: 'peer_group', 
       category: category,
-      currentMembers: req.user._id.toString()
+      currentMembers: userId
     }
   });
 
@@ -187,8 +197,8 @@ router.post('/groups', authenticateToken, authorizeRoles('refugee'), validate(cr
     category,
     maxMembers,
     tags,
-    creator: req.user._id.toString(),
-    currentMembers: [req.user._id.toString()],
+    creator: userId,
+    currentMembers: [userId],
     isActive: true,
     createdAt: new Date(),
     updatedAt: new Date()
@@ -230,8 +240,9 @@ router.get('/groups/:groupId', asyncHandler(async (req: Request, res: Response) 
 }));
 
 // Join a group
-router.post('/groups/:groupId/join', authenticateToken, authorizeRoles('refugee'), asyncHandler(async (req: Request, res: Response) => {
+router.post('/groups/:groupId/join', authenticateToken, authorizeRoles('refugee'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { groupId } = req.params;
+  const { userId, user } = ensureAuth(req);
 
   // Join group logic would go here
   // Check if group exists, if user is already a member, if group is full, etc.
@@ -243,8 +254,9 @@ router.post('/groups/:groupId/join', authenticateToken, authorizeRoles('refugee'
 }));
 
 // Leave a group
-router.post('/groups/:groupId/leave', authenticateToken, authorizeRoles('refugee'), asyncHandler(async (req: Request, res: Response) => {
+router.post('/groups/:groupId/leave', authenticateToken, authorizeRoles('refugee'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { groupId } = req.params;
+  const { userId, user } = ensureAuth(req);
 
   // Leave group logic would go here
   // Check if user is a member, handle group deletion if creator leaves, etc.
@@ -287,9 +299,10 @@ router.get('/groups/:groupId/posts', [
 }));
 
 // Create a post in a group
-router.post('/groups/:groupId/posts', authenticateToken, authorizeRoles('refugee'), validate(createPostValidation), asyncHandler(async (req: Request, res: Response) => {
+router.post('/groups/:groupId/posts', authenticateToken, authorizeRoles('refugee'), validate(createPostValidation), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { groupId } = req.params;
   const { content, type, tags } = req.body;
+  const { userId, user } = ensureAuth(req);
 
   // Check if user is a member of the group
   // Create post logic would go here
@@ -299,7 +312,7 @@ router.post('/groups/:groupId/posts', authenticateToken, authorizeRoles('refugee
     content,
     type,
     tags: tags || [],
-    author: req.user._id,
+    author: userId,
     group: groupId,
     likes: [],
     comments: [],
@@ -342,9 +355,10 @@ router.put('/posts/:postId', authenticateToken, authorizeRoles('refugee'), [
     .trim()
     .isLength({ min: 1, max: 2000 })
     .withMessage('Content must be between 1 and 2000 characters')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { postId } = req.params;
   const { content } = req.body;
+  const { userId, user } = ensureAuth(req);
 
   // Check if user is the author of the post
   // Update post logic would go here
@@ -356,8 +370,9 @@ router.put('/posts/:postId', authenticateToken, authorizeRoles('refugee'), [
 }));
 
 // Delete a post
-router.delete('/posts/:postId', authenticateToken, authorizeRoles('refugee'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/posts/:postId', authenticateToken, authorizeRoles('refugee'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { postId } = req.params;
+  const { userId, user } = ensureAuth(req);
 
   // Check if user is the author of the post or group admin
   // Delete post logic would go here
@@ -369,8 +384,9 @@ router.delete('/posts/:postId', authenticateToken, authorizeRoles('refugee'), as
 }));
 
 // Like/unlike a post
-router.post('/posts/:postId/like', authenticateToken, authorizeRoles('refugee'), asyncHandler(async (req: Request, res: Response) => {
+router.post('/posts/:postId/like', authenticateToken, authorizeRoles('refugee'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { postId } = req.params;
+  const { userId, user } = ensureAuth(req);
 
   // Like/unlike logic would go here
   // Check if user already liked the post, toggle like status
@@ -382,15 +398,16 @@ router.post('/posts/:postId/like', authenticateToken, authorizeRoles('refugee'),
 }));
 
 // Add comment to a post
-router.post('/posts/:postId/comments', authenticateToken, authorizeRoles('refugee'), validate(createCommentValidation), asyncHandler(async (req: Request, res: Response) => {
+router.post('/posts/:postId/comments', authenticateToken, authorizeRoles('refugee'), validate(createCommentValidation), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { postId } = req.params;
   const { content } = req.body;
+  const { userId, user } = ensureAuth(req);
 
   // Add comment logic would go here
   const comment = {
     _id: 'mock-comment-id',
     content,
-    author: req.user._id,
+    author: userId,
     post: postId,
     likes: [],
     createdAt: new Date()
@@ -404,9 +421,10 @@ router.post('/posts/:postId/comments', authenticateToken, authorizeRoles('refuge
 }));
 
 // Update a comment
-router.put('/comments/:commentId', authenticateToken, authorizeRoles('refugee'), validate(createCommentValidation), asyncHandler(async (req: Request, res: Response) => {
+router.put('/comments/:commentId', authenticateToken, authorizeRoles('refugee'), validate(createCommentValidation), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { commentId } = req.params;
   const { content } = req.body;
+  const { userId, user } = ensureAuth(req);
 
   // Check if user is the author of the comment
   // Update comment logic would go here
@@ -418,8 +436,9 @@ router.put('/comments/:commentId', authenticateToken, authorizeRoles('refugee'),
 }));
 
 // Delete a comment
-router.delete('/comments/:commentId', authenticateToken, authorizeRoles('refugee'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/comments/:commentId', authenticateToken, authorizeRoles('refugee'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { commentId } = req.params;
+  const { userId, user } = ensureAuth(req);
 
   // Check if user is the author of the comment or post author
   // Delete comment logic would go here
@@ -431,7 +450,8 @@ router.delete('/comments/:commentId', authenticateToken, authorizeRoles('refugee
 }));
 
 // Get user's groups
-router.get('/user/groups', authenticateToken, authorizeRoles('refugee'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/user/groups', authenticateToken, authorizeRoles('refugee'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId, user } = ensureAuth(req);
   // Get user's groups logic would go here
   const groups: any[] = [];
 
@@ -445,8 +465,9 @@ router.get('/user/groups', authenticateToken, authorizeRoles('refugee'), asyncHa
 router.get('/user/posts', authenticateToken, authorizeRoles('refugee'), [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 20 }).withMessage('Limit must be between 1 and 20')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { page = 1, limit = 10 } = req.query;
+  const { userId, user } = ensureAuth(req);
 
   // Get user's posts logic would go here
   const posts: any[] = [];
@@ -470,8 +491,9 @@ router.get('/user/posts', authenticateToken, authorizeRoles('refugee'), [
 router.get('/search/users', authenticateToken, authorizeRoles('refugee'), [
   query('q').trim().notEmpty().withMessage('Search query is required'),
   query('limit').optional().isInt({ min: 1, max: 20 }).withMessage('Limit must be between 1 and 20')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { q, limit = 10 } = req.query;
+  const { userId, user } = ensureAuth(req);
 
   const result = await db.find({ 
     selector: { 
@@ -481,7 +503,7 @@ router.get('/search/users', authenticateToken, authorizeRoles('refugee'), [
   });
   
   let users = result.docs.filter((user: any) => 
-    user._id !== req.user._id.toString() &&
+    user._id !== userId &&
     (user.firstName?.toLowerCase().includes((q as string).toLowerCase()) ||
      user.lastName?.toLowerCase().includes((q as string).toLowerCase()) ||
      user.email?.toLowerCase().includes((q as string).toLowerCase()))
@@ -494,7 +516,8 @@ router.get('/search/users', authenticateToken, authorizeRoles('refugee'), [
 }));
 
 // Get peer learning statistics
-router.get('/stats', authenticateToken, authorizeRoles('refugee'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/stats', authenticateToken, authorizeRoles('refugee'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId, user } = ensureAuth(req);
   // Get user's peer learning statistics
   const stats = {
     totalGroups: 0,
@@ -514,15 +537,15 @@ router.get('/stats', authenticateToken, authorizeRoles('refugee'), asyncHandler(
 // Add comment to group
 router.post('/groups/:groupId/comments', authenticateToken, authorizeRoles('refugee'), [
   body('text').trim().isLength({ min: 1, max: 1000 }).withMessage('Comment must be between 1 and 1000 characters')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { groupId } = req.params;
   const { text } = req.body;
-  const userId = req.user._id.toString();
+  const { userId, user } = ensureAuth(req);
 
   // Mock comment creation
   const comment = {
     _id: Date.now().toString(),
-    user: req.user.name || 'User',
+    user: user.name || 'User',
     text,
     timestamp: new Date().toISOString(),
     replies: []
@@ -538,15 +561,15 @@ router.post('/groups/:groupId/comments', authenticateToken, authorizeRoles('refu
 // Add reply to comment
 router.post('/groups/:groupId/comments/:commentId/replies', authenticateToken, authorizeRoles('refugee'), [
   body('text').trim().isLength({ min: 1, max: 1000 }).withMessage('Reply must be between 1 and 1000 characters')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { groupId, commentId } = req.params;
   const { text } = req.body;
-  const userId = req.user._id.toString();
+  const { userId, user } = ensureAuth(req);
 
   // Mock reply creation
   const reply = {
     _id: Date.now().toString(),
-    user: req.user.name || 'User',
+    user: user.name || 'User',
     text,
     timestamp: new Date().toISOString()
   };

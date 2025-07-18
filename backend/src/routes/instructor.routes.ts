@@ -1,4 +1,27 @@
 import express, { Request, Response } from 'express';
+
+// Use proper authenticated request type
+interface AuthenticatedRequest extends Request {
+  user?: {
+    _id: string;
+    role?: string;
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    [key: string]: any;
+  };
+}
+
+// Helper function to ensure user authentication
+const ensureAuth = (req: AuthenticatedRequest): { userId: string; user: NonNullable<AuthenticatedRequest['user']> } => {
+  if (!req.user?._id) {
+    throw new Error('User authentication required');
+  }
+  return {
+    userId: req.user._id.toString(),
+    user: req.user as NonNullable<AuthenticatedRequest['user']>
+  };
+};
 import { body, query } from 'express-validator';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { validate } from '../middleware/validation';
@@ -136,8 +159,9 @@ interface HelpTicketDoc {
 }
 
 // Get active courses for assessments (published courses only)
-router.get('/courses/active', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/courses/active', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const { userId } = ensureAuth(req);
     const database = await ensureDb();
     
     // Get all documents and filter for published courses only
@@ -147,7 +171,7 @@ router.get('/courses/active', authenticateToken, authorizeRoles('instructor'), a
       .map((row: any) => row.doc)
       .filter((doc: any) => doc && 
         doc.type === 'course' && 
-        doc.instructor === req.user._id.toString() && 
+        doc.instructor === userId && 
         doc.isPublished === true
       ) as CourseDoc[];
     
@@ -175,8 +199,9 @@ router.get('/courses', authenticateToken, authorizeRoles('instructor'), validate
   query('status').optional().isIn(['published', 'draft']),
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 100 })
-]), asyncHandler(async (req: Request, res: Response) => {
+]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { status, page = 1, limit = 100 } = req.query;
+  const { userId } = ensureAuth(req);
   
   const database = await ensureDb();
   
@@ -184,26 +209,23 @@ router.get('/courses', authenticateToken, authorizeRoles('instructor'), validate
   const result = await database.list({ include_docs: true });
   
   // Filter for courses belonging to this instructor
-  const instructorId = (req as any).user?.id || (req as any).user?._id;
   console.log('🔍 Instructor courses request:', {
-    instructorId,
-    userObject: (req as any).user,
-    userIdType: typeof instructorId
+    userId,
+    userIdType: typeof userId
   });
   
   let courses = result.rows
     .map((row: any) => row.doc)
     .filter((doc: any) => {
       const match = doc && doc.type === 'course' && 
-        (doc.instructor === instructorId || doc.instructor === instructorId?.toString() || 
-         doc.instructor_id === instructorId || doc.instructor_id === instructorId?.toString());
+        (doc.instructor === userId || doc.instructor_id === userId);
       
       if (doc?.type === 'course') {
         console.log('🔍 Checking course:', {
           courseTitle: doc.title,
           courseInstructor: doc.instructor,
           courseInstructorId: doc.instructor_id,
-          instructorId,
+          userId,
           match
         });
       }
@@ -270,8 +292,9 @@ router.get('/assessments', authenticateToken, authorizeRoles('instructor'), vali
   query('status').optional().isIn(['draft', 'published', 'archived']),
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 50 })
-]), asyncHandler(async (req: Request, res: Response) => {
+]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { status, page = 1, limit = 10 } = req.query;
+  const { userId } = ensureAuth(req);
   
   const database = await ensureDb();
   
@@ -283,7 +306,7 @@ router.get('/assessments', authenticateToken, authorizeRoles('instructor'), vali
     .map((row: any) => row.doc)
     .filter((doc: any) => doc && 
       ['assessment', 'quiz', 'assignment', 'exam'].includes(doc.type) && 
-      doc.instructor === req.user._id.toString()) as AssessmentDoc[];
+      doc.instructor === userId) as AssessmentDoc[];
   
   // Apply status filter
   if (status) {
@@ -357,8 +380,9 @@ router.post('/assessments', authenticateToken, authorizeRoles('instructor'), [
   body('questions').optional().isArray().withMessage('Questions must be an array'),
   body('totalPoints').optional().isInt({ min: 0 }).withMessage('Total points must be a non-negative integer'),
   body('dueDate').optional().isISO8601().withMessage('Due date must be a valid date')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { courseId, timeLimit, ...assessmentData } = req.body;
+  const { userId } = ensureAuth(req);
 
   try {
     console.log('Creating assessment with data:', { courseId, timeLimit, ...assessmentData }); // Debug log
@@ -379,7 +403,7 @@ router.post('/assessments', authenticateToken, authorizeRoles('instructor'), [
           });
         }
 
-        if (course.instructor !== req.user._id.toString()) {
+        if (course.instructor !== userId) {
           return res.status(403).json({
             success: false,
             message: 'Not authorized to create assessment for this course'
@@ -423,7 +447,7 @@ router.post('/assessments', authenticateToken, authorizeRoles('instructor'), [
       course: finalCourseId,
       courseId: finalCourseId, // Ensure both fields are set for compatibility
       moduleId: assessmentData.moduleId || '', // Include moduleId if provided
-      instructor: req.user._id.toString(),
+      instructor: userId,
       status: 'published', // Automatically publish instead of draft
       duration: timeLimit || assessmentData.duration || 60,
       totalPoints: totalPoints,
@@ -472,9 +496,10 @@ router.put('/assessments/:assessmentId', authenticateToken, authorizeRoles('inst
   body('questions.*.points').optional().isInt({ min: 0 }).withMessage('Points must be a non-negative integer'),
   body('totalPoints').optional().isInt({ min: 0 }).withMessage('Total points must be a non-negative integer'),
   body('dueDate').optional().isISO8601().withMessage('Due date must be a valid date')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { assessmentId } = req.params;
   const { courseId, timeLimit, ...updates } = req.body;
+  const { userId } = ensureAuth(req);
 
   try {
     const database = await ensureDb();
@@ -488,7 +513,7 @@ router.put('/assessments/:assessmentId', authenticateToken, authorizeRoles('inst
     }
 
     // Check if user is the instructor
-    if (assessment.instructor !== req.user._id.toString()) {
+    if (assessment.instructor !== userId) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to update this assessment'
@@ -505,7 +530,7 @@ router.put('/assessments/:assessmentId', authenticateToken, authorizeRoles('inst
         });
       }
 
-      if (course.instructor !== req.user._id.toString()) {
+      if (course.instructor !== userId) {
         return res.status(403).json({
           success: false,
           message: 'Not authorized to assign assessment to this course'
@@ -616,9 +641,10 @@ router.post('/assessments/:assessmentId/questions', authenticateToken, authorize
   body('points').isInt({ min: 0 }).withMessage('Points must be a non-negative integer'),
   body('options').optional().isArray().withMessage('Options must be an array'),
   body('correctAnswer').notEmpty().withMessage('Correct answer is required')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { assessmentId } = req.params;
   const { question, type, points, options, correctAnswer, explanation } = req.body;
+  const { userId } = ensureAuth(req);
 
   try {
     const database = await ensureDb();
@@ -632,7 +658,7 @@ router.post('/assessments/:assessmentId/questions', authenticateToken, authorize
     }
 
     // Check if user is the instructor
-    if (assessment.instructor !== req.user._id.toString()) {
+    if (assessment.instructor !== userId) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to add questions to this assessment'
@@ -704,9 +730,10 @@ router.put('/assessments/:assessmentId/questions/:questionId', authenticateToken
   body('points').optional().isInt({ min: 0 }).withMessage('Points must be a non-negative integer'),
   body('options').optional().isArray().withMessage('Options must be an array'),
   body('correctAnswer').optional().notEmpty().withMessage('Correct answer cannot be empty')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { assessmentId, questionId } = req.params;
   const updates = req.body;
+  const { userId } = ensureAuth(req);
 
   try {
     const database = await ensureDb();
@@ -720,7 +747,7 @@ router.put('/assessments/:assessmentId/questions/:questionId', authenticateToken
     }
 
     // Check if user is the instructor
-    if (assessment.instructor !== req.user._id.toString()) {
+    if (assessment.instructor !== userId) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to update questions in this assessment'
@@ -826,8 +853,9 @@ router.put('/assessments/:assessmentId/questions/:questionId', authenticateToken
 }));
 
 // Delete individual question from assessment
-router.delete('/assessments/:assessmentId/questions/:questionId', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/assessments/:assessmentId/questions/:questionId', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { assessmentId, questionId } = req.params;
+  const { userId } = ensureAuth(req);
 
   try {
     const database = await ensureDb();
@@ -841,7 +869,7 @@ router.delete('/assessments/:assessmentId/questions/:questionId', authenticateTo
     }
 
     // Check if user is the instructor
-    if (assessment.instructor !== req.user._id.toString()) {
+    if (assessment.instructor !== userId) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to delete questions from this assessment'
@@ -885,27 +913,29 @@ router.delete('/assessments/:assessmentId/questions/:questionId', authenticateTo
 }));
 
 // Test authentication route
-router.get('/test-auth', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/test-auth', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId, user } = ensureAuth(req);
+  
   console.log('🧪 TEST AUTH ROUTE CALLED');
-  console.log('   User from token:', req.user ? req.user._id : 'NO USER');
+  console.log('   User from token:', userId);
   console.log('   Auth header:', req.headers.authorization ? 'Present' : 'Missing');
   
   res.json({
     success: true,
     message: 'Authentication working',
-    user: req.user ? req.user._id : 'No user'
+    user: userId
   });
 }));
 
 // Delete assessment - Simplified version with better debugging
-router.delete('/assessments/:assessmentId', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/assessments/:assessmentId', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { assessmentId } = req.params;
+  const { userId } = ensureAuth(req);
 
   try {
     console.log('🗑️ DELETE REQUEST RECEIVED');
     console.log('   Assessment ID:', assessmentId);
-    console.log('   User from token:', req.user ? req.user._id : 'NO USER');
-    console.log('   User object:', req.user);
+    console.log('   User from token:', userId);
     console.log('   Auth header:', req.headers.authorization ? 'Present' : 'Missing');
 
     const database = await ensureDb();
@@ -925,11 +955,11 @@ router.delete('/assessments/:assessmentId', authenticateToken, authorizeRoles('i
       });
     }
 
-    // Temporarily skip instructor check for debugging
+    // Check instructor authorization
     console.log('🔍 Instructor check:');
     console.log('   Assessment instructor:', assessment.instructor);
-    console.log('   User ID:', req.user._id.toString());
-    console.log('   Match:', assessment.instructor === req.user._id.toString());
+    console.log('   User ID:', userId);
+    console.log('   Match:', assessment.instructor === userId);
 
     // Delete the assessment
     try {
@@ -964,9 +994,10 @@ router.get('/assessments/:assessmentId/submissions', authenticateToken, authoriz
   query('status').optional().isIn(['submitted', 'graded', 'late']),
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 50 })
-]), asyncHandler(async (req: Request, res: Response) => {
+]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { assessmentId } = req.params;
   const { status, page = 1, limit = 10 } = req.query;
+  const { userId } = ensureAuth(req);
 
   try {
     const database = await ensureDb();
@@ -980,7 +1011,7 @@ router.get('/assessments/:assessmentId/submissions', authenticateToken, authoriz
     }
 
     // Check if user is the instructor
-    if (assessment.instructor !== req.user._id.toString()) {
+    if (assessment.instructor !== userId) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to view submissions for this assessment'
@@ -1053,9 +1084,10 @@ router.put('/assessments/:assessmentId/submissions/:submissionId/grade', authent
   body('score').isFloat({ min: 0 }).withMessage('Score must be non-negative'),
   body('feedback').optional().trim(),
   body('comments').optional().trim()
-]), asyncHandler(async (req: Request, res: Response) => {
+]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { assessmentId, submissionId } = req.params;
   const { score, feedback, comments } = req.body;
+  const { userId } = ensureAuth(req);
 
   try {
     const database = await ensureDb();
@@ -1069,7 +1101,7 @@ router.put('/assessments/:assessmentId/submissions/:submissionId/grade', authent
     }
 
     // Check if user is the instructor
-    if (assessment.instructor !== req.user._id.toString()) {
+    if (assessment.instructor !== userId) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to grade submissions for this assessment'
@@ -1114,8 +1146,9 @@ router.put('/assessments/:assessmentId/submissions/:submissionId/grade', authent
 }));
 
 // Get course analytics
-router.get('/courses/:courseId/analytics', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/courses/:courseId/analytics', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { courseId } = req.params;
+  const { userId } = ensureAuth(req);
 
   try {
     const database = await ensureDb();
@@ -1129,7 +1162,7 @@ router.get('/courses/:courseId/analytics', authenticateToken, authorizeRoles('in
     }
 
     // Check if user is the instructor
-    if (course.instructor !== req.user._id.toString()) {
+    if (course.instructor !== userId) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to view analytics for this course'
@@ -1209,9 +1242,10 @@ router.get('/courses/:courseId/analytics', authenticateToken, authorizeRoles('in
 }));
 
 // Get instructor analytics
-router.get('/analytics', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/analytics', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { period = '30' } = req.query;
+    const { userId } = ensureAuth(req);
     const daysAgo = new Date();
     daysAgo.setDate(daysAgo.getDate() - Number(period));
 
@@ -1223,7 +1257,7 @@ router.get('/analytics', authenticateToken, authorizeRoles('instructor'), asyncH
     // Course statistics
     const courses = allDocsResult.rows
       .map((row: any) => row.doc)
-      .filter((doc: any) => doc && doc.type === 'course' && doc.instructor === req.user._id.toString()) as CourseDoc[];
+      .filter((doc: any) => doc && doc.type === 'course' && doc.instructor === userId) as CourseDoc[];
     
     const totalCourses = courses.length;
     const publishedCourses = courses.filter(c => c.isPublished).length;
@@ -1234,7 +1268,7 @@ router.get('/analytics', authenticateToken, authorizeRoles('instructor'), asyncH
       .map((row: any) => row.doc)
       .filter((doc: any) => doc && 
         ['assessment', 'quiz', 'assignment', 'exam'].includes(doc.type) && 
-        doc.instructor === req.user._id.toString()) as AssessmentDoc[];
+        doc.instructor === userId) as AssessmentDoc[];
     
     const totalAssessments = assessments.length;
     const publishedAssessments = assessments.filter(a => a.status === 'published').length;
@@ -1301,9 +1335,10 @@ router.get('/analytics', authenticateToken, authorizeRoles('instructor'), asyncH
 // REMOVED MOCK DATA - User wants only real data from database
 
 // Get instructor dashboard
-router.get('/dashboard', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/dashboard', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { period = '30' } = req.query;
+    const { userId } = ensureAuth(req);
     const daysAgo = new Date();
     daysAgo.setDate(daysAgo.getDate() - Number(period));
 
@@ -1315,7 +1350,7 @@ router.get('/dashboard', authenticateToken, authorizeRoles('instructor'), asyncH
     // Course statistics
     const courses = allDocsResult.rows
       .map((row: any) => row.doc)
-      .filter((doc: any) => doc && doc.type === 'course' && doc.instructor === req.user._id.toString()) as CourseDoc[];
+      .filter((doc: any) => doc && doc.type === 'course' && doc.instructor === userId) as CourseDoc[];
     
     const totalCourses = courses.length;
     const publishedCourses = courses.filter(c => c.isPublished).length;
@@ -1325,7 +1360,7 @@ router.get('/dashboard', authenticateToken, authorizeRoles('instructor'), asyncH
       .map((row: any) => row.doc)
       .filter((doc: any) => doc && 
         ['assessment', 'quiz', 'assignment', 'exam'].includes(doc.type) && 
-        doc.instructor === req.user._id.toString()) as AssessmentDoc[];
+        doc.instructor === userId) as AssessmentDoc[];
 
     const totalAssessments = assessments.length;
     const publishedAssessments = assessments.filter(a => a.status === 'published').length;
@@ -1509,7 +1544,7 @@ router.get('/help-tickets', authenticateToken, authorizeRoles('instructor'), val
   query('priority').optional().isIn(['low', 'medium', 'high', 'urgent']),
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 50 })
-]), asyncHandler(async (req: Request, res: Response) => {
+]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { status, priority, page = 1, limit = 10 } = req.query;
 
   try {
@@ -1599,9 +1634,10 @@ router.get('/help-tickets', authenticateToken, authorizeRoles('instructor'), val
 router.post('/help-tickets/:ticketId/respond', authenticateToken, authorizeRoles('instructor'), validate([
   body('message').trim().notEmpty().withMessage('Response message is required'),
   body('isInternal').optional().isBoolean()
-]), asyncHandler(async (req: Request, res: Response) => {
+]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { ticketId } = req.params;
   const { message, isInternal = false } = req.body;
+  const { userId } = ensureAuth(req);
 
   try {
     const database = await ensureDb();
@@ -1615,7 +1651,7 @@ router.post('/help-tickets/:ticketId/respond', authenticateToken, authorizeRoles
     }
 
     // Check if instructor is assigned to this ticket or is the user
-    if (ticket.assignedTo !== req.user._id.toString() && ticket.user !== req.user._id.toString()) {
+    if (ticket.assignedTo !== userId && ticket.user !== userId) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to respond to this ticket'
@@ -1628,7 +1664,7 @@ router.post('/help-tickets/:ticketId/respond', authenticateToken, authorizeRoles
 
     const response = {
       _id: Date.now().toString(),
-      sender: req.user._id.toString(),
+      sender: userId,
       message,
       isInternal,
       createdAt: new Date()
@@ -1659,9 +1695,10 @@ router.post('/help-tickets/:ticketId/respond', authenticateToken, authorizeRoles
 // Update help ticket status (instructor only)
 router.patch('/help-tickets/:ticketId/status', authenticateToken, authorizeRoles('instructor'), validate([
   body('status').isIn(['open', 'in-progress', 'resolved', 'closed']).withMessage('Invalid status')
-]), asyncHandler(async (req: Request, res: Response) => {
+]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { ticketId } = req.params;
   const { status } = req.body;
+  const { userId } = ensureAuth(req);
 
   try {
     const database = await ensureDb();
@@ -1675,7 +1712,7 @@ router.patch('/help-tickets/:ticketId/status', authenticateToken, authorizeRoles
     }
 
     // Check if instructor is assigned to this ticket
-    if (ticket.assignedTo !== req.user._id.toString()) {
+    if (ticket.assignedTo !== userId) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to update this ticket'
@@ -1704,10 +1741,11 @@ router.patch('/help-tickets/:ticketId/status', authenticateToken, authorizeRoles
 }));
 
 // Get instructor profile
-router.get('/profile', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/profile', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const { userId } = ensureAuth(req);
     const database = await ensureDb();
-    const user = await database.get(req.user._id) as UserDoc;
+    const user = await database.get(userId) as UserDoc;
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -1739,11 +1777,12 @@ router.put('/profile', authenticateToken, authorizeRoles('instructor'), validate
   body('bio').optional().trim(),
   body('phone_number').optional().trim(),
   body('language_preference').optional().trim()
-]), asyncHandler(async (req: Request, res: Response) => {
+]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const { userId } = ensureAuth(req);
     const updates = req.body;
     const database = await ensureDb();
-    const user = await database.get(req.user._id) as UserDoc;
+    const user = await database.get(userId) as UserDoc;
     
     if (!user) {
       return res.status(404).json({
@@ -1778,9 +1817,10 @@ router.put('/profile', authenticateToken, authorizeRoles('instructor'), validate
 }));
 
 // Get real-time student activity and progress
-router.get('/student-activity', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/student-activity', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { period = '7' } = req.query;
+    const { userId } = ensureAuth(req);
     const daysAgo = new Date();
     daysAgo.setDate(daysAgo.getDate() - Number(period));
 
@@ -1792,7 +1832,7 @@ router.get('/student-activity', authenticateToken, authorizeRoles('instructor'),
     // Get instructor's courses
     const courses = allDocsResult.rows
       .map((row: any) => row.doc)
-      .filter((doc: any) => doc && doc.type === 'course' && doc.instructor === req.user._id.toString()) as CourseDoc[];
+      .filter((doc: any) => doc && doc.type === 'course' && doc.instructor === userId) as CourseDoc[];
     
     // Get all users enrolled in instructor's courses
     const enrolledUserIds = new Set<string>();
@@ -1948,9 +1988,9 @@ const validateQuizQuestion = (question: any) => {
 };
 
 // Quiz routes
-router.get('/quizzes', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/quizzes', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const user = req.user;
+    const { userId, user } = ensureAuth(req);
     console.log('🔍 Fetching quizzes for user:', user._id); // Debug log
     
     const database = await ensureDb();
@@ -1991,10 +2031,10 @@ router.post('/quizzes', authenticateToken, authorizeRoles('instructor'), [
   body('passingScore').optional().isInt({ min: 0, max: 100 }).withMessage('Passing score must be between 0-100'),
   body('questions').optional().isArray().withMessage('Questions must be an array'),
   body('dueDate').optional().isISO8601().withMessage('Due date must be a valid date')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { title, description, courseId, moduleId, duration, passingScore, questions, dueDate } = req.body;
-    const user = req.user;
+    const { userId, user } = ensureAuth(req);
     
     // Validate questions if provided
     if (questions && questions.length > 0) {
@@ -2079,9 +2119,9 @@ router.put('/quizzes/:quizId', authenticateToken, authorizeRoles('instructor'), 
   body('passingScore').optional().isInt({ min: 0, max: 100 }).withMessage('Passing score must be between 0 and 100'),
   body('dueDate').optional().isISO8601().withMessage('Due date must be a valid ISO 8601 date'),
   body('questions').optional().isArray().withMessage('Questions must be an array')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const user = req.user;
+    const { userId, user } = ensureAuth(req);
     const { quizId } = req.params;
     const { title, description, courseId, moduleId, duration, totalPoints, passingScore, dueDate, questions } = req.body;
 
@@ -2137,9 +2177,9 @@ router.put('/quizzes/:quizId', authenticateToken, authorizeRoles('instructor'), 
   }
 }));
 
-router.delete('/quizzes/:quizId', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/quizzes/:quizId', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const user = req.user;
+    const { userId, user } = ensureAuth(req);
     const { quizId } = req.params;
 
     const database = await ensureDb();
@@ -2168,9 +2208,9 @@ router.delete('/quizzes/:quizId', authenticateToken, authorizeRoles('instructor'
 }));
 
 // Discussion routes
-router.get('/discussions', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/discussions', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const user = req.user;
+    const { userId, user } = ensureAuth(req);
     
     const database = await ensureDb();
     const result = await database.list({ include_docs: true });
@@ -2199,9 +2239,9 @@ router.post('/discussions', authenticateToken, authorizeRoles('instructor'), [
   body('courseId').notEmpty().withMessage('Course selection is required'),
   body('category').optional().isIn(['general', 'question', 'announcement']).withMessage('Invalid category'),
   body('questions').optional().isArray().withMessage('Questions must be an array')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const user = req.user;
+    const { userId, user } = ensureAuth(req);
     const { title, content, courseId, category, questions } = req.body;
 
     if (!title || !content || !courseId) {
@@ -2264,9 +2304,9 @@ router.put('/discussions/:discussionId', authenticateToken, authorizeRoles('inst
   body('courseId').optional().notEmpty().withMessage('Course selection cannot be empty'),
   body('category').optional().isIn(['general', 'question', 'announcement']).withMessage('Invalid category'),
   body('questions').optional().isArray().withMessage('Questions must be an array')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const user = req.user;
+    const { userId, user } = ensureAuth(req);
     const { discussionId } = req.params;
     const { title, content, courseId, category, questions } = req.body;
 
@@ -2317,9 +2357,9 @@ router.put('/discussions/:discussionId', authenticateToken, authorizeRoles('inst
   }
 }));
 
-router.delete('/discussions/:discussionId', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/discussions/:discussionId', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const user = req.user;
+    const { userId, user } = ensureAuth(req);
     const { discussionId } = req.params;
 
     const database = await ensureDb();
@@ -2348,9 +2388,9 @@ router.delete('/discussions/:discussionId', authenticateToken, authorizeRoles('i
 }));
 
 // Group routes
-router.get('/groups', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/groups', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const user = req.user;
+    const { userId, user } = ensureAuth(req);
     
     const database = await ensureDb();
     const result = await database.list({ include_docs: true });
@@ -2380,9 +2420,9 @@ router.post('/groups', authenticateToken, authorizeRoles('instructor'), [
   body('maxMembers').optional().isInt({ min: 1 }).withMessage('Max members must be a positive integer'),
   body('isPrivate').optional().isBoolean().withMessage('isPrivate must be a boolean'),
   body('allowSelfJoin').optional().isBoolean().withMessage('allowSelfJoin must be a boolean')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const user = req.user;
+    const { userId, user } = ensureAuth(req);
     const { name, description, courseId, maxMembers, isPrivate, allowSelfJoin } = req.body;
 
     if (!name || !courseId) {
@@ -2448,9 +2488,9 @@ router.put('/groups/:groupId', authenticateToken, authorizeRoles('instructor'), 
   body('maxMembers').optional().isInt({ min: 1 }).withMessage('Max members must be a positive integer'),
   body('isPrivate').optional().isBoolean().withMessage('isPrivate must be a boolean'),
   body('allowSelfJoin').optional().isBoolean().withMessage('allowSelfJoin must be a boolean')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const user = req.user;
+    const { userId, user } = ensureAuth(req);
     const { groupId } = req.params;
     const { name, description, courseId, maxMembers, isPrivate, allowSelfJoin } = req.body;
 
@@ -2503,9 +2543,9 @@ router.put('/groups/:groupId', authenticateToken, authorizeRoles('instructor'), 
   }
 }));
 
-router.delete('/groups/:groupId', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/groups/:groupId', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const user = req.user;
+    const { userId, user } = ensureAuth(req);
     const { groupId } = req.params;
 
     const database = await ensureDb();

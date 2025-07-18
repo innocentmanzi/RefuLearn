@@ -10,9 +10,9 @@ const validate = (validations) => {
             return next();
         }
         const extractedErrors = errors.array().map((err) => ({
-            field: err.type === 'field' ? err.path : err.type,
+            field: err.path || err.param || 'unknown',
             message: err.msg,
-            value: err.value
+            type: err.type
         }));
         res.status(400).json({
             success: false,
@@ -26,9 +26,9 @@ const handleValidationErrors = (req, res, next) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty()) {
         const extractedErrors = errors.array().map((err) => ({
-            field: err.type === 'field' ? err.path : err.type,
+            field: err.path || err.param || 'unknown',
             message: err.msg,
-            value: err.value
+            type: err.type
         }));
         return res.status(400).json({
             success: false,

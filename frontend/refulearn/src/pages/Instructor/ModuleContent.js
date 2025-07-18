@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 import { ArrowBack, ArrowForward, Description, VideoLibrary, Link, Assignment, Quiz, Forum, CheckCircle, RadioButtonUnchecked, Send, ThumbUp, Reply, MoreVert } from '@mui/icons-material';
 import QuizTaker from '../../components/QuizTaker';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   max-width: 900px;
@@ -1025,7 +1026,7 @@ function DiscussionComponent({ discussion, courseId, moduleId, discussionIndex }
 }
 
 export default function ModuleContent() {
-  const { courseId, moduleId, resourceId, assessmentId, quizId, discussionId } = useParams();
+  const { courseId, moduleId, resourceId, assessmentId, quizId, discussionId, itemId } = useParams();
   const navigate = useNavigate();
   const [course, setCourse] = useState(null);
   const [module, setModule] = useState(null);
@@ -1048,148 +1049,275 @@ export default function ModuleContent() {
     fetchCompletionStatus();
   }, [courseId, moduleId]);
 
+  // Build content items when module data is loaded
+  useEffect(() => {
+    if (module && module.title !== 'Module Loading...') {
+      console.log('🔧 Building content items from module:', module);
+      const items = [];
+      
+      // Add module content
+      if (module.content) {
+        items.push({
+          type: 'content',
+          title: 'Content',
+          data: module.content
+        });
+      }
+      
+      // Add video content
+      if (module.videoUrl) {
+        items.push({
+          type: 'video',
+          title: module.videoTitle || 'Video Lecture',
+          data: {
+            url: module.videoUrl,
+            title: module.videoTitle
+          }
+        });
+      }
+      
+      // Add content items
+      if (module.contentItems && Array.isArray(module.contentItems)) {
+        module.contentItems.forEach((item, index) => {
+          items.push({
+            type: 'content-item',
+            title: item.title || `Content Item ${index + 1}`,
+            data: item
+          });
+        });
+      }
+      
+      // Add assessments
+      if (module.assessments && Array.isArray(module.assessments)) {
+        module.assessments.forEach((assessment, index) => {
+          items.push({
+            type: 'assessment',
+            title: assessment.title || `Assignment ${index + 1}`,
+            data: assessment
+          });
+        });
+      }
+      
+      // Add quizzes
+      if (module.quizzes && Array.isArray(module.quizzes)) {
+        module.quizzes.forEach((quiz, index) => {
+          items.push({
+            type: 'quiz',
+            title: quiz.title || `Quiz ${index + 1}`,
+            data: quiz
+          });
+        });
+      }
+      
+      // Add discussions
+      if (module.discussions && Array.isArray(module.discussions)) {
+        module.discussions.forEach((discussion, index) => {
+          items.push({
+            type: 'discussion',
+            title: discussion.title || `Discussion ${index + 1}`,
+            data: discussion
+          });
+        });
+      }
+      
+      // Add resources
+      if (module.resources && Array.isArray(module.resources)) {
+        module.resources.forEach((resource, index) => {
+          items.push({
+            type: 'resource',
+            title: resource.title || `Resource ${index + 1}`,
+            data: resource
+          });
+        });
+      }
+      
+      console.log('📝 Built content items:', items);
+      setContentItems(items);
+      
+      // Set current content based on URL parameters
+      let targetIndex = 0;
+      
+      if (itemId !== undefined) {
+        // For content-item routes like /content-item/0
+        const index = parseInt(itemId, 10);
+        if (index >= 0 && index < items.length) {
+          targetIndex = index;
+        }
+      } else if (assessmentId !== undefined) {
+        // Find assessment by ID or index
+        const index = items.findIndex(item => 
+          item.type === 'assessment' && 
+          (item.data._id === assessmentId || items.indexOf(item) === parseInt(assessmentId, 10))
+        );
+        if (index >= 0) targetIndex = index;
+      } else if (quizId !== undefined) {
+        // Find quiz by ID or index
+        const index = items.findIndex(item => 
+          item.type === 'quiz' && 
+          (item.data._id === quizId || items.indexOf(item) === parseInt(quizId, 10))
+        );
+        if (index >= 0) targetIndex = index;
+      } else if (discussionId !== undefined) {
+        // Find discussion by ID or index
+        const index = items.findIndex(item => 
+          item.type === 'discussion' && 
+          (item.data._id === discussionId || items.indexOf(item) === parseInt(discussionId, 10))
+        );
+        if (index >= 0) targetIndex = index;
+      } else if (resourceId !== undefined) {
+        // Find resource by ID or index
+        const index = items.findIndex(item => 
+          item.type === 'resource' && 
+          (item.data._id === resourceId || items.indexOf(item) === parseInt(resourceId, 10))
+        );
+        if (index >= 0) targetIndex = index;
+      } else if (window.location.pathname.includes('/content')) {
+        // For basic content route
+        const index = items.findIndex(item => item.type === 'content');
+        if (index >= 0) targetIndex = index;
+      } else if (window.location.pathname.includes('/video')) {
+        // For video route
+        const index = items.findIndex(item => item.type === 'video');
+        if (index >= 0) targetIndex = index;
+      }
+      
+      setCurrentIndex(targetIndex);
+      if (items[targetIndex]) {
+        setCurrentContent(items[targetIndex]);
+      }
+    }
+  }, [module]);
+
   const fetchCourseAndModule = async () => {
     try {
       setLoading(true);
+      setError(''); // Clear any previous errors
       const token = localStorage.getItem('token');
+      const isOnline = navigator.onLine;
       
-      const response = await fetch(`/api/courses/${courseId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      console.log('🔍 ModuleContent: Fetching data for courseId:', courseId, 'moduleId:', moduleId);
+      
+      let moduleData = null;
+      let courseData = null;
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.data && data.data.course) {
-          const courseData = data.data.course;
-          setCourse(courseData);
+      if (isOnline) {
+        try {
+          // Try online API calls first (preserving existing behavior)
+          console.log('🌐 Online mode: Fetching module content from API...');
           
-          const foundModule = courseData.modules.find(m => m._id === moduleId);
-          if (foundModule) {
-            setModule(foundModule);
-            
-            // Build content items array
-            const items = [];
-            
-            if (foundModule.content) {
-              items.push({
-                type: 'content',
-                title: 'Content',
-                data: foundModule.content,
-                icon: Description
-              });
+          // Fetch module content
+          const moduleResponse = await fetch(`/api/courses/modules/${moduleId}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
             }
+          });
+
+          if (moduleResponse.ok) {
+            const moduleApiData = await moduleResponse.json();
+            console.log('📦 Module API response:', moduleApiData);
             
-            if (foundModule.videoUrl) {
-              items.push({
-                type: 'video',
-                title: foundModule.videoTitle || 'Video Lecture',
-                data: { url: foundModule.videoUrl, title: foundModule.videoTitle },
-                icon: VideoLibrary
-              });
-            }
-            
-            if (foundModule.resources) {
-              foundModule.resources.forEach((resource, idx) => {
-                items.push({
-                  type: 'resource',
-                  title: resource.title || `Resource ${idx + 1}`,
-                  data: resource,
-                  icon: Link
-                });
-              });
-            }
-            
-            if (foundModule.assessments) {
-              foundModule.assessments.forEach((assessment, idx) => {
-                items.push({
-                  type: 'assessment',
-                  title: `Assessment ${idx + 1}${assessment.title ? `: ${assessment.title}` : ''}`,
-                  data: assessment,
-                  icon: Assignment
-                });
-              });
-            }
-            
-            if (foundModule.quizzes) {
-              foundModule.quizzes.forEach((quiz, idx) => {
-                items.push({
-                  type: 'quiz',
-                  title: `Quiz ${idx + 1}${quiz.title ? `: ${quiz.title}` : ''}`,
-                  data: quiz,
-                  icon: Quiz
-                });
-              });
-            }
-            
-            if (foundModule.discussions) {
-              foundModule.discussions.forEach((discussion, idx) => {
-                items.push({
-                  type: 'discussion',
-                  title: discussion.title || `Discussion ${idx + 1}`,
-                  data: discussion,
-                  icon: Forum
-                });
-              });
-            }
-            
-            setContentItems(items);
-            
-            // Determine which content to show based on URL
-            let initialIndex = 0;
-            const currentPath = window.location.pathname;
-            
-            if (currentPath.includes('/video')) {
-              initialIndex = items.findIndex(item => item.type === 'video');
-            } else if (currentPath.includes('/resource/')) {
-              const resourceIndex = parseInt(resourceId);
-              initialIndex = items.findIndex((item, idx) => 
-                item.type === 'resource' && 
-                items.slice(0, idx + 1).filter(i => i.type === 'resource').length === resourceIndex + 1
-              );
-            } else if (currentPath.includes('/assessment/')) {
-              const assessmentIndex = parseInt(assessmentId);
-              initialIndex = items.findIndex((item, idx) => 
-                item.type === 'assessment' && 
-                items.slice(0, idx + 1).filter(i => i.type === 'assessment').length === assessmentIndex + 1
-              );
-            } else if (currentPath.includes('/quiz/')) {
-              const quizIndex = parseInt(quizId);
-              initialIndex = items.findIndex((item, idx) => 
-                item.type === 'quiz' && 
-                items.slice(0, idx + 1).filter(i => i.type === 'quiz').length === quizIndex + 1
-              );
-            } else if (currentPath.includes('/discussion/')) {
-              const discussionIndex = parseInt(discussionId);
-              initialIndex = items.findIndex((item, idx) => 
-                item.type === 'discussion' && 
-                items.slice(0, idx + 1).filter(i => i.type === 'discussion').length === discussionIndex + 1
-              );
+            if (moduleApiData.success && moduleApiData.data && moduleApiData.data.module) {
+              moduleData = moduleApiData.data.module;
+              console.log('✅ Module content received:', moduleData);
+              
+              // Store module data for offline use
+              await offlineIntegrationService.storeModuleContent(moduleId, moduleData);
             } else {
-              // Default to content or first item
-              initialIndex = items.findIndex(item => item.type === 'content');
-            }
-            
-            if (initialIndex === -1) initialIndex = 0;
-            
-            if (items.length > 0) {
-              setCurrentContent(items[initialIndex]);
-              setCurrentIndex(initialIndex);
+              console.error('❌ Invalid module data structure:', moduleApiData);
+              throw new Error('Invalid module data received from API');
             }
           } else {
-            setError('Module not found');
+            const errorText = await moduleResponse.text();
+            console.error('❌ Module API Error:', moduleResponse.status, errorText);
+            throw new Error(`Failed to fetch module content: ${moduleResponse.status}`);
           }
-        } else {
-          setError('Course not found');
+
+          // Fetch course data
+          const courseResponse = await fetch(`/api/courses/${courseId}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (courseResponse.ok) {
+            const courseApiData = await courseResponse.json();
+            console.log('📦 Course API response:', courseApiData);
+            
+            if (courseApiData.success && courseApiData.data && courseApiData.data.course) {
+              courseData = courseApiData.data.course;
+              console.log('✅ Course data received:', courseData);
+              
+              // Store course data for offline use
+              await offlineIntegrationService.storeCourseData(courseId, courseData);
+            } else {
+              console.error('❌ Invalid course data structure:', courseApiData);
+              throw new Error('Invalid course data received from API');
+            }
+          } else {
+            const errorText = await courseResponse.text();
+            console.error('❌ Course API Error:', courseResponse.status, errorText);
+            throw new Error(`Failed to fetch course data: ${courseResponse.status}`);
+          }
+
+        } catch (onlineError) {
+          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+          
+          try {
+            // Fall back to offline data if online fails
+            moduleData = await offlineIntegrationService.getModuleContent(moduleId);
+            courseData = await offlineIntegrationService.getCourseData(courseId);
+            
+            console.log('📴 Offline module data:', moduleData);
+            console.log('📴 Offline course data:', courseData);
+            
+            if (!moduleData || !courseData) {
+              console.error('❌ No offline data available');
+              throw new Error('No module or course data available offline');
+            }
+          } catch (offlineError) {
+            console.error('❌ Offline data also failed:', offlineError);
+            throw new Error('Failed to load module data both online and offline');
+          }
         }
       } else {
-        setError('Failed to load course');
+        // Offline mode: use offline services
+        console.log('📴 Offline mode: Using offline module content data...');
+        moduleData = await offlineIntegrationService.getModuleContent(moduleId);
+        courseData = await offlineIntegrationService.getCourseData(courseId);
+      }
+
+      // Validate and set the data
+      if (moduleData && courseData) {
+        console.log('✅ Setting module and course data');
+        setModule(moduleData);
+        setCourse(courseData);
+      } else {
+        console.error('❌ Missing data - moduleData:', !!moduleData, 'courseData:', !!courseData);
+        throw new Error('Module or course data is missing');
       }
     } catch (err) {
-      console.error('Error fetching course:', err);
-      setError('Network error');
+      console.error('❌ Error fetching module content:', err);
+      setError(err.message || 'Failed to load module content');
+      
+      // Set minimal fallback data to prevent undefined errors
+      if (!module) {
+        setModule({
+          title: 'Module Loading...',
+          content: 'Content is being loaded...',
+          contentItems: [],
+          assessments: [],
+          quizzes: [],
+          discussions: [],
+          resources: []
+        });
+      }
+      if (!course) {
+        setCourse({
+          title: 'Course Loading...'
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -1549,11 +1677,54 @@ export default function ModuleContent() {
     );
   }
 
-  if (error || !course || !module) {
+  if (error) {
     return (
       <Container>
+        <Header>
+          <BackButton onClick={() => navigate(`/instructor/courses/${courseId}/overview`)}>
+            <ArrowBack />
+            Back to Course Overview
+          </BackButton>
+        </Header>
         <div style={{ textAlign: 'center', padding: '2rem', color: 'red' }}>
-          <div>{error || 'Content not found'}</div>
+          <h3>Error Loading Module Content</h3>
+          <p>{error}</p>
+          <p style={{ color: '#666', fontSize: '0.9rem', marginTop: '1rem' }}>
+            Please check the browser console for more details, or try refreshing the page.
+          </p>
+          <button 
+            onClick={() => window.location.reload()} 
+            style={{
+              background: '#007BFF',
+              color: 'white',
+              border: 'none',
+              padding: '0.5rem 1rem',
+              borderRadius: '4px',
+              marginTop: '1rem',
+              cursor: 'pointer'
+            }}
+          >
+            Refresh Page
+          </button>
+        </div>
+      </Container>
+    );
+  }
+
+  if (!course || !module) {
+    return (
+      <Container>
+        <Header>
+          <BackButton onClick={() => navigate(`/instructor/courses/${courseId}/overview`)}>
+            <ArrowBack />
+            Back to Course Overview
+          </BackButton>
+        </Header>
+        <div style={{ textAlign: 'center', padding: '2rem' }}>
+          <div>Content not found or still loading...</div>
+          <p style={{ color: '#666', fontSize: '0.9rem', marginTop: '1rem' }}>
+            If this persists, please check the browser console for errors.
+          </p>
         </div>
       </Container>
     );
@@ -1577,6 +1748,43 @@ export default function ModuleContent() {
 
   return (
     <Container>
+      <Header>
+        <BackButton onClick={() => navigate(`/instructor/courses/${courseId}/overview`)}>
+          <ArrowBack />
+          Back to Course Overview
+        </BackButton>
+        
+        <CourseInfo>
+          <CourseTitle>{course?.title || 'Course'}</CourseTitle>
+          <ModuleInfo>
+            Module: {module?.title || 'Module'} • {getContentTypeLabel()} • {getContentDuration()}
+          </ModuleInfo>
+        </CourseInfo>
+        
+        <ContentHeader>
+          <div>
+            <h2 style={{ margin: '0 0 0.5rem 0', color: '#1a1a1a' }}>
+              {currentContent?.title || 'Content'}
+            </h2>
+            <div style={{ color: '#6b7280', fontSize: '0.875rem' }}>
+              {currentIndex + 1} of {contentItems.length}
+            </div>
+          </div>
+          
+          {contentItems.length > 0 && (
+            <div style={{ 
+              background: '#f3f4f6', 
+              borderRadius: '8px', 
+              padding: '0.5rem 1rem',
+              fontSize: '0.875rem',
+              color: '#374151'
+            }}>
+              Progress: {Math.round((currentIndex / contentItems.length) * 100)}%
+            </div>
+          )}
+        </ContentHeader>
+      </Header>
+
       {renderContent()}
 
       <NavigationBar>

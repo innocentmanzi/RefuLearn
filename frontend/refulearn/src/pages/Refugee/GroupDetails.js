@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useParams, useNavigate } from 'react-router-dom';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
@@ -169,22 +170,50 @@ const GroupDetails = () => {
       try {
         setLoading(true);
         const token = localStorage.getItem('token');
+        const isOnline = navigator.onLine;
         
-        const response = await fetch(`/api/peer-learning/groups/${groupId}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
+        let groupData = null;
 
-        if (response.ok) {
-          const groupData = await response.json();
-          setGroup(groupData.data.group);
+        if (isOnline) {
+          try {
+            // Try online API calls first (preserving existing behavior)
+            console.log('🌐 Online mode: Fetching group details from API...');
+            
+            const response = await fetch(`/api/peer-learning/groups/${groupId}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (response.ok) {
+              const responseData = await response.json();
+              groupData = responseData.data.group;
+              console.log('✅ Group details data received:', groupData);
+              
+              // Store group details for offline use
+              await offlineIntegrationService.storeGroupDetails(groupId, groupData);
+            } else {
+              throw new Error('Failed to load group details');
+            }
+          } catch (onlineError) {
+            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+            // Fall back to offline data if online fails
+            groupData = await offlineIntegrationService.getGroupDetails(groupId);
+          }
         } else {
-          setError('Failed to load group details');
+          // Offline mode: use offline services
+          console.log('📴 Offline mode: Using offline group details data...');
+          groupData = await offlineIntegrationService.getGroupDetails(groupId);
+        }
+
+        if (groupData) {
+          setGroup(groupData);
+        } else {
+          setError('Group details not available offline');
         }
       } catch (err) {
-        console.error('Error fetching group details:', err);
+        console.error('❌ Error fetching group details:', err);
         setError('Failed to load group details');
       } finally {
         setLoading(false);
@@ -200,24 +229,66 @@ const GroupDetails = () => {
     try {
       setSubmitting(true);
       const token = localStorage.getItem('token');
+      const isOnline = navigator.onLine;
       
-      const response = await fetch(`/api/peer-learning/groups/${groupId}/join`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      let success = false;
 
-      if (response.ok) {
-        setGroup(prev => ({ ...prev, joined: true, participants: prev.participants + 1 }));
-        alert('Successfully joined the group!');
+      if (isOnline) {
+        try {
+          // Try online group join first (preserving existing behavior)
+          console.log('🌐 Online mode: Joining group...');
+          
+          const response = await fetch(`/api/peer-learning/groups/${groupId}/join`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.ok) {
+            success = true;
+            console.log('✅ Online group join successful');
+            setGroup(prev => ({ ...prev, joined: true, participants: prev.participants + 1 }));
+            alert('Successfully joined the group!');
+          } else {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Failed to join group');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online group join failed, using offline:', onlineError);
+          // Fall back to offline group join
+          const result = await offlineIntegrationService.joinGroupOffline(groupId);
+          
+          if (result.success) {
+            success = true;
+            console.log('✅ Offline group join successful');
+            setGroup(prev => ({ ...prev, joined: true, participants: prev.participants + 1 }));
+            alert('Successfully joined the group offline! Will sync when online.');
+          } else {
+            throw new Error('Failed to join group offline');
+          }
+        }
       } else {
-        const errorData = await response.json();
-        alert(errorData.message || 'Failed to join group');
+        // Offline group join
+        console.log('📴 Offline mode: Joining group offline...');
+        const result = await offlineIntegrationService.joinGroupOffline(groupId);
+        
+        if (result.success) {
+          success = true;
+          console.log('✅ Offline group join successful');
+          setGroup(prev => ({ ...prev, joined: true, participants: prev.participants + 1 }));
+          alert('Successfully joined the group offline! Will sync when online.');
+        } else {
+          throw new Error('Failed to join group offline');
+        }
+      }
+
+      if (!success) {
+        alert('Failed to join group');
       }
     } catch (error) {
-      console.error('Error joining group:', error);
+      console.error('❌ Error joining group:', error);
       alert('Failed to join group');
     } finally {
       setSubmitting(false);
@@ -231,29 +302,79 @@ const GroupDetails = () => {
     try {
       setSubmitting(true);
       const token = localStorage.getItem('token');
+      const isOnline = navigator.onLine;
       
-      const response = await fetch(`/api/peer-learning/groups/${groupId}/comments`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ text: comment })
-      });
+      let success = false;
 
-      if (response.ok) {
-        const commentData = await response.json();
-        setGroup(prev => ({
-          ...prev,
-          comments: [...prev.comments, commentData.data.comment]
-        }));
-        setComment('');
+      if (isOnline) {
+        try {
+          // Try online comment posting first (preserving existing behavior)
+          console.log('🌐 Online mode: Posting comment...');
+          
+          const response = await fetch(`/api/peer-learning/groups/${groupId}/comments`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ text: comment })
+          });
+
+          if (response.ok) {
+            const commentData = await response.json();
+            success = true;
+            console.log('✅ Online comment posting successful');
+            setGroup(prev => ({
+              ...prev,
+              comments: [...prev.comments, commentData.data.comment]
+            }));
+            setComment('');
+          } else {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Failed to post comment');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online comment posting failed, using offline:', onlineError);
+          // Fall back to offline comment posting
+          const result = await offlineIntegrationService.postCommentOffline(groupId, comment);
+          
+          if (result.success) {
+            success = true;
+            console.log('✅ Offline comment posting successful');
+            setGroup(prev => ({
+              ...prev,
+              comments: [...prev.comments, result.comment]
+            }));
+            setComment('');
+            alert('Comment posted offline! Will sync when online.');
+          } else {
+            throw new Error('Failed to post comment offline');
+          }
+        }
       } else {
-        const errorData = await response.json();
-        alert(errorData.message || 'Failed to post comment');
+        // Offline comment posting
+        console.log('📴 Offline mode: Posting comment offline...');
+        const result = await offlineIntegrationService.postCommentOffline(groupId, comment);
+        
+        if (result.success) {
+          success = true;
+          console.log('✅ Offline comment posting successful');
+          setGroup(prev => ({
+            ...prev,
+            comments: [...prev.comments, result.comment]
+          }));
+          setComment('');
+          alert('Comment posted offline! Will sync when online.');
+        } else {
+          throw new Error('Failed to post comment offline');
+        }
+      }
+
+      if (!success) {
+        alert('Failed to post comment');
       }
     } catch (error) {
-      console.error('Error posting comment:', error);
+      console.error('❌ Error posting comment:', error);
       alert('Failed to post comment');
     } finally {
       setSubmitting(false);
@@ -267,34 +388,94 @@ const GroupDetails = () => {
     try {
       setSubmitting(true);
       const token = localStorage.getItem('token');
+      const isOnline = navigator.onLine;
       
-      const response = await fetch(`/api/peer-learning/groups/${groupId}/comments/${commentId}/replies`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ text: replyText })
-      });
+      let success = false;
 
-      if (response.ok) {
-        const replyData = await response.json();
-        setGroup(prev => ({
-          ...prev,
-          comments: prev.comments.map(c => 
-            c._id === commentId 
-              ? { ...c, replies: [...c.replies, replyData.data.reply] }
-              : c
-          )
-        }));
-        setReplyText('');
-        setReplyingTo(null);
+      if (isOnline) {
+        try {
+          // Try online reply posting first (preserving existing behavior)
+          console.log('🌐 Online mode: Posting reply...');
+          
+          const response = await fetch(`/api/peer-learning/groups/${groupId}/comments/${commentId}/replies`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ text: replyText })
+          });
+
+          if (response.ok) {
+            const replyData = await response.json();
+            success = true;
+            console.log('✅ Online reply posting successful');
+            setGroup(prev => ({
+              ...prev,
+              comments: prev.comments.map(c => 
+                c._id === commentId 
+                  ? { ...c, replies: [...c.replies, replyData.data.reply] }
+                  : c
+              )
+            }));
+            setReplyText('');
+            setReplyingTo(null);
+          } else {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Failed to post reply');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online reply posting failed, using offline:', onlineError);
+          // Fall back to offline reply posting
+          const result = await offlineIntegrationService.postReplyOffline(groupId, commentId, replyText);
+          
+          if (result.success) {
+            success = true;
+            console.log('✅ Offline reply posting successful');
+            setGroup(prev => ({
+              ...prev,
+              comments: prev.comments.map(c => 
+                c._id === commentId 
+                  ? { ...c, replies: [...c.replies, result.reply] }
+                  : c
+              )
+            }));
+            setReplyText('');
+            setReplyingTo(null);
+            alert('Reply posted offline! Will sync when online.');
+          } else {
+            throw new Error('Failed to post reply offline');
+          }
+        }
       } else {
-        const errorData = await response.json();
-        alert(errorData.message || 'Failed to post reply');
+        // Offline reply posting
+        console.log('📴 Offline mode: Posting reply offline...');
+        const result = await offlineIntegrationService.postReplyOffline(groupId, commentId, replyText);
+        
+        if (result.success) {
+          success = true;
+          console.log('✅ Offline reply posting successful');
+          setGroup(prev => ({
+            ...prev,
+            comments: prev.comments.map(c => 
+              c._id === commentId 
+                ? { ...c, replies: [...c.replies, result.reply] }
+                : c
+            )
+          }));
+          setReplyText('');
+          setReplyingTo(null);
+          alert('Reply posted offline! Will sync when online.');
+        } else {
+          throw new Error('Failed to post reply offline');
+        }
+      }
+
+      if (!success) {
+        alert('Failed to post reply');
       }
     } catch (error) {
-      console.error('Error posting reply:', error);
+      console.error('❌ Error posting reply:', error);
       alert('Failed to post reply');
     } finally {
       setSubmitting(false);

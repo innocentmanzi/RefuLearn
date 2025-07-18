@@ -1,31 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { Line, Bar } from 'react-chartjs-2';
 import { NavLink } from 'react-router-dom';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Title as ChartTitle,
-  Tooltip,
-  Legend
-} from 'chart.js';
-import PageContainer from '../../components/PageContainer';
-import ContentWrapper from '../../components/ContentWrapper';
+import { Line, Bar } from 'react-chartjs-2';
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title as ChartTitle, Tooltip, Legend } from 'chart.js';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
+import { useUser } from '../../contexts/UserContext';
 
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  ChartTitle,
-  Tooltip,
-  Legend
-);
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ChartTitle, Tooltip, Legend);
+
+const ContentWrapper = styled.div`
+  padding: 2rem;
+  background: ${({ theme }) => theme.colors.white};
+  min-height: 100vh;
+`;
+
+const PageContainer = styled.div`
+  max-width: 1200px;
+  margin: 0 auto;
+`;
 
 // const Container = styled.div`
 //   padding: 2rem;
@@ -163,54 +155,219 @@ const AdminDashboard = () => {
   const [recentActivityData, setRecentActivityData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const { isAuthenticated } = useUser();
 
   useEffect(() => {
-    const fetchDashboardData = async () => {
+    const fetchDashboardData = async (retryCount = 0) => {
       setLoading(true);
       setError('');
-      try {
-        const res = await fetch('/api/admin/dashboard', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-          }
-        });
-        const data = await res.json();
-        if (data.success) {
-          setDashboardData(data.data);
-        } else {
-          setError(data.message || 'Failed to fetch dashboard data');
-        }
-      } catch (err) {
-        setError('Network error occurred');
-      } finally {
+      
+      // Don't fetch if not authenticated
+      if (!isAuthenticated) {
+        console.log('ℹ️ User not authenticated, skipping dashboard fetch');
         setLoading(false);
+        return;
+      }
+      
+      const isOnline = navigator.onLine;
+      let dashboardData = null;
+      let activityData = [];
+
+      if (isOnline) {
+        try {
+          // Add a small delay on first attempt to ensure authentication is ready
+          if (retryCount === 0) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+          
+          // Try online API calls first (preserving existing behavior)
+          console.log('🌐 Online mode: Fetching admin dashboard from API... (attempt', retryCount + 1, ')');
+          
+          const token = localStorage.getItem('token');
+          if (!token) {
+            throw new Error('No authentication token available');
+          }
+          
+          const res = await fetch('/api/admin/dashboard', {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          
+          console.log('📊 Dashboard API response status:', res.status);
+          const data = await res.json();
+          
+          if (data.success) {
+            dashboardData = data.data;
+            console.log('✅ Admin dashboard data received:', dashboardData);
+            
+            // Clear any existing error messages when data loads successfully
+            setError('');
+            
+            // Store dashboard data for offline use
+            await offlineIntegrationService.storeAdminDashboard({
+              ...dashboardData,
+              lastUpdated: new Date().toISOString()
+            });
+          } else {
+            throw new Error(data.message || 'Failed to fetch dashboard data');
+          }
+        } catch (onlineError) {
+          console.warn(`⚠️ Online API failed (attempt ${retryCount + 1}):`, onlineError);
+          
+          // Retry up to 2 times for authentication/timing issues
+          if (retryCount < 2 && (
+            onlineError.message?.includes('token') || 
+            onlineError.message?.includes('401') ||
+            onlineError.message?.includes('authentication')
+          )) {
+            console.log('🔄 Retrying dashboard fetch due to auth issue...');
+            return fetchDashboardData(retryCount + 1);
+          }
+          
+          // After retries failed, fall back to offline data
+          console.warn('⚠️ All API attempts failed, falling back to offline data');
+          const offlineData = await fetchOfflineData();
+          dashboardData = offlineData.dashboard;
+          activityData = offlineData.activity;
+          
+          // Only set error if we have no data at all and it's not a temporary issue
+          if (!dashboardData && retryCount >= 2) {
+            setError('Unable to load dashboard data. Please check your connection and try refreshing.');
+          } else if (!dashboardData) {
+            // Don't show error for temporary issues, just log
+            console.warn('⚠️ No dashboard data available, but not showing error to user');
+          }
+        }
+      } else {
+        // Offline mode: use offline services
+        console.log('📴 Offline mode: Using offline admin dashboard data...');
+        const offlineData = await fetchOfflineData();
+        dashboardData = offlineData.dashboard;
+        activityData = offlineData.activity;
+      }
+
+      setDashboardData(dashboardData);
+      setRecentActivityData(activityData);
+      setLoading(false);
+    };
+
+    const fetchActivityData = async (retryCount = 0) => {
+      // Don't fetch if not authenticated
+      if (!isAuthenticated) {
+        console.log('ℹ️ User not authenticated, skipping activity fetch');
+        return;
+      }
+      
+      const isOnline = navigator.onLine;
+      
+      if (isOnline) {
+        try {
+          const token = localStorage.getItem('token');
+          if (!token) {
+            throw new Error('No authentication token available');
+          }
+          
+          const res = await fetch('/api/admin/analytics', {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          const data = await res.json();
+          if (data.success && data.data?.recentActivity?.all) {
+            const activityData = data.data.recentActivity.all;
+            setRecentActivityData(activityData);
+            console.log('✅ Admin activity data received');
+            
+            // Store activity data for offline use
+            await offlineIntegrationService.storeAdminActivityData(activityData);
+          } else {
+            throw new Error(data.message || 'Failed to fetch activity data');
+          }
+        } catch (onlineError) {
+          console.warn(`⚠️ Activity API failed (attempt ${retryCount + 1}):`, onlineError);
+          
+          // Retry once for authentication/timing issues
+          if (retryCount < 1 && (
+            onlineError.message?.includes('token') || 
+            onlineError.message?.includes('401') ||
+            onlineError.message?.includes('authentication')
+          )) {
+            console.log('🔄 Retrying activity fetch due to auth issue...');
+            return fetchActivityData(retryCount + 1);
+          }
+          
+          // Fall back to offline data after retry
+          console.warn('⚠️ Activity API failed, using offline data');
+          try {
+            const offlineActivityData = await offlineIntegrationService.getAdminActivityData() || [];
+            setRecentActivityData(offlineActivityData);
+          } catch (offlineError) {
+            console.error('❌ Failed to load offline activity data:', offlineError);
+          }
+        }
+      } else {
+        // Offline mode: use offline activity data
+        console.log('📴 Offline mode: Using offline activity data...');
+        try {
+          const offlineActivityData = await offlineIntegrationService.getAdminActivityData() || [];
+          setRecentActivityData(offlineActivityData);
+        } catch (offlineError) {
+          console.error('❌ Failed to load offline activity data:', offlineError);
+        }
       }
     };
 
-    const fetchActivityData = async () => {
+    // Helper function to fetch offline data
+    const fetchOfflineData = async () => {
       try {
-        const res = await fetch('/api/admin/analytics', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-          }
+        const dashboard = await offlineIntegrationService.getAdminDashboard();
+        const activity = await offlineIntegrationService.getAdminActivityData() || [];
+        
+        console.log('📱 Offline admin dashboard data loaded:', {
+          dashboard: !!dashboard,
+          activity: activity.length
         });
-        const data = await res.json();
-        if (data.success && data.data?.recentActivity?.all) {
-          setRecentActivityData(data.data.recentActivity.all);
-        } else {
-          setRecentActivityData([]);
+        
+        // Only return offline data if it's recent (within last 5 minutes)
+        if (dashboard && dashboard.lastUpdated) {
+          const lastUpdate = new Date(dashboard.lastUpdated);
+          const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+          
+          if (lastUpdate > fiveMinutesAgo) {
+            return { dashboard, activity };
+          } else {
+            console.log('⚠️ Offline data is too old, not using it');
+            return { dashboard: null, activity: [] };
+          }
         }
-      } catch (err) {
-        setRecentActivityData([]);
+        
+        return { dashboard, activity };
+      } catch (error) {
+        console.error('❌ Failed to load offline admin dashboard data:', error);
+        return { dashboard: null, activity: [] };
       }
     };
 
     fetchDashboardData();
     fetchActivityData();
-    // Optionally, poll for real-time updates every 30 seconds
-    const interval = setInterval(fetchActivityData, 30000);
-    return () => clearInterval(interval);
-  }, []);
+    
+    // Set up interval for periodic updates, but only if authenticated
+    let interval;
+    if (isAuthenticated) {
+      interval = setInterval(() => {
+        if (isAuthenticated) {
+          fetchActivityData();
+        }
+      }, 30000);
+    }
+    
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [isAuthenticated]); // Add isAuthenticated to dependency array
 
   if (loading) {
     return (
@@ -358,8 +515,8 @@ const AdminDashboard = () => {
         </DashboardGrid>
 
         <SectionTitle>Quick Actions</SectionTitle>
-        <QuickActionLink to="/analytics">View Analytics</QuickActionLink>
-        <QuickActionLink to="/manage-users">Manage Users</QuickActionLink>
+        <QuickActionLink to="/admin/analytics">View Analytics</QuickActionLink>
+        <QuickActionLink to="/admin/users">Manage Users</QuickActionLink>
 
         <SectionTitle>Recent Activity</SectionTitle>
         <RecentList>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowBack, Article, VideoLibrary, AudioFile, AttachFile, Launch } from '@mui/icons-material';
+import offlineIntegrationService from '../services/offlineIntegrationService';
 
 const Container = styled.div`
   background: #f4f8fb;
@@ -160,23 +161,21 @@ const FileInfo = styled.div`
   margin: 1rem 0;
 `;
 
-const ContentItemViewer = () => {
-  const location = useLocation();
+const ContentItemViewer = ({ returnUrl }) => {
+  const { courseId, moduleId, contentType, contentId } = useParams();
   const navigate = useNavigate();
-  const { courseId, moduleId, itemIndex } = useParams();
-  
-  // Get data from location.state (if coming from navigate) or fetch from backend (if coming from window.location.href)
-  const { contentItem: stateContentItem, module: stateModule, course: stateCourse, returnUrl: stateReturnUrl } = location.state || {};
-  
-  const [contentItem, setContentItem] = useState(stateContentItem);
-  const [module, setModule] = useState(stateModule);
-  const [course, setCourse] = useState(stateCourse);
-  const [loading, setLoading] = useState(!stateContentItem);
+  const location = useLocation();
+  const [contentItem, setContentItem] = useState(null);
+  const [course, setCourse] = useState(null);
+  const [module, setModule] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
-  // Get return URL from query params or state
-  const urlParams = new URLSearchParams(location.search);
-  const returnUrl = urlParams.get('return') || stateReturnUrl || `/courses/${courseId}/overview`;
+  // Get item index from URL params
+  const itemIndex = contentId;
+  
+  // Try to get content item from navigation state
+  const stateContentItem = location.state?.contentItem;
 
   // Fetch content item data if not provided via state
   useEffect(() => {
@@ -190,28 +189,63 @@ const ContentItemViewer = () => {
       try {
         setLoading(true);
         const token = localStorage.getItem('token');
+        const isOnline = navigator.onLine;
         
-        // Fetch course data
-        const courseResponse = await fetch(`/api/courses/${courseId}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
+        let courseData = null;
 
-        if (courseResponse.ok) {
-          const courseData = await courseResponse.json();
-          const courseInfo = courseData.data.course;
-          setCourse(courseInfo);
+        if (isOnline) {
+          try {
+            // Try online API calls first (preserving existing behavior)
+            console.log('🌐 Online mode: Fetching content item data from API...');
+            
+            const courseResponse = await fetch(`/api/courses/${courseId}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (courseResponse.ok) {
+              const courseApiData = await courseResponse.json();
+              courseData = courseApiData.data.course;
+              console.log('✅ Course data received for content item');
+              
+              // Store course data for offline use
+              await offlineIntegrationService.storeCourseData(courseId, courseData);
+            } else {
+              throw new Error('Failed to load course data');
+            }
+
+          } catch (onlineError) {
+            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+            
+            // Fall back to offline data if online fails
+            courseData = await offlineIntegrationService.getCourseData(courseId);
+            
+            if (!courseData) {
+              throw onlineError;
+            }
+          }
+        } else {
+          // Offline mode: use offline services
+          console.log('📴 Offline mode: Using offline content item data...');
+          courseData = await offlineIntegrationService.getCourseData(courseId);
+        }
+
+        if (courseData) {
+          setCourse(courseData);
           
           // Find the specific module and content item
-          const targetModule = courseInfo.modules?.find(m => m._id === moduleId);
+          const targetModule = courseData.modules?.find(m => m._id === moduleId);
           if (targetModule) {
             setModule(targetModule);
             
             const targetContentItem = targetModule.contentItems?.[parseInt(itemIndex)];
             if (targetContentItem) {
               setContentItem(targetContentItem);
+              
+              // Store content item for offline use
+              await offlineIntegrationService.storeContentItem(courseId, moduleId, itemIndex, targetContentItem);
             } else {
               setError('Content item not found');
             }
@@ -219,11 +253,11 @@ const ContentItemViewer = () => {
             setError('Module not found');
           }
         } else {
-          setError('Failed to load course data');
+          setError('Course not found');
         }
       } catch (err) {
-        console.error('Error fetching content item data:', err);
-        setError('Failed to load content item');
+        console.error('❌ Error fetching content item data:', err);
+        setError(err.message || 'Failed to load content item');
       } finally {
         setLoading(false);
       }

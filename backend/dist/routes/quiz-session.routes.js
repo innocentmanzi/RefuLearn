@@ -9,6 +9,15 @@ const auth_1 = require("../middleware/auth");
 const validation_1 = require("../middleware/validation");
 const errorHandler_1 = require("../middleware/errorHandler");
 const couchdb_1 = require("../config/couchdb");
+const ensureAuth = (req) => {
+    if (!req.user?._id) {
+        throw new Error('User authentication required');
+    }
+    return {
+        userId: req.user._id.toString(),
+        user: req.user
+    };
+};
 const router = express_1.default.Router();
 let couchConnection = null;
 const initializeDatabase = async () => {
@@ -39,10 +48,10 @@ router.post('/start', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refu
     (0, express_validator_1.body)('courseId').notEmpty().withMessage('Course ID is required'),
     (0, express_validator_1.body)('moduleId').notEmpty().withMessage('Module ID is required'),
     (0, express_validator_1.body)('duration').isInt({ min: 1 }).withMessage('Duration must be a positive integer')
-], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res, next) => {
     try {
         const { quizId, courseId, moduleId, duration } = req.body;
-        const userId = req.user._id.toString();
+        const { userId } = ensureAuth(req);
         console.log('🚀 Starting new quiz session:', { userId, quizId, duration });
         const database = await ensureDb();
         const existingSessions = await database.find({
@@ -126,10 +135,10 @@ router.post('/start', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refu
 }));
 router.get('/:quizId/status', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee', 'user'), [
     (0, express_validator_1.param)('quizId').notEmpty().withMessage('Quiz ID is required')
-], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res, next) => {
     try {
         const { quizId } = req.params;
-        const userId = req.user._id.toString();
+        const { userId } = ensureAuth(req);
         console.log('📊 Getting quiz session status:', { userId, quizId });
         const database = await ensureDb();
         const sessions = await database.find({
@@ -196,11 +205,11 @@ router.get('/:quizId/status', auth_1.authenticateToken, (0, auth_1.authorizeRole
 router.put('/:sessionId/answers', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee', 'user'), [
     (0, express_validator_1.param)('sessionId').notEmpty().withMessage('Session ID is required'),
     (0, express_validator_1.body)('answers').isObject().withMessage('Answers must be an object')
-], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res, next) => {
     try {
         const { sessionId } = req.params;
         const { answers } = req.body;
-        const userId = req.user._id.toString();
+        const { userId } = ensureAuth(req);
         console.log('💾 Updating quiz session answers:', { sessionId, userId });
         const database = await ensureDb();
         const session = await database.get(sessionId);
@@ -252,10 +261,10 @@ router.put('/:sessionId/answers', auth_1.authenticateToken, (0, auth_1.authorize
 }));
 router.get('/quiz/:quizId/submissions', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor'), [
     (0, express_validator_1.param)('quizId').notEmpty().withMessage('Quiz ID is required')
-], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res, next) => {
     try {
         const { quizId } = req.params;
-        const instructorId = req.user._id.toString();
+        const { userId: instructorId } = ensureAuth(req);
         console.log('📊 Getting quiz submissions for instructor:', { instructorId, quizId });
         const database = await ensureDb();
         const quiz = await database.get(quizId);
@@ -337,11 +346,11 @@ router.get('/quiz/:quizId/submissions', auth_1.authenticateToken, (0, auth_1.aut
 router.post('/:sessionId/submit', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee', 'user'), [
     (0, express_validator_1.param)('sessionId').notEmpty().withMessage('Session ID is required'),
     (0, express_validator_1.body)('answers').isObject().withMessage('Answers must be an object')
-], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res, next) => {
     try {
         const { sessionId } = req.params;
         const { answers } = req.body;
-        const userId = req.user._id.toString();
+        const { userId } = ensureAuth(req);
         console.log('📤 Submitting quiz session:', { sessionId, userId });
         const database = await ensureDb();
         const session = await database.get(sessionId);
@@ -414,6 +423,72 @@ router.post('/:sessionId/submit', auth_1.authenticateToken, (0, auth_1.authorize
         session.updatedAt = now;
         await database.insert(session);
         console.log('✅ Quiz session submitted successfully');
+        try {
+            console.log('🎯 Updating course progress after quiz completion...');
+            const courseDoc = await database.get(session.courseId);
+            if (courseDoc && courseDoc.modules) {
+                const moduleDoc = await database.get(session.moduleId);
+                if (moduleDoc && moduleDoc.quizzes) {
+                    const quizIndex = moduleDoc.quizzes.findIndex((quiz) => quiz._id === session.quizId);
+                    if (quizIndex !== -1) {
+                        let itemIndex = 0;
+                        if (moduleDoc.description)
+                            itemIndex++;
+                        if (moduleDoc.content)
+                            itemIndex++;
+                        if (moduleDoc.videoUrl)
+                            itemIndex++;
+                        if (moduleDoc.resources)
+                            itemIndex += moduleDoc.resources.length;
+                        if (moduleDoc.assessments)
+                            itemIndex += moduleDoc.assessments.length;
+                        itemIndex += quizIndex;
+                        const completionKey = `quiz-${itemIndex}`;
+                        console.log('🎯 Quiz completion details:', {
+                            quizId: session.quizId,
+                            moduleId: session.moduleId,
+                            courseId: session.courseId,
+                            quizIndex,
+                            itemIndex,
+                            completionKey
+                        });
+                        if (!courseDoc.studentProgress) {
+                            courseDoc.studentProgress = [];
+                        }
+                        let moduleProgress = courseDoc.studentProgress.find((p) => p.student === userId && p.moduleId === session.moduleId);
+                        if (!moduleProgress) {
+                            moduleProgress = {
+                                student: userId,
+                                moduleId: session.moduleId,
+                                completed: false,
+                                score: 0,
+                                completedAt: null,
+                                completedItems: []
+                            };
+                            courseDoc.studentProgress.push(moduleProgress);
+                        }
+                        if (!moduleProgress.completedItems) {
+                            moduleProgress.completedItems = [];
+                        }
+                        if (!moduleProgress.completedItems.includes(completionKey)) {
+                            moduleProgress.completedItems.push(completionKey);
+                            console.log('✅ Added quiz completion to progress:', completionKey);
+                            courseDoc.updatedAt = new Date();
+                            const latestCourse = await database.get(courseDoc._id);
+                            courseDoc._rev = latestCourse._rev;
+                            await database.insert(courseDoc);
+                            console.log('✅ Course progress updated successfully after quiz completion');
+                        }
+                        else {
+                            console.log('ℹ️ Quiz already marked as completed in progress');
+                        }
+                    }
+                }
+            }
+        }
+        catch (progressError) {
+            console.error('⚠️ Failed to update course progress after quiz completion:', progressError.message);
+        }
         res.json({
             success: true,
             message: 'Quiz submitted successfully',
@@ -431,6 +506,116 @@ router.post('/:sessionId/submit', auth_1.authenticateToken, (0, auth_1.authorize
         res.status(500).json({
             success: false,
             message: 'Failed to submit quiz'
+        });
+    }
+}));
+router.get('/:quizId/completion-status', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee', 'user'), [
+    (0, express_validator_1.param)('quizId').notEmpty().withMessage('Quiz ID is required')
+], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res, next) => {
+    try {
+        const { quizId } = req.params;
+        const { userId } = ensureAuth(req);
+        console.log('🔍 Enhanced quiz completion check:', { userId, quizId });
+        const database = await ensureDb();
+        let completedSession = null;
+        try {
+            const completedSessions = await database.find({
+                selector: {
+                    type: 'quiz_session',
+                    userId,
+                    quizId,
+                    status: 'completed'
+                },
+                sort: [{ submittedAt: 'desc' }],
+                limit: 1
+            });
+            if (completedSessions.docs.length > 0) {
+                completedSession = completedSessions.docs[0];
+                console.log('✅ Found completed quiz session:', completedSession._id);
+            }
+        }
+        catch (sessionErr) {
+            console.log('⚠️ Quiz session query failed:', sessionErr);
+        }
+        if (!completedSession) {
+            try {
+                const allSessions = await database.find({
+                    selector: {
+                        type: 'quiz_session',
+                        userId,
+                        quizId
+                    },
+                    sort: [{ createdAt: 'desc' }],
+                    limit: 5
+                });
+                console.log('🔍 All sessions for this user+quiz:', allSessions.docs.map((s) => ({
+                    id: s._id,
+                    status: s.status,
+                    score: s.score,
+                    submittedAt: s.submittedAt
+                })));
+                const sessionWithScore = allSessions.docs.find((s) => s.score !== undefined && s.score !== null);
+                if (sessionWithScore) {
+                    completedSession = sessionWithScore;
+                    console.log('✅ Found session with score:', sessionWithScore._id, 'Score:', sessionWithScore.score);
+                }
+            }
+            catch (allSessionsErr) {
+                console.log('⚠️ All sessions query failed:', allSessionsErr);
+            }
+        }
+        if (!completedSession) {
+            try {
+                console.log('🔍 Trying comprehensive search...');
+                const allQuizSessions = await database.list({ include_docs: true });
+                const userQuizSessions = allQuizSessions.rows
+                    .map((row) => row.doc)
+                    .filter((doc) => doc &&
+                    doc.type === 'quiz_session' &&
+                    doc.userId === userId &&
+                    doc.quizId === quizId &&
+                    (doc.status === 'completed' || doc.score !== undefined));
+                console.log('🔍 Comprehensive search found:', userQuizSessions.length, 'sessions');
+                if (userQuizSessions.length > 0) {
+                    completedSession = userQuizSessions.sort((a, b) => new Date(b.submittedAt || b.updatedAt || b.createdAt).getTime() -
+                        new Date(a.submittedAt || a.updatedAt || a.createdAt).getTime())[0];
+                    console.log('✅ Found session via comprehensive search:', completedSession._id);
+                }
+            }
+            catch (comprehensiveErr) {
+                console.log('⚠️ Comprehensive search failed:', comprehensiveErr);
+            }
+        }
+        if (completedSession) {
+            return res.json({
+                success: true,
+                data: {
+                    isCompleted: true,
+                    completedAt: completedSession.submittedAt || completedSession.updatedAt,
+                    score: completedSession.score,
+                    timeSpent: completedSession.timeSpent,
+                    sessionId: completedSession._id,
+                    method: 'enhanced_search'
+                }
+            });
+        }
+        console.log('ℹ️ No completed quiz session found for user');
+        res.json({
+            success: true,
+            data: {
+                isCompleted: false,
+                completedAt: null,
+                score: null,
+                timeSpent: null,
+                sessionId: null
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error checking quiz completion status:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to check quiz completion status'
         });
     }
 }));

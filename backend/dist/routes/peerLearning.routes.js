@@ -13,6 +13,11 @@ const pouchdb_find_1 = __importDefault(require("pouchdb-find"));
 const router = express_1.default.Router();
 pouchdb_1.default.plugin(pouchdb_find_1.default);
 const db = new pouchdb_1.default('http://Manzi:Clarisse101@localhost:5984/refulearn');
+const ensureAuth = (req) => {
+    if (!req.user?._id)
+        throw new Error('User authentication required');
+    return { userId: req.user._id.toString(), user: req.user };
+};
 const createGroupValidation = [
     (0, express_validator_1.body)('name')
         .trim()
@@ -96,8 +101,9 @@ router.get('/groups', [
 }));
 router.post('/groups', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee'), (0, validation_1.validate)(createGroupValidation), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { name, description, category, maxMembers, tags } = req.body;
-    if (req.user.role !== 'refugee') {
-        const userActivity = await getUserActivity(req.user._id.toString());
+    const { userId, user } = ensureAuth(req);
+    if (user.role !== 'refugee') {
+        const userActivity = await getUserActivity(userId);
         if (userActivity.totalPosts < 5) {
             return res.status(403).json({
                 success: false,
@@ -109,7 +115,7 @@ router.post('/groups', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('ref
         selector: {
             type: 'peer_group',
             category: category,
-            currentMembers: req.user._id.toString()
+            currentMembers: userId
         }
     });
     if (existingGroupResult.docs.length > 0) {
@@ -125,8 +131,8 @@ router.post('/groups', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('ref
         category,
         maxMembers,
         tags,
-        creator: req.user._id.toString(),
-        currentMembers: [req.user._id.toString()],
+        creator: userId,
+        currentMembers: [userId],
         isActive: true,
         createdAt: new Date(),
         updatedAt: new Date()
@@ -160,6 +166,7 @@ router.get('/groups/:groupId', (0, errorHandler_1.asyncHandler)(async (req, res)
 }));
 router.post('/groups/:groupId/join', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { groupId } = req.params;
+    const { userId, user } = ensureAuth(req);
     res.json({
         success: true,
         message: 'Successfully joined the group'
@@ -167,6 +174,7 @@ router.post('/groups/:groupId/join', auth_1.authenticateToken, (0, auth_1.author
 }));
 router.post('/groups/:groupId/leave', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { groupId } = req.params;
+    const { userId, user } = ensureAuth(req);
     res.json({
         success: true,
         message: 'Successfully left the group'
@@ -199,12 +207,13 @@ router.get('/groups/:groupId/posts', [
 router.post('/groups/:groupId/posts', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee'), (0, validation_1.validate)(createPostValidation), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { groupId } = req.params;
     const { content, type, tags } = req.body;
+    const { userId, user } = ensureAuth(req);
     const post = {
         _id: 'mock-post-id',
         content,
         type,
         tags: tags || [],
-        author: req.user._id,
+        author: userId,
         group: groupId,
         likes: [],
         comments: [],
@@ -242,6 +251,7 @@ router.put('/posts/:postId', auth_1.authenticateToken, (0, auth_1.authorizeRoles
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { postId } = req.params;
     const { content } = req.body;
+    const { userId, user } = ensureAuth(req);
     res.json({
         success: true,
         message: 'Post updated successfully'
@@ -249,6 +259,7 @@ router.put('/posts/:postId', auth_1.authenticateToken, (0, auth_1.authorizeRoles
 }));
 router.delete('/posts/:postId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { postId } = req.params;
+    const { userId, user } = ensureAuth(req);
     res.json({
         success: true,
         message: 'Post deleted successfully'
@@ -256,6 +267,7 @@ router.delete('/posts/:postId', auth_1.authenticateToken, (0, auth_1.authorizeRo
 }));
 router.post('/posts/:postId/like', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { postId } = req.params;
+    const { userId, user } = ensureAuth(req);
     res.json({
         success: true,
         message: 'Post liked successfully'
@@ -264,10 +276,11 @@ router.post('/posts/:postId/like', auth_1.authenticateToken, (0, auth_1.authoriz
 router.post('/posts/:postId/comments', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee'), (0, validation_1.validate)(createCommentValidation), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { postId } = req.params;
     const { content } = req.body;
+    const { userId, user } = ensureAuth(req);
     const comment = {
         _id: 'mock-comment-id',
         content,
-        author: req.user._id,
+        author: userId,
         post: postId,
         likes: [],
         createdAt: new Date()
@@ -281,6 +294,7 @@ router.post('/posts/:postId/comments', auth_1.authenticateToken, (0, auth_1.auth
 router.put('/comments/:commentId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee'), (0, validation_1.validate)(createCommentValidation), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { commentId } = req.params;
     const { content } = req.body;
+    const { userId, user } = ensureAuth(req);
     res.json({
         success: true,
         message: 'Comment updated successfully'
@@ -288,12 +302,14 @@ router.put('/comments/:commentId', auth_1.authenticateToken, (0, auth_1.authoriz
 }));
 router.delete('/comments/:commentId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { commentId } = req.params;
+    const { userId, user } = ensureAuth(req);
     res.json({
         success: true,
         message: 'Comment deleted successfully'
     });
 }));
 router.get('/user/groups', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId, user } = ensureAuth(req);
     const groups = [];
     res.json({
         success: true,
@@ -305,6 +321,7 @@ router.get('/user/posts', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('
     (0, express_validator_1.query)('limit').optional().isInt({ min: 1, max: 20 }).withMessage('Limit must be between 1 and 20')
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { page = 1, limit = 10 } = req.query;
+    const { userId, user } = ensureAuth(req);
     const posts = [];
     const total = 0;
     res.json({
@@ -325,13 +342,14 @@ router.get('/search/users', auth_1.authenticateToken, (0, auth_1.authorizeRoles)
     (0, express_validator_1.query)('limit').optional().isInt({ min: 1, max: 20 }).withMessage('Limit must be between 1 and 20')
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { q, limit = 10 } = req.query;
+    const { userId, user } = ensureAuth(req);
     const result = await db.find({
         selector: {
             type: 'user',
             isActive: true
         }
     });
-    let users = result.docs.filter((user) => user._id !== req.user._id.toString() &&
+    let users = result.docs.filter((user) => user._id !== userId &&
         (user.firstName?.toLowerCase().includes(q.toLowerCase()) ||
             user.lastName?.toLowerCase().includes(q.toLowerCase()) ||
             user.email?.toLowerCase().includes(q.toLowerCase()))).slice(0, Number(limit));
@@ -341,6 +359,7 @@ router.get('/search/users', auth_1.authenticateToken, (0, auth_1.authorizeRoles)
     });
 }));
 router.get('/stats', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId, user } = ensureAuth(req);
     const stats = {
         totalGroups: 0,
         totalPosts: 0,
@@ -359,10 +378,10 @@ router.post('/groups/:groupId/comments', auth_1.authenticateToken, (0, auth_1.au
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { groupId } = req.params;
     const { text } = req.body;
-    const userId = req.user._id.toString();
+    const { userId, user } = ensureAuth(req);
     const comment = {
         _id: Date.now().toString(),
-        user: req.user.name || 'User',
+        user: user.name || 'User',
         text,
         timestamp: new Date().toISOString(),
         replies: []
@@ -378,10 +397,10 @@ router.post('/groups/:groupId/comments/:commentId/replies', auth_1.authenticateT
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { groupId, commentId } = req.params;
     const { text } = req.body;
-    const userId = req.user._id.toString();
+    const { userId, user } = ensureAuth(req);
     const reply = {
         _id: Date.now().toString(),
-        user: req.user.name || 'User',
+        user: user.name || 'User',
         text,
         timestamp: new Date().toISOString()
     };

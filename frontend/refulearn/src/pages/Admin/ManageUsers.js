@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
@@ -307,26 +308,59 @@ const ManageUsers = () => {
     const fetchUsers = async () => {
       setLoading(true);
       setError('');
-      try {
-        let url = `/api/admin/users?page=${page}&limit=10`;
-        if (roleFilter !== 'all') url += `&role=${roleFilter}`;
-        if (statusFilter !== 'all') url += `&status=${statusFilter}`;
-        if (searchTerm) url += `&search=${encodeURIComponent(searchTerm)}`;
+      
+      const isOnline = navigator.onLine;
+      let usersData = [];
+      let paginationData = { totalPages: 1, totalUsers: 0 };
 
-        const res = await fetch(url, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+      if (isOnline) {
+        try {
+          // Try online API calls first (preserving existing behavior)
+          console.log('🌐 Online mode: Fetching admin users from API...');
+          
+          let url = `/api/admin/users?page=${page}&limit=10`;
+          if (roleFilter !== 'all') url += `&role=${roleFilter}`;
+          if (statusFilter !== 'all') url += `&status=${statusFilter}`;
+          if (searchTerm) url += `&search=${encodeURIComponent(searchTerm)}`;
+
+          const res = await fetch(url, {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+            }
+          });
+          const data = await res.json();
+          if (data.success) {
+            usersData = data.data.users || [];
+            paginationData = data.data.pagination || { totalPages: 1, totalUsers: 0 };
+            
+            // Store users data for offline use
+            await offlineIntegrationService.storeAdminUsers(usersData);
+            console.log('✅ Admin users data stored for offline use');
+          } else {
+            throw new Error(data.message || 'Failed to fetch users');
           }
-        });
-        const data = await res.json();
-        if (data.success) {
-          setUsers(data.data.users || []);
-          setTotalPages(data.data.pagination.totalPages || 1);
-          setTotalUsers(data.data.pagination.totalUsers || 0);
-        } else {
-          setError(data.message || 'Failed to fetch users');
+        } catch (onlineError) {
+          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+          
+          // Fall back to offline data if online fails
+          usersData = await offlineIntegrationService.getAdminUsers() || [];
+          
+          if (!usersData || usersData.length === 0) {
+            throw onlineError;
+          }
         }
+      } else {
+        // Offline mode: use offline services
+        console.log('📴 Offline mode: Using offline admin users data...');
+        usersData = await offlineIntegrationService.getAdminUsers() || [];
+      }
+
+      try {
+        setUsers(usersData || []);
+        setTotalPages(paginationData?.totalPages || 1);
+        setTotalUsers(paginationData?.totalUsers || (usersData?.length || 0));
       } catch (err) {
+        console.error('❌ Error setting users data:', err);
         setError('Network error occurred');
       } finally {
         setLoading(false);
@@ -398,52 +432,77 @@ const ManageUsers = () => {
         updateUserOptimistically(userId, { isActive: newStatus });
       });
 
+      const isOnline = navigator.onLine;
+      
       try {
-        // Perform actual API calls
-        const promises = selectedUsers.map(userId => 
-          fetch(`/api/admin/users/${userId}`, {
-            method: 'PUT',
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ isActive: newStatus })
-          })
-        );
+        if (isOnline) {
+          console.log('🌐 Online mode: Performing bulk user actions...');
+          
+          // Perform actual API calls
+          const promises = selectedUsers.map(userId => 
+            fetch(`/api/admin/users/${userId}`, {
+              method: 'PUT',
+              headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ isActive: newStatus })
+            })
+          );
 
-        const results = await Promise.all(promises);
-        const failedUpdates = [];
+          const results = await Promise.all(promises);
+          const failedUpdates = [];
 
-        results.forEach((res, index) => {
-          if (!res.ok) {
-            failedUpdates.push(selectedUsers[index]);
+          results.forEach((res, index) => {
+            if (!res.ok) {
+              failedUpdates.push(selectedUsers[index]);
+            }
+          });
+
+          if (failedUpdates.length > 0) {
+            // Rollback failed updates
+            failedUpdates.forEach(userId => {
+              const original = originalStates.get(userId);
+              if (original) {
+                rollbackUserUpdate(userId, original);
+              }
+            });
+            showToast(`${failedUpdates.length} users failed to update. Changes reverted.`, 'error');
+          } else {
+            showToast(`${selectedUsers.length} users ${confirmDialog.action}d successfully`);
           }
-        });
 
-        if (failedUpdates.length > 0) {
-          // Rollback failed updates
-          failedUpdates.forEach(userId => {
-            const original = originalStates.get(userId);
-            if (original) {
-              rollbackUserUpdate(userId, original);
-            }
-          });
-          showToast(`${failedUpdates.length} users failed to update. Changes reverted.`, 'error');
+          setSelectedUsers([]);
         } else {
-          showToast(`${selectedUsers.length} users ${confirmDialog.action}d successfully`);
+          // Offline mode: queue actions for sync
+          console.log('📴 Offline mode: Queuing bulk user actions for sync...');
+          
+          for (const userId of selectedUsers) {
+            await offlineIntegrationService.queueAdminUserAction({
+              action: 'update_status',
+              userId: userId,
+              isActive: newStatus
+            });
+          }
+          
+          showToast(`Bulk ${confirmDialog.action} actions queued for sync when online`);
+          setSelectedUsers([]);
         }
-
-        setSelectedUsers([]);
-              } catch (err) {
-          // Rollback all changes on network error
-          selectedUsers.forEach(userId => {
-            const original = originalStates.get(userId);
-            if (original) {
-              rollbackUserUpdate(userId, original);
-            }
+      } catch (err) {
+        console.warn('⚠️ Bulk action failed, queuing for offline sync:', err);
+        
+        // Queue actions for offline sync
+        for (const userId of selectedUsers) {
+          await offlineIntegrationService.queueAdminUserAction({
+            action: 'update_status',
+            userId: userId,
+            isActive: newStatus
           });
-          showToast('Network error occurred. Changes reverted.', 'error');
-        } finally {
+        }
+        
+        showToast(`Bulk ${confirmDialog.action} actions queued for sync when online`);
+        setSelectedUsers([]);
+      } finally {
         setPendingActions(prev => {
           const newMap = new Map(prev);
           newMap.delete(actionId);
@@ -463,34 +522,58 @@ const ManageUsers = () => {
       const newStatus = confirmDialog.action === 'deactivate' ? false : true;
       updateUserOptimistically(userId, { isActive: newStatus });
 
+      const isOnline = navigator.onLine;
+      
       try {
-        const res = await fetch(`/api/admin/users/${userId}`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ isActive: newStatus })
-        });
-        const data = await res.json();
-        if (data.success) {
-          showToast(`User ${confirmDialog.action}d successfully`);
-        } else {
-          // Rollback on failure
-          rollbackUserUpdate(userId, originalState);
-          showToast(data.message || 'Failed to update user', 'error');
-        }
-              } catch (err) {
-          // Rollback on network error
-          rollbackUserUpdate(userId, originalState);
-          showToast('Network error occurred. Changes reverted.', 'error');
-        } finally {
-          setPendingActions(prev => {
-            const newMap = new Map(prev);
-            newMap.delete(actionId);
-            return newMap;
+        if (isOnline) {
+          console.log('🌐 Online mode: Performing single user action...');
+          
+          const res = await fetch(`/api/admin/users/${userId}`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ isActive: newStatus })
           });
+          const data = await res.json();
+          if (data.success) {
+            showToast(`User ${confirmDialog.action}d successfully`);
+          } else {
+            // Rollback on failure
+            rollbackUserUpdate(userId, originalState);
+            showToast(data.message || 'Failed to update user', 'error');
+          }
+        } else {
+          // Offline mode: queue action for sync
+          console.log('📴 Offline mode: Queuing single user action for sync...');
+          
+          await offlineIntegrationService.queueAdminUserAction({
+            action: 'update_status',
+            userId: userId,
+            isActive: newStatus
+          });
+          
+          showToast(`User ${confirmDialog.action} action queued for sync when online`);
         }
+      } catch (err) {
+        console.warn('⚠️ Single action failed, queuing for offline sync:', err);
+        
+        // Queue action for offline sync
+        await offlineIntegrationService.queueAdminUserAction({
+          action: 'update_status',
+          userId: userId,
+          isActive: newStatus
+        });
+        
+        showToast(`User ${confirmDialog.action} action queued for sync when online`);
+      } finally {
+        setPendingActions(prev => {
+          const newMap = new Map(prev);
+          newMap.delete(actionId);
+          return newMap;
+        });
+      }
     }
     closeConfirmDialog();
   };
@@ -565,29 +648,50 @@ const ManageUsers = () => {
     setUsers(prevUsers => prevUsers.filter(user => user._id !== userId));
     setTotalUsers(prev => prev - 1);
 
+    const isOnline = navigator.onLine;
+    
     try {
-      const res = await fetch(`/api/admin/users/${userId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+      if (isOnline) {
+        console.log('🌐 Online mode: Deleting user...');
+        
+        const res = await fetch(`/api/admin/users/${userId}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+          }
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('User deleted successfully');
+          // Remove from selected users if present
+          setSelectedUsers(prev => prev.filter(id => id !== userId));
+        } else {
+          // Rollback on failure
+          setUsers(prevUsers => [...prevUsers, originalUser]);
+          setTotalUsers(prev => prev + 1);
+          showToast(data.message || 'Failed to delete user', 'error');
         }
-      });
-      const data = await res.json();
-      if (data.success) {
-        showToast('User deleted successfully');
-        // Remove from selected users if present
-        setSelectedUsers(prev => prev.filter(id => id !== userId));
       } else {
-        // Rollback on failure
-        setUsers(prevUsers => [...prevUsers, originalUser]);
-        setTotalUsers(prev => prev + 1);
-        showToast(data.message || 'Failed to delete user', 'error');
+        // Offline mode: queue action for sync
+        console.log('📴 Offline mode: Queuing user deletion for sync...');
+        
+        await offlineIntegrationService.queueAdminUserAction({
+          action: 'delete',
+          userId: userId
+        });
+        
+        showToast('User deletion queued for sync when online');
       }
     } catch (err) {
-      // Rollback on network error
-      setUsers(prevUsers => [...prevUsers, originalUser]);
-      setTotalUsers(prev => prev + 1);
-      showToast('Network error occurred. Changes reverted.', 'error');
+      console.warn('⚠️ Delete failed, queuing for offline sync:', err);
+      
+      // Queue action for offline sync
+      await offlineIntegrationService.queueAdminUserAction({
+        action: 'delete',
+        userId: userId
+      });
+      
+      showToast('User deletion queued for sync when online');
     } finally {
       setPendingActions(prev => {
         const newMap = new Map(prev);

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
@@ -363,68 +364,135 @@ const Scholarships = () => {
   const fetchScholarships = async () => {
     setLoading(true);
     setError('');
-    try {
-      let url = '/api/scholarships/employer/scholarships';
-      if (statusFilter) {
-        url += `?status=${statusFilter}`;
-      }
+    
+    const isOnline = navigator.onLine;
+    let scholarshipsData = [];
 
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+    if (isOnline) {
+      try {
+        // Try online API calls first (preserving existing behavior)
+        console.log('🌐 Online mode: Fetching scholarships from API...');
+        
+        let url = '/api/scholarships/employer/scholarships';
+        if (statusFilter) {
+          url += `?status=${statusFilter}`;
         }
-      });
 
-      const data = await response.json();
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+          }
+        });
 
-      if (data.success) {
-        setScholarships(data.data.scholarships || []);
-      } else {
-        setError(data.message || 'Failed to fetch scholarships');
+        const data = await response.json();
+
+        if (data.success) {
+          scholarshipsData = (data.data && data.data.scholarships) ? data.data.scholarships : [];
+          
+          // Store scholarships data for offline use
+          await offlineIntegrationService.storeEmployerScholarships(scholarshipsData);
+          console.log('✅ Scholarships stored for offline use');
+        } else if (data.offline) {
+          // Handle offline response from service worker
+          console.log('📴 Service worker returned offline response, using empty array');
+          scholarshipsData = [];
+        } else {
+          throw new Error(data.message || 'Failed to fetch scholarships');
+        }
+      } catch (onlineError) {
+        console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+        
+        // Fall back to offline data if online fails
+        try {
+          scholarshipsData = await offlineIntegrationService.getEmployerScholarships() || [];
+        } catch (offlineError) {
+          console.warn('⚠️ Offline service also failed, using empty array:', offlineError);
+          scholarshipsData = [];
+        }
+        
+        // Don't throw error if we have any data (even empty array)
+        // Only throw if there's a serious network/system error
+        if (scholarshipsData.length === 0 && onlineError.message && !onlineError.message.includes('offline')) {
+          console.log('ℹ️ No scholarships available, showing empty state');
+        }
       }
+    } else {
+      // Offline mode: use offline services
+      console.log('📴 Offline mode: Using offline scholarships data...');
+      scholarshipsData = await offlineIntegrationService.getEmployerScholarships() || [];
+    }
+
+    try {
+      // Ensure scholarshipsData is always an array
+      const safeScholarshipsData = Array.isArray(scholarshipsData) ? scholarshipsData : [];
+      setScholarships(safeScholarshipsData);
     } catch (err) {
       console.error('Scholarships fetch error:', err);
       setError('Network error. Please try again.');
+      setScholarships([]); // Set empty array as fallback
     } finally {
       setLoading(false);
     }
   };
 
   const handleEdit = (scholarshipId) => {
-    navigate(`/employer/scholarships/edit/${scholarshipId}`);
+    navigate(`/employer/scholarships/${scholarshipId}/edit`);
   };
 
   const handleDelete = idx => {
     setShowDelete(idx);
   };
 
-  const confirmDelete = async () => {
-    try {
-      const scholarshipToDelete = scholarships[showDelete];
-      const response = await fetch(`/api/scholarships/${scholarshipToDelete._id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+  const confirmDelete = async (scholarshipId) => {
+    const isOnline = navigator.onLine;
+    
+    if (isOnline) {
+      try {
+        console.log('🌐 Online mode: Deleting scholarship...');
+        
+        const response = await fetch(`/api/scholarships/${scholarshipId}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+          }
+        });
+
+        if (response.ok) {
+          setSuccessMessage('Scholarship deleted successfully');
+          fetchScholarships();
+        } else {
+          throw new Error('Failed to delete scholarship');
         }
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setScholarships(scholarships.filter((_, idx) => idx !== showDelete));
-        setShowDelete(null);
-        setSuccessMessage('Scholarship deleted successfully');
-        setTimeout(() => setSuccessMessage(''), 3000);
-      } else {
-        setError(data.message || 'Failed to delete scholarship');
+      } catch (onlineError) {
+        console.warn('⚠️ Online delete failed, queuing for offline sync:', onlineError);
+        
+        // Queue action for offline sync
+        await offlineIntegrationService.queueEmployerScholarshipAction({
+          action: 'delete',
+          scholarshipId: scholarshipId
+        });
+        
+        setSuccessMessage('Scholarship deletion queued for sync when online');
       }
-    } catch (err) {
-      console.error('Scholarship delete error:', err);
-      setError('Network error. Please try again.');
+    } else {
+      // Offline mode: queue action for sync
+      console.log('📴 Offline mode: Queuing scholarship deletion for sync...');
+      
+      await offlineIntegrationService.queueEmployerScholarshipAction({
+        action: 'delete',
+        scholarshipId: scholarshipId
+      });
+      
+      setSuccessMessage('Scholarship deletion queued for sync when online');
     }
+    
+    setShowDelete(null);
+    setTimeout(() => setSuccessMessage(''), 3000);
   };
 
-  const cancelDelete = () => setShowDelete(null);
+  const cancelDelete = () => {
+    setShowDelete(null);
+  };
 
   const toggleScholarshipStatus = async (scholarshipId, currentStatus) => {
     try {
@@ -769,7 +837,7 @@ const Scholarships = () => {
                      <small style={{ color: '#6c757d', fontWeight: 'normal' }}>This action cannot be undone.</small>
                    </DeleteMessage>
                    <DeleteButtons>
-                     <ActionButton variant="danger" onClick={confirmDelete}>
+                     <ActionButton variant="danger" onClick={() => confirmDelete(scholarships[showDelete]._id)}>
                        Yes, Delete
                      </ActionButton>
                      <ActionButton variant="secondary" onClick={cancelDelete}>

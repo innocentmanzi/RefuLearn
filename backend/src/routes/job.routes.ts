@@ -1,4 +1,27 @@
 import express, { Request, Response } from 'express';
+
+// Use proper authenticated request type
+interface AuthenticatedRequest extends Request {
+  user?: {
+    _id: string;
+    role?: string;
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    [key: string]: any;
+  };
+}
+
+// Helper function to ensure user authentication
+const ensureAuth = (req: AuthenticatedRequest): { userId: string; user: NonNullable<AuthenticatedRequest['user']> } => {
+  if (!req.user?._id) {
+    throw new Error('User authentication required');
+  }
+  return {
+    userId: req.user._id.toString(),
+    user: req.user as NonNullable<AuthenticatedRequest['user']>
+  };
+};
 import { body, query } from 'express-validator';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { validate } from '../middleware/validation';
@@ -139,11 +162,11 @@ router.get('/:jobId', asyncHandler(async (req: Request, res: Response) => {
 // Apply for job (user, employer, admin) - with error handling
 router.post('/:jobId/apply', authenticateToken, authorizeRoles('refugee', 'user', 'employer', 'admin'), uploadAny, [
   body('expectedSalary').optional().isFloat({ min: 0 })
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { jobId } = req.params;
   const { expectedSalary } = req.body;
   const files = req.files as Express.Multer.File[];
-  const userId = req.user._id.toString();
+  const { userId } = ensureAuth(req);
 
   // Validate required files
   if (!files || files.length < 2) {
@@ -233,9 +256,9 @@ router.post('/:jobId/apply', authenticateToken, authorizeRoles('refugee', 'user'
 }), handleUploadError);
 
 // Withdraw application (user, employer, admin)
-router.delete('/:jobId/apply', authenticateToken, authorizeRoles('refugee', 'user', 'employer', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/:jobId/apply', authenticateToken, authorizeRoles('refugee', 'user', 'employer', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { jobId } = req.params;
-  const userId = req.user._id.toString();
+  const { userId } = ensureAuth(req);
 
   const job = await db.get(jobId) as JobDoc;
   if (!job) {
@@ -264,8 +287,8 @@ router.delete('/:jobId/apply', authenticateToken, authorizeRoles('refugee', 'use
 }));
 
 // DEBUG: Check applications data (employer and admin only)
-router.get('/debug/applications', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user._id.toString();
+router.get('/debug/applications', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   
   // Get all jobs
   const result = await db.find({ selector: { type: 'job' } });
@@ -350,9 +373,10 @@ router.post('/', authenticateToken, authorizeRoles('employer', 'admin'), [
   body('application_link').optional().trim(),
   body('is_active').isBoolean().withMessage('is_active must be a boolean'),
   body('remote_work').isBoolean().withMessage('remote_work must be a boolean'),
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   console.log('Received job creation request:', JSON.stringify(req.body, null, 2));
   
+  const { userId } = ensureAuth(req);
   const {
     title, company, description, location, job_type, required_skills,
     salary_range, application_deadline, application_link, is_active, remote_work
@@ -371,7 +395,7 @@ router.post('/', authenticateToken, authorizeRoles('employer', 'admin'), [
     application_link: application_link || '',
     is_active: is_active !== undefined ? is_active : true,
     remote_work: remote_work !== undefined ? remote_work : false,
-    employer: req.user._id.toString(),
+    employer: userId,
     createdAt: new Date(),
     updatedAt: new Date()
   };
@@ -398,7 +422,7 @@ router.put('/:jobId', authenticateToken, authorizeRoles('employer', 'admin'), [
   body('application_link').optional().trim(),
   body('is_active').optional().isBoolean(),
   body('remote_work').optional().isBoolean(),
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { jobId } = req.params;
   console.log('🔧 Updating job:', jobId);
   console.log('📋 Update data received:', JSON.stringify(req.body, null, 2));
@@ -410,7 +434,8 @@ router.put('/:jobId', authenticateToken, authorizeRoles('employer', 'admin'), [
     });
   }
   // Check if user is the employer who created the job or admin
-  if (job.employer !== req.user._id.toString() && req.user.role !== 'admin') {
+  const { userId, user } = ensureAuth(req);
+  if (job.employer !== userId && user.role !== 'admin') {
     return res.status(403).json({
       success: false,
       message: 'Not authorized to update this job'
@@ -445,14 +470,15 @@ router.put('/:jobId', authenticateToken, authorizeRoles('employer', 'admin'), [
 }));
 
 // Delete job (employer, admin)
-router.delete('/:jobId', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/:jobId', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { jobId } = req.params;
   const job = await db.get(jobId) as JobDoc;
   if (!job) {
     return res.status(404).json({ success: false, message: req.t('job.not_found') });
   }
   // Only allow employer who owns the job or admin
-  if (req.user.role !== 'admin' && job.employer !== req.user._id.toString()) {
+  const { userId, user } = ensureAuth(req);
+  if (user.role !== 'admin' && job.employer !== userId) {
     return res.status(403).json({ success: false, message: 'Not authorized to delete this job' });
   }
   const latest = await db.get(job._id);
@@ -465,14 +491,15 @@ router.delete('/:jobId', authenticateToken, authorizeRoles('employer', 'admin'),
 }));
 
 // Get employer's jobs
-router.get('/employer/jobs', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/employer/jobs', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   console.log('🔍 Employer jobs endpoint called');
-  console.log('👤 User:', { id: req.user._id, role: req.user.role });
   
   const { page = 1, limit = 10 } = req.query;
   let selector: any = { type: 'job' };
-  if (req.user.role !== 'admin') {
-    selector.employer = req.user._id.toString();
+  const { userId, user } = ensureAuth(req);
+  console.log('👤 User:', { id: userId, role: user.role });
+  if (user.role !== 'admin') {
+    selector.employer = userId;
   }
   
   console.log('🔍 Selector:', selector);
@@ -489,7 +516,7 @@ router.get('/employer/jobs', authenticateToken, authorizeRoles('employer', 'admi
       title: job.title,
       employer: job.employer,
       employerType: typeof job.employer,
-      matches: job.employer === req.user._id.toString()
+      matches: job.employer === userId
     });
   });
   
@@ -516,8 +543,8 @@ router.get('/employer/jobs', authenticateToken, authorizeRoles('employer', 'admi
 }));
 
 // UTILITY: Fix employer's own jobs (employer/admin)
-router.post('/fix-my-jobs', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: Request, res: Response) => {
-  const currentUserId = req.user._id.toString();
+router.post('/fix-my-jobs', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   
   // Find all jobs that might belong to this user but have undefined/missing employer field
   const allJobs = await db.find({ selector: { type: 'job' } });
@@ -540,14 +567,14 @@ router.post('/fix-my-jobs', authenticateToken, authorizeRoles('employer', 'admin
     try {
       // Fix: Get the latest job document and update it properly
       const job = await db.get(jobDoc._id) as JobDoc;
-      job.employer = currentUserId;
+      job.employer = userId;
       job.updatedAt = new Date();
       await db.put(job);
       results.push({ 
         jobId: job._id, 
         status: 'updated', 
         title: job.title,
-        assignedTo: currentUserId 
+        assignedTo: userId 
       });
     } catch (error) {
       results.push({ 
@@ -566,7 +593,8 @@ router.post('/fix-my-jobs', authenticateToken, authorizeRoles('employer', 'admin
 }));
 
 // DEBUG: Get all jobs with employer info (temporary diagnostic endpoint)
-router.get('/debug/all-jobs', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/debug/all-jobs', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId, user } = ensureAuth(req);
   const result = await db.find({ selector: { type: 'job' } });
   const jobsInfo = result.docs.map((job: any) => ({
     _id: job._id,
@@ -574,9 +602,9 @@ router.get('/debug/all-jobs', authenticateToken, authorizeRoles('employer', 'adm
     employer: job.employer,
     employerType: typeof job.employer,
     hasEmployer: job.hasOwnProperty('employer'),
-    currentUserId: req.user._id,
-    currentUserIdString: req.user._id.toString(),
-    matches: job.employer === req.user._id.toString()
+    currentUserId: userId,
+    currentUserIdString: userId,
+    matches: job.employer === userId
   }));
   
   res.json({
@@ -584,9 +612,9 @@ router.get('/debug/all-jobs', authenticateToken, authorizeRoles('employer', 'adm
     data: {
       totalJobs: result.docs.length,
       currentUser: {
-        id: req.user._id,
-        idString: req.user._id.toString(),
-        role: req.user.role
+        id: userId,
+        idString: userId,
+        role: user.role
       },
       jobs: jobsInfo
     }
@@ -594,7 +622,7 @@ router.get('/debug/all-jobs', authenticateToken, authorizeRoles('employer', 'adm
 }));
 
 // Get job applications (employer and admin only)
-router.get('/:jobId/applications', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/:jobId/applications', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { jobId } = req.params;
 
   const job = await db.get(jobId) as JobDoc;
@@ -617,7 +645,7 @@ router.get('/:jobId/applications', authenticateToken, authorizeRoles('employer',
 router.put('/:jobId/applications/:applicationId', authenticateToken, authorizeRoles('employer', 'admin'), [
   body('status').isIn(['pending', 'reviewed', 'shortlisted', 'rejected', 'hired', 'closed']).withMessage('Invalid status'),
   body('notes').optional().trim()
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { jobId, applicationId } = req.params;
   // Handle both JSON and form data
   const { status, notes } = req.body;
@@ -661,7 +689,7 @@ router.put('/:jobId/applications/:applicationId', authenticateToken, authorizeRo
 }));
 
 // Get job analytics (employer only)
-router.get('/:jobId/analytics', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/:jobId/analytics', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { jobId } = req.params;
 
   const job = await db.get(jobId) as JobDoc;
@@ -693,8 +721,9 @@ router.get('/:jobId/analytics', authenticateToken, authorizeRoles('employer', 'a
 }));
 
 // UTILITY: Fix jobs missing employer field (admin/employer)
-router.post('/admin/fix-employer-field', authenticateToken, authorizeRoles('admin', 'employer'), asyncHandler(async (req: Request, res: Response) => {
+router.post('/admin/fix-employer-field', authenticateToken, authorizeRoles('admin', 'employer'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { employerId, jobIds } = req.body;
+  const { userId, user } = ensureAuth(req);
   
   if (!employerId || !jobIds || !Array.isArray(jobIds)) {
     return res.status(400).json({
@@ -704,7 +733,7 @@ router.post('/admin/fix-employer-field', authenticateToken, authorizeRoles('admi
   }
 
   // If user is employer (not admin), they can only assign jobs to themselves
-  if (req.user.role === 'employer' && employerId !== req.user._id.toString()) {
+  if (user.role === 'employer' && employerId !== userId) {
     return res.status(403).json({
       success: false,
       message: 'Employers can only assign jobs to themselves'
@@ -740,8 +769,8 @@ router.post('/admin/fix-employer-field', authenticateToken, authorizeRoles('admi
 }));
 
 // UTILITY: Fix employer's own jobs (employer/admin)
-router.post('/fix-my-jobs', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: Request, res: Response) => {
-  const currentUserId = req.user._id.toString();
+router.post('/fix-my-jobs', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   
   // Find all jobs that might belong to this user but have undefined/missing employer field
   const allJobs = await db.find({ selector: { type: 'job' } });
@@ -764,14 +793,14 @@ router.post('/fix-my-jobs', authenticateToken, authorizeRoles('employer', 'admin
     try {
       // Fix: Get the latest job document and update it properly
       const job = await db.get(jobDoc._id) as JobDoc;
-      job.employer = currentUserId;
+      job.employer = userId;
       job.updatedAt = new Date();
       await db.put(job);
       results.push({ 
         jobId: job._id, 
         status: 'updated', 
         title: job.title,
-        assignedTo: currentUserId 
+        assignedTo: userId 
       });
     } catch (error) {
       results.push({ 

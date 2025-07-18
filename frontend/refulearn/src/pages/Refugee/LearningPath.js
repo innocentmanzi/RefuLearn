@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
 import ContentWrapper from '../../components/ContentWrapper';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
@@ -206,51 +207,121 @@ const LearningPath = () => {
       try {
         setLoading(true);
         const token = localStorage.getItem('token');
+        const isOnline = navigator.onLine;
 
-        // Fetch user's learning path
-        const pathResponse = await fetch('/api/courses/learning-path', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
+        let learningPathData = [];
+        let userStatsData = {};
+        let recommendationsData = [];
+
+        if (isOnline) {
+          try {
+            // Try online API calls first (preserving existing behavior)
+            console.log('🌐 Online mode: Fetching learning path data from API...');
+
+            // Fetch user's learning path
+            const pathResponse = await fetch('/api/courses/learning-path', {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (pathResponse.ok) {
+              const pathData = await pathResponse.json();
+              learningPathData = pathData.data.learningPath || [];
+              console.log('✅ Learning path data received:', learningPathData.length);
+              
+              // Store learning path for offline use
+              await offlineIntegrationService.storeLearningPath(learningPathData);
+            } else {
+              console.error('❌ Learning path API failed:', pathResponse.status);
+            }
+
+            // Fetch user stats
+            const statsResponse = await fetch('/api/users/profile', {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (statsResponse.ok) {
+              const statsData = await statsResponse.json();
+              userStatsData = statsData.data.user || {};
+              console.log('✅ User stats data received');
+              
+              // Store user stats for offline use
+              await offlineIntegrationService.storeUserStats(userStatsData);
+            } else {
+              console.error('❌ User stats API failed:', statsResponse.status);
+            }
+
+            // Fetch course recommendations
+            const recommendationsResponse = await fetch('/api/courses/recommendations', {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (recommendationsResponse.ok) {
+              const recommendationsData_temp = await recommendationsResponse.json();
+              recommendationsData = recommendationsData_temp.data.recommendations || [];
+              console.log('✅ Course recommendations data received:', recommendationsData.length);
+              
+              // Store course recommendations for offline use
+              await offlineIntegrationService.storeCourseRecommendations(recommendationsData);
+            } else {
+              console.error('❌ Course recommendations API failed:', recommendationsResponse.status);
+            }
+
+          } catch (onlineError) {
+            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+            // Fall back to offline data if online fails
+            const offlineData = await fetchOfflineData();
+            learningPathData = offlineData.learningPath;
+            userStatsData = offlineData.userStats;
+            recommendationsData = offlineData.recommendations;
           }
-        });
-
-        if (pathResponse.ok) {
-          const pathData = await pathResponse.json();
-          setLearningPath(pathData.data.learningPath || []);
+        } else {
+          // Offline mode: use offline services
+          console.log('📴 Offline mode: Using offline learning path data...');
+          const offlineData = await fetchOfflineData();
+          learningPathData = offlineData.learningPath;
+          userStatsData = offlineData.userStats;
+          recommendationsData = offlineData.recommendations;
         }
 
-        // Fetch user stats
-        const statsResponse = await fetch('/api/users/profile', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (statsResponse.ok) {
-          const statsData = await statsResponse.json();
-          setUserStats(statsData.data.user || {});
-        }
-
-        // Fetch course recommendations
-        const recommendationsResponse = await fetch('/api/courses/recommendations', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (recommendationsResponse.ok) {
-          const recommendationsData = await recommendationsResponse.json();
-          setRecommendations(recommendationsData.data.recommendations || []);
-        }
+        // Update state with fetched data
+        setLearningPath(learningPathData);
+        setUserStats(userStatsData);
+        setRecommendations(recommendationsData);
 
       } catch (err) {
-        console.error('Error fetching learning path:', err);
+        console.error('❌ Error fetching learning path:', err);
         setError('Failed to load learning path');
       } finally {
         setLoading(false);
+      }
+    };
+
+    // Helper function to fetch offline data
+    const fetchOfflineData = async () => {
+      try {
+        const learningPath = await offlineIntegrationService.getLearningPath();
+        const userStats = await offlineIntegrationService.getUserStats();
+        const recommendations = await offlineIntegrationService.getCourseRecommendations();
+        
+        console.log('📱 Offline learning path data loaded:', {
+          learningPath: learningPath.length,
+          userStats: !!userStats,
+          recommendations: recommendations.length
+        });
+        
+        return { learningPath, userStats, recommendations };
+      } catch (error) {
+        console.error('❌ Failed to load offline learning path data:', error);
+        return { learningPath: [], userStats: {}, recommendations: [] };
       }
     };
 
@@ -289,24 +360,69 @@ const LearningPath = () => {
   const handleEnrollCourse = async (courseId) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/courses/${courseId}/enroll`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const isOnline = navigator.onLine;
+      
+      let success = false;
 
-      if (response.ok) {
-        alert('Successfully enrolled in course!');
-        // Refresh learning path
-        window.location.reload();
+      if (isOnline) {
+        try {
+          // Try online enrollment first (preserving existing behavior)
+          console.log('🌐 Online mode: Enrolling in course...');
+          
+          const response = await fetch(`/api/courses/${courseId}/enroll`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.ok) {
+            success = true;
+            console.log('✅ Online course enrollment successful');
+            alert('Successfully enrolled in course!');
+            // Refresh learning path
+            window.location.reload();
+          } else {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Failed to enroll in course');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online enrollment failed, using offline:', onlineError);
+          // Fall back to offline enrollment
+          const result = await offlineIntegrationService.enrollInCourseOffline(courseId);
+          
+          if (result.success) {
+            success = true;
+            console.log('✅ Offline course enrollment successful');
+            alert('Successfully enrolled in course offline! Will sync when online.');
+            // Refresh learning path
+            window.location.reload();
+          } else {
+            throw new Error('Failed to enroll in course offline');
+          }
+        }
       } else {
-        const errorData = await response.json();
-        alert(errorData.message || 'Failed to enroll in course');
+        // Offline enrollment
+        console.log('📴 Offline mode: Enrolling in course offline...');
+        const result = await offlineIntegrationService.enrollInCourseOffline(courseId);
+        
+        if (result.success) {
+          success = true;
+          console.log('✅ Offline course enrollment successful');
+          alert('Successfully enrolled in course offline! Will sync when online.');
+          // Refresh learning path
+          window.location.reload();
+        } else {
+          throw new Error('Failed to enroll in course offline');
+        }
+      }
+
+      if (!success) {
+        alert('Failed to enroll in course');
       }
     } catch (error) {
-      console.error('Error enrolling in course:', error);
+      console.error('❌ Error enrolling in course:', error);
       alert('Failed to enroll in course');
     }
   };

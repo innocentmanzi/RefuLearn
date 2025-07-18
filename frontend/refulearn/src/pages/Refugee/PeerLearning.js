@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
@@ -175,29 +176,81 @@ const PeerLearning = () => {
       try {
         setLoading(true);
         const token = localStorage.getItem('token');
+        const isOnline = navigator.onLine;
         
-        // Fetch peer learning groups
-        const groupsResponse = await fetch('/api/peer-learning/groups', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
+        let groupsData = [];
+        let activitiesData = [];
 
-        if (groupsResponse.ok) {
-          const groupsData = await groupsResponse.json();
-          setGroups(groupsData.data.groups || []);
+        if (isOnline) {
+          try {
+            // Try online API calls first (preserving existing behavior)
+            console.log('🌐 Online mode: Fetching peer learning data from API...');
+            
+            // Fetch peer learning groups
+            const groupsResponse = await fetch('/api/peer-learning/groups', {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (groupsResponse.ok) {
+              const groupsApiData = await groupsResponse.json();
+              groupsData = groupsApiData.data.groups || [];
+              console.log('✅ Peer learning groups data received:', groupsData.length);
+              
+              // Store groups for offline use
+              await offlineIntegrationService.storePeerLearningGroups(groupsData);
+            } else {
+              console.error('❌ Peer learning groups API failed:', groupsResponse.status);
+            }
+
+            // Fetch user activities (if available)
+            // This would depend on your backend structure
+            activitiesData = [];
+
+          } catch (onlineError) {
+            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+            // Fall back to offline data if online fails
+            const offlineData = await fetchOfflineData();
+            groupsData = offlineData.groups;
+            activitiesData = offlineData.activities;
+          }
+        } else {
+          // Offline mode: use offline services
+          console.log('📴 Offline mode: Using offline data...');
+          const offlineData = await fetchOfflineData();
+          groupsData = offlineData.groups;
+          activitiesData = offlineData.activities;
         }
 
-        // Fetch user activities (if available)
-        // This would depend on your backend structure
-        setAssignedActivities([]);
+        // Update state with fetched data
+        setGroups(groupsData);
+        setAssignedActivities(activitiesData);
 
       } catch (err) {
         console.error('Error fetching data:', err);
         setError('Failed to load peer learning data');
       } finally {
         setLoading(false);
+      }
+    };
+
+    // Helper function to fetch offline data
+    const fetchOfflineData = async () => {
+      try {
+        const groups = await offlineIntegrationService.getPeerLearningGroups() || [];
+        const activities = await offlineIntegrationService.getPeerLearningActivities() || [];
+        
+        console.log('📱 Offline peer learning data loaded:', {
+          groups: groups.length,
+          activities: activities.length
+        });
+        
+        return { groups, activities };
+      } catch (error) {
+        console.error('❌ Failed to load offline peer learning data:', error);
+        return { groups: [], activities: [] };
       }
     };
 
@@ -215,30 +268,73 @@ const PeerLearning = () => {
   const handleJoinGroup = async (groupId) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/peer-learning/groups/${groupId}/join`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const isOnline = navigator.onLine;
+      let joinSuccess = false;
 
-      if (response.ok) {
-        alert('Successfully joined the group!');
-        // Refresh groups data
-        const groupsResponse = await fetch('/api/peer-learning/groups', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
+      if (isOnline) {
+        try {
+          // Try online group join first (preserving existing behavior)
+          console.log('🌐 Online group join for group:', groupId);
+          const response = await fetch(`/api/peer-learning/groups/${groupId}/join`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.ok) {
+            joinSuccess = true;
+            console.log('✅ Online group join successful');
+            alert('Successfully joined the group!');
+            
+            // Refresh groups data with offline support
+            try {
+              const groupsResponse = await fetch('/api/peer-learning/groups', {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+              if (groupsResponse.ok) {
+                const groupsData = await groupsResponse.json();
+                setGroups(groupsData.data.groups || []);
+                console.log('✅ Groups data refreshed after join');
+              } else {
+                console.warn('⚠️ Failed to refresh groups data, using cached data');
+              }
+            } catch (refreshError) {
+              console.warn('⚠️ Failed to refresh groups data:', refreshError);
+              // Continue with cached data, user already successfully joined
+            }
+          } else {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Failed to join group');
           }
-        });
-        if (groupsResponse.ok) {
-          const groupsData = await groupsResponse.json();
-          setGroups(groupsData.data.groups || []);
+        } catch (onlineError) {
+          console.warn('⚠️ Online group join failed, using offline:', onlineError);
+          // Fall back to offline join
+          await offlineIntegrationService.joinPeerLearningGroup(groupId);
+          joinSuccess = true;
+          console.log('✅ Offline group join successful');
+          alert('Successfully joined the group offline! Will sync when online.');
         }
       } else {
-        const errorData = await response.json();
-        alert(errorData.message || 'Failed to join group');
+        // Offline group join
+        console.log('📴 Offline group join for group:', groupId);
+        await offlineIntegrationService.joinPeerLearningGroup(groupId);
+        joinSuccess = true;
+        console.log('✅ Offline group join successful');
+        alert('Successfully joined the group offline! Will sync when online.');
+      }
+
+      if (joinSuccess && !isOnline) {
+        // Update local state to reflect the change in offline mode
+        setGroups(prevGroups => prevGroups.map(group => 
+          group._id === groupId 
+            ? { ...group, currentMembers: [...(group.currentMembers || []), localStorage.getItem('userId')] }
+            : group
+        ));
       }
     } catch (err) {
       console.error('Error joining group:', err);

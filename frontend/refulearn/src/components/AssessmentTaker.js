@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { Timer, CheckCircle, Cancel, ArrowBack } from '@mui/icons-material';
+import offlineIntegrationService from '../services/offlineIntegrationService';
 
 const Container = styled.div`
   max-width: 800px;
@@ -209,23 +210,68 @@ export default function AssessmentTaker({ assessmentId, onClose }) {
   const fetchAssessment = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/courses/assessments/${assessmentId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const isOnline = navigator.onLine;
+      let assessmentData = null;
 
-      if (response.ok) {
-        const data = await response.json();
-        setAssessment(data.data.assessment);
-        setTimeLeft(data.data.assessment.timeLimit * 60); // Convert minutes to seconds
+      if (isOnline) {
+        try {
+          // Try online assessment fetch first (preserving existing behavior)
+          console.log('🌐 Online mode: Fetching assessment...');
+          
+          const response = await fetch(`/api/courses/assessments/${assessmentId}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            assessmentData = data.data.assessment;
+            console.log('✅ Online assessment fetch successful');
+            
+            // Store assessment for offline use
+            await offlineIntegrationService.storeAssessment(assessmentId, assessmentData);
+            
+            setAssessment(assessmentData);
+            setTimeLeft(assessmentData.timeLimit * 60); // Convert minutes to seconds
+          } else {
+            throw new Error('Failed to fetch assessment online');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online assessment fetch failed, using offline:', onlineError);
+          // Fall back to offline assessment
+          assessmentData = await offlineIntegrationService.getAssessment(assessmentId);
+          
+          if (assessmentData) {
+            console.log('✅ Offline assessment fetch successful');
+            setAssessment(assessmentData);
+            setTimeLeft(assessmentData.timeLimit * 60);
+          } else {
+            throw new Error('Assessment not available offline');
+          }
+        }
       } else {
+        // Offline assessment fetch
+        console.log('📴 Offline mode: Fetching assessment offline...');
+        assessmentData = await offlineIntegrationService.getAssessment(assessmentId);
+        
+        if (assessmentData) {
+          console.log('✅ Offline assessment fetch successful');
+          setAssessment(assessmentData);
+          setTimeLeft(assessmentData.timeLimit * 60);
+        } else {
+          throw new Error('Assessment not available offline');
+        }
+      }
+
+      if (!assessmentData) {
         alert('Failed to load assessment');
       }
+
     } catch (err) {
-      console.error('Error fetching assessment:', err);
-      alert('Failed to load assessment');
+      console.error('❌ Error fetching assessment:', err);
+      alert('Failed to load assessment: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -242,30 +288,80 @@ export default function AssessmentTaker({ assessmentId, onClose }) {
     try {
       const timeSpent = Math.floor((Date.now() - startTime) / 1000);
       const answersArray = assessment.questions.map((_, index) => answers[index] || '');
-
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/courses/assessments/${assessmentId}/submit`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          answers: answersArray,
-          timeSpent
-        })
-      });
+      const isOnline = navigator.onLine;
+      let success = false;
 
-      if (response.ok) {
-        const data = await response.json();
-        setResults(data.data);
-        setIsSubmitted(true);
+      const submissionData = {
+        answers: answersArray,
+        timeSpent,
+        submittedAt: new Date().toISOString()
+      };
+
+      if (isOnline) {
+        try {
+          // Try online submission first (preserving existing behavior)
+          console.log('🌐 Online mode: Submitting assessment...');
+          
+          const response = await fetch(`/api/courses/assessments/${assessmentId}/submit`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(submissionData)
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            success = true;
+            console.log('✅ Online assessment submission successful');
+            
+            setResults(data.data);
+            setIsSubmitted(true);
+          } else {
+            throw new Error('Failed to submit assessment online');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online assessment submission failed, using offline:', onlineError);
+          // Fall back to offline submission
+          const result = await offlineIntegrationService.submitAssessmentOffline(assessmentId, submissionData);
+          
+          if (result.success) {
+            success = true;
+            console.log('✅ Offline assessment submission successful');
+            
+            setResults(result.data || { score: 0, totalQuestions: assessment.questions.length, message: 'Assessment submitted offline' });
+            setIsSubmitted(true);
+            alert('Assessment submitted offline! Results will be available when online.');
+          } else {
+            throw new Error('Failed to submit assessment offline');
+          }
+        }
       } else {
-        alert('Failed to submit assessment');
+        // Offline submission
+        console.log('📴 Offline mode: Submitting assessment offline...');
+        const result = await offlineIntegrationService.submitAssessmentOffline(assessmentId, submissionData);
+        
+        if (result.success) {
+          success = true;
+          console.log('✅ Offline assessment submission successful');
+          
+          setResults(result.data || { score: 0, totalQuestions: assessment.questions.length, message: 'Assessment submitted offline' });
+          setIsSubmitted(true);
+          alert('Assessment submitted offline! Results will be available when online.');
+        } else {
+          throw new Error('Failed to submit assessment offline');
+        }
       }
+
+      if (!success) {
+        throw new Error('Failed to submit assessment');
+      }
+
     } catch (err) {
-      console.error('Error submitting assessment:', err);
-      alert('Failed to submit assessment');
+      console.error('❌ Assessment submission error:', err);
+      alert('Failed to submit assessment: ' + err.message);
     }
   };
 

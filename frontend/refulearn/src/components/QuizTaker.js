@@ -10,6 +10,7 @@ import {
   Assignment,
   Send
 } from '@mui/icons-material';
+import offlineIntegrationService from '../services/offlineIntegrationService';
 
 const QuizContainer = styled.div`
   background: white;
@@ -445,34 +446,77 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
   const startQuiz = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/quiz-sessions/start', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
+      const isOnline = navigator.onLine;
+      let success = false;
+
+      if (isOnline) {
+        try {
+          // Try online quiz start first (preserving existing behavior)
+          console.log('🌐 Online mode: Starting quiz...');
+          
+          const response = await fetch('/api/quiz-sessions/start', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              quizId: quiz._id,
+              courseId: quiz.courseId,
+              moduleId: quiz.moduleId,
+              duration: parseInt(quiz.duration) || 30
+            })
+          });
+
+          if (response.ok) {
+            success = true;
+            console.log('✅ Online quiz start successful');
+          } else {
+            throw new Error('Failed to start quiz online');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online quiz start failed, using offline:', onlineError);
+          // Fall back to offline quiz start
+          const result = await offlineIntegrationService.startQuizOffline({
+            quizId: quiz._id,
+            courseId: quiz.courseId,
+            moduleId: quiz.moduleId,
+            duration: parseInt(quiz.duration) || 30
+          });
+          
+          if (result.success) {
+            success = true;
+            console.log('✅ Offline quiz start successful');
+          } else {
+            throw new Error('Failed to start quiz offline');
+          }
+        }
+      } else {
+        // Offline quiz start
+        console.log('📴 Offline mode: Starting quiz offline...');
+        const result = await offlineIntegrationService.startQuizOffline({
           quizId: quiz._id,
           courseId: quiz.courseId,
           moduleId: quiz.moduleId,
           duration: parseInt(quiz.duration) || 30
-        })
-      });
+        });
+        
+        if (result.success) {
+          success = true;
+          console.log('✅ Offline quiz start successful');
+        } else {
+          throw new Error('Failed to start quiz offline');
+        }
+      }
 
-      if (response.ok) {
-        const data = await response.json();
-        console.log('🚀 Quiz session started:', data.data);
-        
-        setSessionId(data.data.sessionId);
+      if (success) {
+        // Quiz started successfully (either online or offline)
         setQuizStarted(true);
-        setTimeRemaining(data.data.timeRemaining);
+        setTimeRemaining(parseInt(quiz.duration) * 60); // Convert to seconds
         setTimerActive(true);
-        
         console.log('🚀 Quiz started! Timer:', quiz?.duration, 'minutes');
       } else {
-        const errorData = await response.json();
-        console.error('❌ Failed to start quiz session:', errorData);
-        alert('Failed to start quiz: ' + (errorData.message || 'Unknown error'));
+        throw new Error('Failed to start quiz');
       }
     } catch (error) {
       console.error('❌ Error starting quiz session:', error);
@@ -1004,7 +1048,12 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
       <QuizHeader>
         <QuizHeaderTop>
           <QuizInfo>
-            <QuizTitle>Assessment {quizNumber}: {quiz.title || 'Untitled Assessment'}</QuizTitle>
+            <QuizTitle>
+              {quiz.type === 'quiz' ? 'Quiz' : 
+               quiz.type === 'assessment' ? 'Assessment' : 
+               quiz.type === 'exam' ? 'Exam' : 
+               'Quiz'} {quizNumber}: {quiz.title || `Untitled ${quiz.type === 'quiz' ? 'Quiz' : quiz.type === 'assessment' ? 'Assessment' : quiz.type === 'exam' ? 'Exam' : 'Quiz'}`}
+            </QuizTitle>
             {quiz.totalPoints && (
               <div style={{ 
                 color: '#6b7280', 
@@ -1202,8 +1251,10 @@ function AssignmentSubmissionForm({ assessmentId, courseId, moduleId, assessment
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const formData = new FormData();
+      const isOnline = navigator.onLine;
+      let success = false;
       
+      const formData = new FormData();
       formData.append('assessmentId', assessmentId);
       formData.append('courseId', courseId);
       formData.append('moduleId', moduleId);
@@ -1216,34 +1267,113 @@ function AssignmentSubmissionForm({ assessmentId, courseId, moduleId, assessment
         formData.append('submissionLink', submissionLink);
       }
 
-      const response = await fetch('/api/courses/submissions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: formData
-      });
-
-      if (response.ok) {
-        const responseData = await response.json();
-        setSubmitted(true);
-        alert('Assignment submitted successfully!');
-        
-        // Call the success callback with submission data
-        if (onSubmissionSuccess) {
-          onSubmissionSuccess({
-            submissionType,
-            submittedAt: new Date(),
-            status: 'Submitted',
-            ...responseData.data
+      if (isOnline) {
+        try {
+          // Try online submission first (preserving existing behavior)
+          console.log('🌐 Online mode: Submitting assignment...');
+          
+          const response = await fetch('/api/courses/submissions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`
+            },
+            body: formData
           });
+
+          if (response.ok) {
+            const responseData = await response.json();
+            success = true;
+            console.log('✅ Online assignment submission successful');
+            
+            setSubmitted(true);
+            alert('Assignment submitted successfully!');
+            
+            // Call the success callback with submission data
+            if (onSubmissionSuccess) {
+              onSubmissionSuccess({
+                submissionType,
+                submittedAt: new Date(),
+                status: 'Submitted',
+                ...responseData.data
+              });
+            }
+          } else {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Failed to submit assignment');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online submission failed, using offline:', onlineError);
+          // Fall back to offline submission
+          const result = await offlineIntegrationService.submitAssignmentOffline({
+            assessmentId,
+            courseId,
+            moduleId,
+            submissionType,
+            submissionText,
+            submissionLink: submissionType === 'link' ? submissionLink : null,
+            submissionFile: submissionType === 'file' ? selectedFile : null
+          });
+          
+          if (result.success) {
+            success = true;
+            console.log('✅ Offline assignment submission successful');
+            
+            setSubmitted(true);
+            alert('Assignment submitted offline! Will sync when online.');
+            
+            // Call the success callback with submission data
+            if (onSubmissionSuccess) {
+              onSubmissionSuccess({
+                submissionType,
+                submittedAt: new Date(),
+                status: 'Submitted Offline',
+                offline: true
+              });
+            }
+          } else {
+            throw new Error('Failed to submit assignment offline');
+          }
         }
       } else {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to submit assignment');
+        // Offline submission
+        console.log('📴 Offline mode: Submitting assignment offline...');
+        const result = await offlineIntegrationService.submitAssignmentOffline({
+          assessmentId,
+          courseId,
+          moduleId,
+          submissionType,
+          submissionText,
+          submissionLink: submissionType === 'link' ? submissionLink : null,
+          submissionFile: submissionType === 'file' ? selectedFile : null
+        });
+        
+        if (result.success) {
+          success = true;
+          console.log('✅ Offline assignment submission successful');
+          
+          setSubmitted(true);
+          alert('Assignment submitted offline! Will sync when online.');
+          
+          // Call the success callback with submission data
+          if (onSubmissionSuccess) {
+            onSubmissionSuccess({
+              submissionType,
+              submittedAt: new Date(),
+              status: 'Submitted Offline',
+              offline: true
+            });
+          }
+        } else {
+          throw new Error('Failed to submit assignment offline');
+        }
       }
+
+      if (!success) {
+        throw new Error('Failed to submit assignment');
+      }
+
     } catch (error) {
-      console.error('Submission error:', error);
+      console.error('❌ Assignment submission error:', error);
       alert('Failed to submit assignment: ' + error.message);
     } finally {
       setLoading(false);

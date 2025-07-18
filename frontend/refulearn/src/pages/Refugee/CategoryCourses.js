@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useParams, useNavigate } from 'react-router-dom';
 import ContentWrapper from '../../components/ContentWrapper';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem 2rem 2rem 2rem;
@@ -306,6 +307,24 @@ const CategoryCourses = () => {
     const fetchData = async () => {
       console.log('🔍 Starting to fetch data for category:', category);
       
+      // Helper function to fetch offline data - DEFINED FIRST TO AVOID INITIALIZATION ERROR
+      const fetchOfflineData = async () => {
+        try {
+          const courses = await offlineIntegrationService.getCategoryCourses(category) || [];
+          const enrolled = await offlineIntegrationService.getEnrolledCourses() || [];
+          
+          console.log('📱 Offline data loaded for category:', category, {
+            courses: courses.length,
+            enrolled: enrolled.length
+          });
+          
+          return { courses, enrolled };
+        } catch (error) {
+          console.error('❌ Failed to load offline data:', error);
+          return { courses: [], enrolled: [] };
+        }
+      };
+      
       if (!category) {
         console.error('❌ No category provided');
         setError('No category specified');
@@ -318,7 +337,9 @@ const CategoryCourses = () => {
         setError('');
         
         const token = localStorage.getItem('token');
+        const isOnline = navigator.onLine;
         console.log('🔑 Token exists:', !!token);
+        console.log('🌐 Network status:', isOnline ? 'online' : 'offline');
         
         if (!token) {
           console.error('❌ No authentication token found');
@@ -327,74 +348,261 @@ const CategoryCourses = () => {
           return;
         }
 
-        // Fetch courses from the category endpoint
-        const apiUrl = `/api/courses/category/${encodeURIComponent(category)}`;
-        console.log('🌐 Making API call to:', apiUrl);
-        console.log('🔍 Category parameter:', category);
-        console.log('🔍 Encoded category:', encodeURIComponent(category));
-        
-        const response = await fetch(apiUrl, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
+        let coursesData = [];
+        let enrolledData = [];
 
-        console.log('📊 Response status:', response.status);
-        console.log('📊 Response headers:', response.headers);
-        console.log('📊 Response ok:', response.ok);
-        
-        if (response.ok) {
-          const data = await response.json();
-          console.log('✅ Data received:', data);
-          console.log('✅ Success:', data.success);
-          console.log('✅ Courses array:', data.data?.courses);
-          console.log('✅ Courses length:', data.data?.courses?.length || 0);
-          
-          if (data.success && data.data?.courses) {
-            setCourses(data.data.courses);
+        if (isOnline) {
+          try {
+            // Try online API calls first (preserving existing behavior)
+            console.log('🌐 Online mode: Fetching category courses from API...');
             
-            // Fetch enrolled courses properly from the backend
-            try {
-              const enrolledResponse = await fetch('/api/courses/enrolled/courses', {
-                headers: {
-                  'Authorization': `Bearer ${token}`,
-                  'Content-Type': 'application/json'
-                }
-              });
-
-              if (enrolledResponse.ok) {
-                const enrolledData = await enrolledResponse.json();
-                console.log('✅ Enrolled courses data:', enrolledData);
-                // Set enrolled courses as array of course IDs
-                setEnrolledCourses(enrolledData.data.courses?.map(course => course._id) || []);
-              } else {
-                console.error('❌ Failed to fetch enrolled courses');
-                setEnrolledCourses([]);
+            // Fetch courses from the category endpoint
+            const apiUrl = `/api/courses/category/${encodeURIComponent(category)}`;
+            console.log('🌐 Making API call to:', apiUrl);
+            console.log('🔍 Category parameter:', category);
+            console.log('🔍 Encoded category:', encodeURIComponent(category));
+            
+            const response = await fetch(apiUrl, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
               }
-            } catch (enrolledError) {
-              console.error('❌ Error fetching enrolled courses:', enrolledError);
-              setEnrolledCourses([]);
-            }
+            });
+
+            console.log('📊 Response status:', response.status);
+            console.log('📊 Response headers:', response.headers);
+            console.log('📊 Response ok:', response.ok);
             
-            console.log('📚 Courses set:', data.data.courses.length);
-          } else {
-            console.error('❌ Invalid response structure:', data);
-            setError('Invalid response from server');
+            if (response.ok) {
+              const data = await response.json();
+              console.log('✅ Data received:', data);
+              console.log('✅ Success:', data.success);
+              console.log('✅ Courses array:', data.data?.courses);
+              console.log('✅ Courses length:', data.data?.courses?.length || 0);
+              console.log('✅ Debug info from API:', data.data?.debug);
+              
+              if (data.success && data.data?.courses) {
+                coursesData = data.data.courses;
+                
+                // Store category courses for offline use
+                await offlineIntegrationService.storeCategoryCourses(category, coursesData);
+                
+                // Fetch enrolled courses properly from the backend
+                try {
+                  const enrolledResponse = await fetch('/api/courses/enrolled/courses', {
+                    headers: {
+                      'Authorization': `Bearer ${token}`,
+                      'Content-Type': 'application/json'
+                    }
+                  });
+
+                  if (enrolledResponse.ok) {
+                    const enrolledApiData = await enrolledResponse.json();
+                    console.log('✅ Enrolled courses data:', enrolledApiData);
+                    // Set enrolled courses as array of course IDs
+                    enrolledData = enrolledApiData.data.courses?.map(course => course._id) || [];
+                    
+                    // Store enrolled courses for offline use
+                    await offlineIntegrationService.storeEnrolledCourses(enrolledData);
+                  } else {
+                    console.error('❌ Failed to fetch enrolled courses');
+                    enrolledData = [];
+                  }
+                } catch (enrolledError) {
+                  console.error('❌ Error fetching enrolled courses:', enrolledError);
+                  enrolledData = [];
+                }
+                
+                console.log('📚 Courses set:', coursesData.length);
+              } else if (data.success && data.data?.courses?.length === 0) {
+                // API succeeded but no courses found for this category
+                console.log('⚠️ No courses found for category:', category);
+                console.log('🔄 Trying to fetch all courses and filter client-side...');
+                
+                // Fallback: Get all courses and filter client-side
+                const allCoursesResponse = await fetch('/api/courses', {
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                  }
+                });
+                
+                if (allCoursesResponse.ok) {
+                  const allCoursesData = await allCoursesResponse.json();
+                  if (allCoursesData.success && allCoursesData.data?.courses) {
+                    // Filter courses by category client-side (case-insensitive)
+                    coursesData = allCoursesData.data.courses.filter(course => 
+                      course.category && course.category.toLowerCase() === category.toLowerCase()
+                    );
+                    console.log('📚 Client-side filtered courses:', coursesData.length);
+                    
+                    // Store for offline use
+                    await offlineIntegrationService.storeCategoryCourses(category, coursesData);
+                  }
+                }
+                
+                // Still get enrolled courses
+                try {
+                  const enrolledResponse = await fetch('/api/courses/enrolled/courses', {
+                    headers: {
+                      'Authorization': `Bearer ${token}`,
+                      'Content-Type': 'application/json'
+                    }
+                  });
+
+                  if (enrolledResponse.ok) {
+                    const enrolledApiData = await enrolledResponse.json();
+                    enrolledData = enrolledApiData.data.courses?.map(course => course._id) || [];
+                    await offlineIntegrationService.storeEnrolledCourses(enrolledData);
+                  }
+                } catch (enrolledError) {
+                  console.error('❌ Error fetching enrolled courses:', enrolledError);
+                  enrolledData = [];
+                }
+              } else {
+                console.error('❌ Invalid response structure:', data);
+                throw new Error('Invalid response from server');
+              }
+            } else {
+              console.error('❌ Response not ok:', response.status);
+              const errorText = await response.text();
+              console.error('❌ Error response:', errorText);
+              console.error('❌ Response headers:', Object.fromEntries(response.headers.entries()));
+              
+              // Parse error response to understand what went wrong
+              let errorMessage = 'Unknown error';
+              let isAuthError = false;
+              let isNotFoundError = false;
+              
+              if (response.status === 401) {
+                errorMessage = 'Authentication failed. Please log in again.';
+                isAuthError = true;
+              } else if (response.status === 403) {
+                errorMessage = 'Access denied. Insufficient permissions.';
+                isAuthError = true;
+              } else if (response.status === 404) {
+                errorMessage = 'Category endpoint not found.';
+                isNotFoundError = true;
+              } else {
+                try {
+                  const errorData = JSON.parse(errorText);
+                  console.error('❌ Parsed error data:', errorData);
+                  errorMessage = errorData.message || errorData.error || `HTTP ${response.status} error`;
+                } catch (parseError) {
+                  console.error('❌ Failed to parse error response:', parseError);
+                  errorMessage = `HTTP ${response.status}: ${response.statusText || 'Server error'}`;
+                }
+              }
+              
+              console.error('❌ Final error message:', errorMessage);
+              
+              // If it's an auth error, redirect to login
+              if (isAuthError) {
+                localStorage.removeItem('token');
+                window.location.href = '/login';
+                return;
+              }
+              
+              // Try fallback: get all courses and filter client-side
+              console.log('🔄 API failed, trying fallback: fetch all courses and filter...');
+              
+              try {
+                const allCoursesResponse = await fetch('/api/courses', {
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                  }
+                });
+                
+                if (allCoursesResponse.ok) {
+                  const allCoursesData = await allCoursesResponse.json();
+                  if (allCoursesData.success && allCoursesData.data?.courses) {
+                    console.log('📚 All courses from fallback API:', allCoursesData.data.courses.length);
+                    console.log('📋 All course categories:', allCoursesData.data.courses.map(c => `"${c.title}" -> "${c.category}"`));
+                    
+                    // Filter courses by category client-side (case-insensitive)
+                    coursesData = allCoursesData.data.courses.filter(course => {
+                      if (!course.category) return false;
+                      const matches = course.category.toLowerCase() === category.toLowerCase();
+                      console.log(`🔍 "${course.title}" category="${course.category}" matches="${matches}" published="${course.isPublished}"`);
+                      return matches;
+                    });
+                    console.log('📚 Fallback: Client-side filtered courses:', coursesData.length);
+                    
+                    // Store for offline use
+                    await offlineIntegrationService.storeCategoryCourses(category, coursesData);
+                    
+                    // Get enrolled courses
+                    try {
+                      const enrolledResponse = await fetch('/api/courses/enrolled/courses', {
+                        headers: {
+                          'Authorization': `Bearer ${token}`,
+                          'Content-Type': 'application/json'
+                        }
+                      });
+
+                      if (enrolledResponse.ok) {
+                        const enrolledApiData = await enrolledResponse.json();
+                        enrolledData = enrolledApiData.data.courses?.map(course => course._id) || [];
+                        await offlineIntegrationService.storeEnrolledCourses(enrolledData);
+                      }
+                    } catch (enrolledError) {
+                      console.error('❌ Error fetching enrolled courses:', enrolledError);
+                      enrolledData = [];
+                    }
+                  } else {
+                    throw new Error('Failed to fetch all courses as fallback');
+                  }
+                } else {
+                  throw new Error(`Fallback API also failed: HTTP ${allCoursesResponse.status}`);
+                }
+              } catch (fallbackError) {
+                console.error('❌ Fallback also failed:', fallbackError);
+                
+                // Set detailed error message for user
+                throw new Error(`${errorMessage}. Fallback also failed: ${fallbackError.message}`);
+              }
+            }
+
+          } catch (onlineError) {
+            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+            // Fall back to offline data if online fails
+            const offlineData = await fetchOfflineData();
+            coursesData = offlineData.courses;
+            enrolledData = offlineData.enrolled;
           }
         } else {
-          console.error('❌ Response not ok:', response.status);
-          const errorText = await response.text();
-          console.error('❌ Error response:', errorText);
-          
-          try {
-            const errorData = JSON.parse(errorText);
-            console.error('❌ Parsed error data:', errorData);
-            setError(errorData.message || 'Failed to fetch courses');
-          } catch (parseError) {
-            console.error('❌ Failed to parse error response:', parseError);
-            setError(`HTTP ${response.status}: Failed to fetch courses`);
-          }
+          // Offline mode: use offline services
+          console.log('📴 Offline mode: Using offline data...');
+          const offlineData = await fetchOfflineData();
+          coursesData = offlineData.courses;
+          enrolledData = offlineData.enrolled;
+        }
+
+        // Update state with fetched data
+        setCourses(coursesData);
+        setEnrolledCourses(enrolledData);
+        
+        // Debug final results
+        console.log('🎯 Final results for category:', category);
+        console.log('📚 Courses found:', coursesData.length);
+        console.log('📝 Enrolled courses:', enrolledData.length);
+        console.log('📋 Enrolled courses list:', enrolledData);
+        console.log('🔍 First course ID:', coursesData[0]?._id);
+        console.log('🔍 Is first course enrolled?:', enrolledData.includes(coursesData[0]?._id));
+        console.log('📋 Course details:', coursesData.map(c => ({
+          title: c.title,
+          category: c.category,
+          published: c.isPublished,
+          id: c._id
+        })));
+        
+        if (coursesData.length === 0) {
+          console.log('⚠️ No courses found! This could be because:');
+          console.log('   1. No courses exist in this category');
+          console.log('   2. Courses exist but are not published');
+          console.log('   3. Category name mismatch');
+          console.log('   4. Authentication/API error');
         }
 
       } catch (err) {
@@ -405,6 +613,8 @@ const CategoryCourses = () => {
       } finally {
         setLoading(false);
       }
+
+
     };
 
     if (category) {
@@ -423,21 +633,62 @@ const CategoryCourses = () => {
   const handleEnroll = async (course) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/courses/${course._id}/enroll`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const isOnline = navigator.onLine;
+      let enrollmentSuccess = false;
 
-      if (response.ok) {
+      if (isOnline) {
+        try {
+          // Try online enrollment first (preserving existing behavior)
+          console.log('🌐 Online enrollment for course:', course.title);
+          const response = await fetch(`/api/courses/${course._id}/enroll`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.ok) {
+            enrollmentSuccess = true;
+            console.log('✅ Online enrollment successful');
+          } else {
+            const errorData = await response.json();
+            console.error('❌ Online enrollment failed:', errorData.message);
+            
+            // If already enrolled, update the state to reflect this
+            if (errorData.message && errorData.message.includes('Already enrolled')) {
+              console.log('✅ User is already enrolled, updating state');
+              setEnrolledCourses(prev => {
+                if (!prev.includes(course._id)) {
+                  return [...prev, course._id];
+                }
+                return prev;
+              });
+              alert('You are already enrolled in this course!');
+              return; // Don't throw error, just return
+            }
+            
+            throw new Error(errorData.message || 'Failed to enroll in course');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online enrollment failed, trying offline:', onlineError);
+          // Fall back to offline enrollment
+          await offlineIntegrationService.enrollInCourse(course._id);
+          enrollmentSuccess = true;
+          console.log('✅ Offline enrollment successful');
+        }
+      } else {
+        // Offline enrollment
+        console.log('📴 Offline enrollment for course:', course.title);
+        await offlineIntegrationService.enrollInCourse(course._id);
+        enrollmentSuccess = true;
+        console.log('✅ Offline enrollment successful');
+      }
+
+      if (enrollmentSuccess) {
         // Add course ID to enrolled courses array
         setEnrolledCourses(prev => [...prev, course._id]);
         alert('Successfully enrolled in course!');
-      } else {
-        const errorData = await response.json();
-        alert(errorData.message || 'Failed to enroll in course');
       }
     } catch (error) {
       console.error('Error enrolling in course:', error);
@@ -509,9 +760,49 @@ const CategoryCourses = () => {
     return (
       <ContentWrapper>
         <Container>
-          <div style={{ textAlign: 'center', padding: '2rem', color: 'red' }}>
-            <div>{error}</div>
-            <button onClick={() => window.location.reload()}>Retry</button>
+          <BackButton onClick={() => navigate('/courses')}>
+            ← Back to Courses
+          </BackButton>
+          
+          <CategoryHeader>
+            <CategoryTitle>{category} Courses</CategoryTitle>
+            <CategoryDescription>
+              We're having trouble loading courses for this category right now.
+            </CategoryDescription>
+          </CategoryHeader>
+          
+          <div style={{ textAlign: 'center', padding: '2rem', background: '#fff3cd', borderRadius: '8px', border: '1px solid #ffeaa7' }}>
+            <div style={{ color: '#856404', marginBottom: '1rem' }}>⚠️ {error}</div>
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button 
+                onClick={() => window.location.reload()}
+                style={{
+                  background: '#007bff',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '0.75rem 1.5rem',
+                  cursor: 'pointer',
+                  fontWeight: '600'
+                }}
+              >
+                Retry
+              </button>
+              <button 
+                onClick={() => navigate('/courses')}
+                style={{
+                  background: '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '0.75rem 1.5rem',
+                  cursor: 'pointer',
+                  fontWeight: '600'
+                }}
+              >
+                Browse All Courses
+              </button>
+            </div>
           </div>
         </Container>
       </ContentWrapper>
@@ -571,9 +862,59 @@ const CategoryCourses = () => {
         </div>
 
         {filteredCourses.length === 0 ? (
-          <EmptyState>
-            <div>No courses found for this category.</div>
-          </EmptyState>
+          <div style={{ 
+            textAlign: 'center', 
+            padding: '3rem 2rem', 
+            background: '#f8f9fa', 
+            borderRadius: '12px',
+            border: '1px solid #e9ecef'
+          }}>
+            <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📚</div>
+            <h3 style={{ color: '#333', marginBottom: '1rem' }}>No courses found in {category}</h3>
+            <p style={{ color: '#666', marginBottom: '2rem', lineHeight: '1.6' }}>
+              {courses.length === 0 
+                ? `We don't have any courses in the ${category} category yet. Check back later or explore other categories!`
+                : `No courses match your current filters. Try adjusting your search terms or filters.`
+              }
+            </p>
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => navigate('/courses')}
+                style={{
+                  background: '#007bff',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '0.75rem 1.5rem',
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                  fontSize: '1rem'
+                }}
+              >
+                Browse All Courses
+              </button>
+              {courses.length > 0 && (
+                <button
+                  onClick={() => {
+                    setActiveFilter('all');
+                    setSearchTerm('');
+                  }}
+                  style={{
+                    background: '#6c757d',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '0.75rem 1.5rem',
+                    cursor: 'pointer',
+                    fontWeight: '600',
+                    fontSize: '1rem'
+                  }}
+                >
+                  Clear Filters
+                </button>
+              )}
+            </div>
+          </div>
         ) : (
           <CourseGrid>
             {filteredCourses.map((course) => (

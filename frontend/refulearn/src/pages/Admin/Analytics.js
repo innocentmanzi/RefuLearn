@@ -12,6 +12,7 @@ import {
   Legend,
   ArcElement
 } from 'chart.js';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 ChartJS.register(
   CategoryScale,
@@ -143,29 +144,64 @@ const Analytics = () => {
     const fetchAnalyticsData = async () => {
       setLoading(true);
       setError('');
-      try {
-        // Fetch analytics data
-        const analyticsRes = await fetch('/api/admin/analytics', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-          }
-        });
-        const analyticsResult = await analyticsRes.json();
+      
+      const isOnline = navigator.onLine;
+      let analyticsData = null;
+      let statisticsData = null;
 
-        // Fetch statistics data
-        const statisticsRes = await fetch('/api/admin/statistics', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-          }
-        });
-        const statisticsResult = await statisticsRes.json();
+      if (isOnline) {
+        try {
+          // Try online API calls first (preserving existing behavior)
+          console.log('🌐 Online mode: Fetching admin analytics from API...');
+          
+          // Fetch analytics data
+          const analyticsRes = await fetch('/api/admin/analytics', {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+            }
+          });
+          const analyticsResult = await analyticsRes.json();
 
-        if (analyticsResult.success && statisticsResult.success) {
-          setAnalyticsData(analyticsResult.data);
-          setStatisticsData(statisticsResult.data);
-        } else {
-          setError('Failed to fetch analytics data');
+          // Fetch statistics data
+          const statisticsRes = await fetch('/api/admin/statistics', {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+            }
+          });
+          const statisticsResult = await statisticsRes.json();
+
+          if (analyticsResult.success && statisticsResult.success) {
+            analyticsData = analyticsResult.data;
+            statisticsData = statisticsResult.data;
+            
+            // Store data for offline use
+            await offlineIntegrationService.storeAdminAnalytics(analyticsData);
+            await offlineIntegrationService.storeAdminStatistics(statisticsData);
+            console.log('✅ Admin analytics data stored for offline use');
+          } else {
+            throw new Error('Failed to fetch analytics data');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+          
+          // Fall back to offline data if online fails
+          analyticsData = await offlineIntegrationService.getAdminAnalytics();
+          statisticsData = await offlineIntegrationService.getAdminStatistics();
+          
+          if (!analyticsData || !statisticsData) {
+            throw onlineError;
+          }
         }
+      } else {
+        // Offline mode: use offline services
+        console.log('📴 Offline mode: Using offline admin analytics data...');
+        analyticsData = await offlineIntegrationService.getAdminAnalytics();
+        statisticsData = await offlineIntegrationService.getAdminStatistics();
+      }
+
+      try {
+        setAnalyticsData(analyticsData);
+        setStatisticsData(statisticsData);
       } catch (err) {
         setError('Network error occurred');
       } finally {

@@ -18,6 +18,7 @@ import {
   AudioFile,
   AttachFile
 } from '@mui/icons-material';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 // Import all the styled components from instructor CourseOverview for consistency
 const Container = styled.div`
@@ -40,6 +41,18 @@ const BackButton = styled.button`
   display: flex;
   align-items: center;
   margin-bottom: 1rem;
+  position: relative;
+  z-index: 10;
+  pointer-events: auto;
+  
+  &:hover {
+    color: #0056b3;
+    text-decoration: underline;
+  }
+  
+  &:active {
+    transform: translateY(1px);
+  }
 `;
 
 const CourseHeader = styled.div`
@@ -534,7 +547,7 @@ const StudentCourseOverview = () => {
   const [completedItems, setCompletedItems] = useState(new Set());
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [showGradesModal, setShowGradesModal] = useState(false);
-  const [courseCompleted, setCourseCompleted] = useState(false);
+  const [courseCompleted, setCourseCompleted] = useState(false); // Always start as false - only set true when genuinely completed
   const [isMarkingComplete, setIsMarkingComplete] = useState(false); // Prevent rapid clicking
 
   // Debounce utility function
@@ -546,9 +559,31 @@ const StudentCourseOverview = () => {
     };
   };
 
-  // Ensure all modules start collapsed when component mounts or course changes
+  // Ensure all modules start collapsed and clear fake completion data when component mounts or course changes
   useEffect(() => {
     setExpandedModules(new Set());
+    
+    // Clear potentially fake completion data and reset to genuine state
+    setCourseCompleted(false);
+    setProgress(0);
+    setCompletedItems(new Set());
+    
+    // Clean up any localStorage data that might contain fake completions
+    if (courseId) {
+      console.log('🧹 Clearing any fake completion data for course:', courseId);
+      
+      // Check what's currently in localStorage
+      const existingCompletions = localStorage.getItem(`course_completions_${courseId}`);
+      if (existingCompletions) {
+        console.log('⚠️ Found existing completion data (potentially fake):', existingCompletions);
+        // Clear it to start fresh with real progress
+        localStorage.removeItem(`course_completions_${courseId}`);
+        console.log('🗑️ Cleared existing completion data - will rebuild from real user interactions');
+      }
+      
+      // This ensures we start fresh and only track real user progress
+      console.log('✨ Course state reset - only real progress will be tracked from now on');
+    }
   }, [courseId]);
 
   // Test backend connectivity
@@ -594,126 +629,258 @@ const StudentCourseOverview = () => {
       try {
         setLoading(true);
         const token = localStorage.getItem('token');
+        const isOnline = navigator.onLine;
 
-        // Fetch course details with modules
-        const courseResponse = await fetch(`/api/courses/${courseId}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
+        let courseData = null;
+        let enrollmentStatus = false;
+        let progressData = null;
 
-        if (courseResponse.ok) {
-          const courseData = await courseResponse.json();
-          console.log('🎓 Course data received from backend:', courseData);
-          console.log('📚 Course object:', courseData.data.course);
-          console.log('📖 Course overview:', courseData.data.course.overview);
-          console.log('🎯 Learning outcomes:', courseData.data.course.learningOutcomes);
-          console.log('📋 Modules:', courseData.data.course.modules);
-          console.log('📊 Module count:', courseData.data.course.modules?.length || 0);
-          
-          if (courseData.data.course.modules && courseData.data.course.modules.length > 0) {
-            console.log('📋 Module details:');
-            courseData.data.course.modules.forEach((module, index) => {
-              console.log(`  Module ${index + 1}: ${module.title}`);
-              console.log(`    Description: ${module.description || 'None'}`);
-              console.log(`    Content: ${module.content ? 'Yes' : 'No'}`);
-              console.log(`    Video: ${module.videoUrl ? 'Yes' : 'No'}`);
-              console.log(`    Assessments: ${module.assessments?.length || 0}`);
-              console.log(`    Quizzes: ${module.quizzes?.length || 0}`);
-              console.log(`    Discussions: ${module.discussions?.length || 0}`);
-              console.log(`    Resources: ${module.resources?.length || 0}`);
+        // Helper function to fetch offline data
+        const fetchOfflineData = async () => {
+          try {
+            const course = await offlineIntegrationService.getStudentCourseOverview(courseId);
+            const enrollment = await offlineIntegrationService.getEnrollmentStatus(courseId);
+            const progress = await offlineIntegrationService.getCourseProgress(courseId);
+            
+            console.log('📱 Offline student course overview data loaded:', {
+              course: !!course,
+              enrollment: enrollment,
+              progress: !!progress
             });
-          } else {
-            console.log('❌ No modules found in course data');
+            
+            return { course, enrollment, progress };
+          } catch (error) {
+            console.error('❌ Failed to load offline student course overview data:', error);
+            return { course: null, enrollment: false, progress: null };
           }
+        };
+
+        if (isOnline) {
+          try {
+            // Try online API calls first (preserving existing behavior)
+            console.log('🌐 Online mode: Fetching course data from API...');
+
+            // Fetch course details with modules
+            const courseResponse = await fetch(`/api/courses/${courseId}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (courseResponse.ok) {
+              const courseApiData = await courseResponse.json();
+              console.log('🔍 RAW COURSE API RESPONSE:', JSON.stringify(courseApiData, null, 2));
+              
+              // Backend returns: { success: true, data: { course: {...} } }
+              if (courseApiData.data && courseApiData.data.course) {
+                courseData = courseApiData.data.course;
+              } else {
+                console.error('❌ Course not found in expected location. Response structure:', Object.keys(courseApiData));
+                throw new Error('Invalid course data structure');
+              }
+              console.log('✅ Course data received from backend:', courseData);
+              console.log('📚 Course object:', courseData);
+              console.log('📖 Course overview:', courseData.overview);
+              console.log('🎯 Learning outcomes:', courseData.learningOutcomes);
+              console.log('📋 Modules:', courseData.modules);
+              console.log('📊 Module count:', courseData.modules?.length || 0);
+              
+              if (courseData.modules && courseData.modules.length > 0) {
+                console.log('📋 Module details:');
+                courseData.modules.forEach((module, index) => {
+                  console.log(`  Module ${index + 1}: ${module.title}`);
+                  console.log(`    Description: ${module.description || 'None'}`);
+                  console.log(`    Content: ${module.content ? 'Yes' : 'No'}`);
+                  console.log(`    Video: ${module.videoUrl ? 'Yes' : 'No'}`);
+                  console.log(`    Assessments: ${module.assessments?.length || 0}`);
+                  console.log(`    Quizzes: ${module.quizzes?.length || 0}`);
+                  console.log(`    Discussions: ${module.discussions?.length || 0}`);
+                  console.log(`    Resources: ${module.resources?.length || 0}`);
+                });
+              } else {
+                console.log('❌ No modules found in course data');
+              }
+              
+              // Store course data for offline use
+              await offlineIntegrationService.storeStudentCourseOverview(courseId, courseData);
+              
+              // Automatically expand ALL modules for better UX (like instructor view)
+              if (courseData.modules && courseData.modules.length > 0) {
+                const allModuleIds = courseData.modules.map(module => module._id).filter(id => id);
+                setExpandedModules(new Set(allModuleIds));
+                console.log('📖 Auto-expanded all modules:', allModuleIds);
+              }
+            } else {
+              console.error('❌ Course API failed with status:', courseResponse.status);
+              const errorData = await courseResponse.text();
+              console.error('❌ Error response:', errorData);
+              throw new Error(`Failed to fetch course details: ${courseResponse.status}`);
+            }
+          } catch (onlineError) {
+            console.warn('⚠️ Online course data fetch failed, falling back to offline data:', onlineError);
+            // Fall back to offline data if online fails
+            const offlineData = await fetchOfflineData();
+            courseData = offlineData.course;
+            enrollmentStatus = offlineData.enrollment;
+            progressData = offlineData.progress;
+          }
+        } else {
+          // Offline mode: use offline services
+          console.log('📴 Offline mode: Using offline course data...');
+          const offlineData = await fetchOfflineData();
+          courseData = offlineData.course;
+          enrollmentStatus = offlineData.enrollment;
+          progressData = offlineData.progress;
+        }
+
+        // Set course data
+        if (courseData) {
+          setCourse(courseData);
           
-          setCourse(courseData.data.course);
-          
-          // Automatically expand ALL modules for better UX (like instructor view)
-          if (courseData.data.course.modules && courseData.data.course.modules.length > 0) {
-            const allModuleIds = courseData.data.course.modules.map(module => module._id).filter(id => id);
+          // Automatically expand ALL modules for better UX
+          if (courseData.modules && courseData.modules.length > 0) {
+            const allModuleIds = courseData.modules.map(module => module._id).filter(id => id);
             setExpandedModules(new Set(allModuleIds));
             console.log('📖 Auto-expanded all modules:', allModuleIds);
           }
         } else {
-          throw new Error('Failed to fetch course details');
+          throw new Error('Course data not available offline');
         }
 
-        // Check enrollment status
-        try {
-          const enrollmentResponse = await fetch(`/api/courses/enrolled/courses/${courseId}`, {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
-          });
-
-          if (enrollmentResponse.ok) {
-            setIsEnrolled(true);
-            
-            // Fetch progress if enrolled (add cache-busting to prevent 304)
-            const progressResponse = await fetch(`/api/courses/${courseId}/progress?t=${Date.now()}`, {
+        // Handle enrollment and progress for online mode
+        if (isOnline && courseData) {
+          try {
+            // Check enrollment status
+            const enrollmentResponse = await fetch(`/api/courses/enrolled/courses/${courseId}`, {
               headers: {
                 'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-                'Cache-Control': 'no-cache'
+                'Content-Type': 'application/json'
               }
             });
 
-            if (progressResponse.ok) {
-              const progressData = await progressResponse.json();
-              console.log('🔄 Progress response from backend:', progressData);
-              setProgress(Math.min(progressData.data.progressPercentage || 0, 100));
+            if (enrollmentResponse.ok) {
+              enrollmentStatus = true;
+              console.log('✅ User is enrolled in course:', courseId);
               
-              // Set completed items from progress data - ALWAYS use backend as source of truth
-              const completedSet = new Set();
-              if (progressData.data.allCompletedItems) {
-                progressData.data.allCompletedItems.forEach(item => completedSet.add(item));
-              }
+              // Store enrollment status for offline use
+              await offlineIntegrationService.storeEnrollmentStatus(courseId, true);
               
-              // Also check individual module progress
-              if (progressData.data.modulesProgress) {
-                Object.values(progressData.data.modulesProgress).forEach(moduleProgress => {
-                  if (moduleProgress.completedItems) {
-                    moduleProgress.completedItems.forEach(item => completedSet.add(item));
-                  }
-                });
-              }
-              
-              // Always update localStorage with backend data
-              const completionsArray = Array.from(completedSet);
-              localStorage.setItem(`course_completions_${courseId}`, JSON.stringify(completionsArray));
-              
-              setCompletedItems(completedSet);
-              
-              // Check if course is completed (must be exactly 100%)
-              if (Math.round(progressData.data.progressPercentage) >= 100) {
-                setCourseCompleted(true);
+              // Fetch progress if enrolled (add cache-busting to prevent 304)
+              const progressResponse = await fetch(`/api/courses/${courseId}/progress?t=${Date.now()}`, {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                  'Cache-Control': 'no-cache'
+                }
+              });
+
+              if (progressResponse.ok) {
+                const progressApiData = await progressResponse.json();
+                progressData = progressApiData.data;
+                console.log('🔄 Progress response from backend:', progressData);
+                
+                // Store progress data for offline use
+                await offlineIntegrationService.storeCourseProgress(courseId, progressData);
+                
+                setProgress(Math.min(progressData.progressPercentage || 0, 100));
+                
+                // Set completed items from progress data - ALWAYS use backend as source of truth
+                const completedSet = new Set();
+                if (progressData.allCompletedItems) {
+                  progressData.allCompletedItems.forEach(item => completedSet.add(item));
+                }
+                
+                // Also check individual module progress
+                if (progressData.modulesProgress) {
+                  Object.values(progressData.modulesProgress).forEach(moduleProgress => {
+                    if (moduleProgress.completedItems) {
+                      moduleProgress.completedItems.forEach(item => completedSet.add(item));
+                    }
+                  });
+                }
+                
+                // Always update localStorage with backend data
+                const completionsArray = Array.from(completedSet);
+                localStorage.setItem(`course_completions_${courseId}`, JSON.stringify(completionsArray));
+                
+                setCompletedItems(completedSet);
+                
+                // REMOVED: Don't auto-set completion based on potentially fake API data
+                // Course completion will be determined by actual user interaction and real progress tracking
+                console.log('ℹ️ Progress data received but not auto-setting completion (preventing fake completions)');
               }
             }
+                      } catch (enrollmentError) {
+              console.log('⚠️ Enrollment API failed:', enrollmentError.message);
+              // If user can access course overview and see modules, assume they're enrolled
+              if (courseData && courseData.modules && courseData.modules.length > 0) {
+                enrollmentStatus = true;
+                console.log('✅ User assumed enrolled based on course access');
+              } else {
+                enrollmentStatus = false;
+              }
+            }
+        }
+
+        // Set enrollment status and progress from fetched data
+        // If user can access course overview with modules, they should be considered enrolled
+        const finalEnrollmentStatus = enrollmentStatus || (courseData && courseData.modules && courseData.modules.length > 0);
+        setIsEnrolled(finalEnrollmentStatus);
+        console.log('📊 Final enrollment status:', finalEnrollmentStatus);
+        
+        if (progressData) {
+          setProgress(Math.min(progressData.progressPercentage || 0, 100));
+          
+          // Set completed items from progress data
+          const completedSet = new Set();
+          if (progressData.allCompletedItems) {
+            progressData.allCompletedItems.forEach(item => completedSet.add(item));
           }
-        } catch (enrollmentError) {
-          // User not enrolled, continue with course display
-          setIsEnrolled(false);
+          
+          // Also check individual module progress
+          if (progressData.modulesProgress) {
+            Object.values(progressData.modulesProgress).forEach(moduleProgress => {
+              if (moduleProgress.completedItems) {
+                moduleProgress.completedItems.forEach(item => completedSet.add(item));
+              }
+            });
+          }
+          
+          // Always update localStorage with backend data
+          const completionsArray = Array.from(completedSet);
+          localStorage.setItem(`course_completions_${courseId}`, JSON.stringify(completionsArray));
+          
+          setCompletedItems(completedSet);
+          
+          // REMOVED: Don't auto-set completion based on potentially fake offline data
+          // Course completion will only be set when user genuinely completes all items
+          console.log('ℹ️ Offline progress loaded but not auto-setting completion (preventing fake completions)');
         }
 
       } catch (err) {
-        console.error('Error fetching course data:', err);
-        setError('Failed to load course details');
+        console.error('❌ CRITICAL ERROR in fetchCourseData:', err);
+        console.error('❌ Error stack:', err.stack);
+        setError(`Failed to load course details: ${err.message}`);
+        
+        // Try to set some fallback state to prevent blank page
+        setCourse(null);
+        setIsEnrolled(false);
+        setProgress(0);
       } finally {
         setLoading(false);
       }
     };
 
-  // Call fetchCourseData when courseId changes
+  // Call fetchCourseData when courseId changes - but ONLY when courseId changes
   useEffect(() => {
-    if (courseId) {
+    if (courseId && courseId !== '') {
+      console.log('🏠 USEEFFECT TRIGGERED for courseId:', courseId);
       testBackend(); // Test backend first
       testProgressAPI(); // Test progress API
       fetchCourseData();
     }
-  }, [courseId]);
+  }, [courseId]); // ONLY depend on courseId to prevent infinite loops
 
   // Refresh data when user returns to the page (for navigation back from module content)
   useEffect(() => {
@@ -919,13 +1086,23 @@ const StudentCourseOverview = () => {
     }
   }, [completedItems, courseId]);
 
-  // Recalculate progress when completedItems or course data changes
+  // Recalculate progress when completedItems or course data changes - REAL PROGRESS ONLY
   useEffect(() => {
-    if (course && course.modules && completedItems.size > 0) {
+    if (course && course.modules) {
       const calculatedProgress = recalculateProgress();
       if (Math.abs(calculatedProgress - progress) > 1) { // Only update if significant change
         setProgress(calculatedProgress);
-        console.log('🔄 Progress recalculated from completion data:', Math.round(calculatedProgress), '%');
+        console.log('🔄 Progress recalculated from real completion data:', Math.round(calculatedProgress), '%');
+      }
+      
+      // Only set course as completed if it's genuinely 100% AND verified by real user interaction
+      const realCompletion = isCourseCompleted();
+      if (realCompletion && Math.round(calculatedProgress) >= 100) {
+        console.log('🎉 Course genuinely completed through real user interaction!');
+        setCourseCompleted(true);
+      } else if (courseCompleted && (!realCompletion || Math.round(calculatedProgress) < 100)) {
+        console.log('🚫 Removing false completion - course not actually finished');
+        setCourseCompleted(false);
       }
     }
   }, [completedItems, course]);
@@ -1132,10 +1309,23 @@ const StudentCourseOverview = () => {
     return totalItems > 0 && completedCount === totalItems;
   };
 
-  // Check if course is completed
+  // Check if course is completed - STRICT VALIDATION
   const isCourseCompleted = () => {
-    if (!course?.modules || course.modules.length === 0) return false;
-    return course.modules.every(module => isModuleCompleted(module));
+    if (!course?.modules || course.modules.length === 0) {
+      console.log('🚫 Course completion check: No modules found');
+      return false;
+    }
+    
+    const completionResults = course.modules.map(module => {
+      const isCompleted = isModuleCompleted(module);
+      console.log(`📋 Module "${module.title}": ${isCompleted ? '✅ Complete' : '❌ Incomplete'}`);
+      return isCompleted;
+    });
+    
+    const allCompleted = completionResults.every(result => result === true);
+    console.log(`🎯 Course completion check: ${allCompleted ? 'COMPLETED' : 'NOT COMPLETED'} (${completionResults.filter(r => r).length}/${completionResults.length} modules)`);
+    
+    return allCompleted;
   };
 
   // Get next incomplete module
@@ -1234,8 +1424,22 @@ const StudentCourseOverview = () => {
   // Generate certificate when course is completed
   const generateCertificate = async () => {
     try {
+      console.log('📜 === CERTIFICATE GENERATION DEBUG ===');
+      console.log('📜 Generating certificate for:', {
+        courseId: courseId,
+        courseTitle: course.title
+      });
+      
       const token = localStorage.getItem('token');
-      await fetch(`/api/certificates/generate`, {
+      console.log('🔑 Token for certificate generation:', !!token);
+      
+      if (!token) {
+        console.error('❌ No token available for certificate generation');
+        return;
+      }
+      
+      console.log('📡 Making certificate generation API call...');
+      const response = await fetch(`/api/certificates/generate`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -1246,8 +1450,25 @@ const StudentCourseOverview = () => {
           courseTitle: course.title
         })
       });
+
+      console.log('📡 Certificate generation response status:', response.status);
+      const result = await response.json();
+      console.log('📡 Certificate generation response body:', result);
+      
+      if (response.ok && result.success) {
+        console.log('✅ Certificate generated successfully:', result);
+      } else {
+        console.warn('⚠️ Certificate generation failed or already exists:', result);
+        // Even if it says certificate already exists, that's fine
+        if (result.message && result.message.includes('already exists')) {
+          console.log('ℹ️ Certificate already exists for this course - that\'s OK');
+        } else {
+          console.error('❌ Unexpected certificate generation error:', result);
+        }
+      }
     } catch (err) {
-      console.error('Error generating certificate:', err);
+      console.error('❌ Exception during certificate generation:', err);
+      console.error('❌ Error details:', err.message, err.stack);
     }
   };
 
@@ -1273,36 +1494,23 @@ const StudentCourseOverview = () => {
     
     switch (contentType) {
       case 'description':
-        navigationUrl = `/courses/${courseId}/modules/${module._id}/description?return=${encodeURIComponent(returnUrl)}`;
-        console.log('📍 Navigating to MODULE DESCRIPTION:', navigationUrl);
-        console.log('📍 Full URL will be:', window.location.origin + navigationUrl);
-        
-        // Use window.location.href for reliable navigation
-        window.location.href = navigationUrl;
-        break;
       case 'content':
-        navigationUrl = `/courses/${courseId}/modules/${module._id}/content?return=${encodeURIComponent(returnUrl)}`;
+      case 'video':
+        navigationUrl = `/courses/${courseId}/module/${module._id}?return=${encodeURIComponent(returnUrl)}`;
         console.log('📍 Navigating to MODULE CONTENT:', navigationUrl);
         console.log('📍 Full URL will be:', window.location.origin + navigationUrl);
         
         // Use window.location.href for reliable navigation
         window.location.href = navigationUrl;
         break;
-      case 'video':
-        navigationUrl = `/courses/${courseId}/modules/${module._id}/video?return=${encodeURIComponent(returnUrl)}`;
-        console.log('📍 Navigating to MODULE VIDEO:', navigationUrl);
-        
-        // Use window.location.href for reliable navigation
-        window.location.href = navigationUrl;
-        break;
       case 'quiz':
         if (contentData && contentData._id) {
-          navigationUrl = `/courses/${courseId}/modules/${module._id}/quiz/${contentData._id}?return=${encodeURIComponent(returnUrl)}`;
-          console.log('📍 Navigating to QUIZ:', navigationUrl);
-          console.log('📍 Quiz data:', contentData);
+          console.log('🎯 QUIZ CLICK: Using force navigation bypass');
+          console.log('🎯 Quiz ID:', contentData._id);
+          console.log('🎯 Course ID:', courseId);
           
-          // Use window.location.href for reliable navigation
-          window.location.href = navigationUrl;
+          // Use the bypass function to avoid all authentication middleware
+          forceNavigateToQuiz(contentData._id);
         } else {
           console.error('❌ Quiz navigation failed - no quiz ID:', contentData);
           console.log('🔍 Available contentData:', contentData);
@@ -1311,11 +1519,11 @@ const StudentCourseOverview = () => {
         break;
       case 'assessment':
         if (contentData && contentData._id) {
-          navigationUrl = `/courses/${courseId}/modules/${module._id}/assessment/${contentData._id}?return=${encodeURIComponent(returnUrl)}`;
+          navigationUrl = `/courses/${courseId}/assessment/${contentData._id}`;
           console.log('📍 Navigating to ASSESSMENT:', navigationUrl);
           console.log('📍 Assessment data:', contentData);
           
-          // Use window.location.href for reliable navigation
+          // Use window.location.href for reliable navigation (same as quiz/description/content)
           window.location.href = navigationUrl;
         } else {
           console.error('❌ Assessment navigation failed - no assessment ID:', contentData);
@@ -1325,11 +1533,12 @@ const StudentCourseOverview = () => {
         break;
       case 'discussion':
         if (contentData && contentData._id) {
-          navigationUrl = `/courses/${courseId}/modules/${module._id}/discussion/${contentData._id}?return=${encodeURIComponent(returnUrl)}`;
-          console.log('📍 Navigating to DISCUSSION:', navigationUrl);
+          console.log('💬 DISCUSSION CLICK: Using force navigation bypass');
+          console.log('💬 Discussion ID:', contentData._id);
+          console.log('💬 Course ID:', courseId);
           
-          // Use window.location.href for reliable navigation
-          window.location.href = navigationUrl;
+          // Use the bypass function to avoid all authentication middleware
+          forceNavigateToDiscussion(contentData._id);
         } else {
           console.error('❌ Discussion navigation failed - no discussion ID:', contentData);
           console.log('🔍 Available contentData:', contentData);
@@ -1443,6 +1652,62 @@ const StudentCourseOverview = () => {
     }
   };
 
+  // Add bypass function for direct navigation
+  const forceNavigateToQuiz = (quizId, moduleId = null) => {
+    console.log('🚀 FORCE NAVIGATE: Bypassing all middleware for quiz:', quizId);
+    
+    // Clear any authentication redirects
+    sessionStorage.clear();
+    localStorage.removeItem('redirectAfterLogin');
+    
+    // Force authentication state
+    const token = localStorage.getItem('token');
+    const user = localStorage.getItem('user');
+    const userRole = localStorage.getItem('userRole');
+    
+    console.log('🚀 FORCE NAVIGATE: Auth state check:', {
+      hasToken: !!token,
+      hasUser: !!user,
+      userRole: userRole
+    });
+    
+    // Try multiple URL patterns - with and without modules
+    const urlWithoutModule = `/courses/${courseId}/quiz/${quizId}`;
+    const urlWithModule = moduleId ? `/courses/${courseId}/modules/${moduleId}/quiz/${quizId}` : null;
+    
+    console.log('🚀 FORCE NAVIGATE: Trying URL patterns:');
+    console.log('  - Without module:', urlWithoutModule);
+    if (urlWithModule) {
+      console.log('  - With module:', urlWithModule);
+    }
+    
+    // Try the simpler pattern first
+    console.log('🚀 FORCE NAVIGATE: Using simple pattern (no modules)');
+    window.location.replace(urlWithoutModule);
+  };
+
+  const forceNavigateToDiscussion = (discussionId, moduleId = null) => {
+    console.log('🚀 FORCE NAVIGATE: Bypassing all middleware for discussion:', discussionId);
+    
+    // Clear any authentication redirects
+    sessionStorage.clear();
+    localStorage.removeItem('redirectAfterLogin');
+    
+    // Try multiple URL patterns - with and without modules
+    const urlWithoutModule = `/courses/${courseId}/discussion/${discussionId}`;
+    const urlWithModule = moduleId ? `/courses/${courseId}/modules/${moduleId}/discussion/${discussionId}` : null;
+    
+    console.log('🚀 FORCE NAVIGATE: Trying discussion URL patterns:');
+    console.log('  - Without module:', urlWithoutModule);
+    if (urlWithModule) {
+      console.log('  - With module:', urlWithModule);
+    }
+    
+    // Try the simpler pattern first
+    console.log('🚀 FORCE NAVIGATE: Using simple pattern (no modules)');
+    window.location.replace(urlWithoutModule);
+  };
+
   if (loading) {
     return (
       <Container>
@@ -1483,21 +1748,38 @@ const StudentCourseOverview = () => {
           }
         `}
       </style>
-      
-      <BackButton onClick={() => navigate('/courses')}>
+
+
+        <BackButton 
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('🔙 Back button clicked!');
+          
+          // Navigate back to the specific category page based on course category
+          if (course?.category) {
+            const categoryUrl = `/courses/category/${encodeURIComponent(course.category)}`;
+            console.log('🔙 Navigating to category:', categoryUrl);
+            window.location.href = categoryUrl;
+          } else {
+            // Fallback to Engineering category if no course category available
+            window.location.href = '/courses/category/Engineering';
+          }
+        }}
+        style={{ 
+          backgroundColor: 'transparent',
+          border: 'none',
+          color: '#007BFF',
+          cursor: 'pointer',
+          padding: '8px',
+          fontSize: '1.1rem',
+          fontWeight: 600
+        }}
+      >
         <ArrowBack style={{ marginRight: 6 }} /> Back to Courses
       </BackButton>
 
-      {/* Show enrollment banner if not enrolled - but don't block content access */}
-      {!isEnrolled && (
-        <EnrollmentBanner>
-          <BannerTitle>🎓 Ready to start learning?</BannerTitle>
-          <BannerText>Enroll in this course to track your progress and earn certificates</BannerText>
-          <ActionButton primary onClick={handleEnroll}>
-            Enroll Now - It's Free!
-          </ActionButton>
-        </EnrollmentBanner>
-      )}
+
 
       {/* Show course completion banner if completed */}
       {isCourseCompleted() && (
@@ -1505,7 +1787,33 @@ const StudentCourseOverview = () => {
           <BannerTitle>🎉 Congratulations!</BannerTitle>
           <BannerText>You have successfully completed this course!</BannerText>
           <ModalButtons>
-            <ActionButton primary onClick={() => navigate('/certificates')}>
+            <ActionButton 
+              primary 
+              onClick={async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('🎓 View Certificate clicked - generating certificate and navigating...');
+                
+                try {
+                  console.log('📜 Generating certificate for JavaScript course...');
+                  await generateCertificate();
+                  console.log('✅ Certificate generation completed, waiting before navigation...');
+                  
+                  // Wait a moment for the certificate to be saved in database
+                  await new Promise(resolve => setTimeout(resolve, 1000));
+                } catch (error) {
+                  console.warn('⚠️ Certificate generation error (continuing anyway):', error);
+                }
+                
+                console.log('🚀 Navigating to certificates page...');
+                window.location.href = '/certificates';
+              }}
+              style={{
+                zIndex: 9999,
+                position: 'relative',
+                pointerEvents: 'auto'
+              }}
+            >
               View Certificate
             </ActionButton>
             <ActionButton primary onClick={() => setShowGradesModal(true)}>
@@ -1548,9 +1856,11 @@ const StudentCourseOverview = () => {
         <div>
           <CourseTitle>
             {course.title}
-            <StatusBadge enrolled={isEnrolled}>
-              {isEnrolled ? `${Math.round(progress)}% Complete` : 'Not Enrolled'}
-            </StatusBadge>
+            {isEnrolled && (
+              <StatusBadge enrolled={isEnrolled}>
+                {Math.round(progress)}% Complete
+              </StatusBadge>
+            )}
           </CourseTitle>
 
           {isEnrolled && (
@@ -1575,169 +1885,6 @@ const StudentCourseOverview = () => {
           <div style={{ marginTop: '1rem' }}>
             <ActionButton onClick={() => setShowGradesModal(true)}>
               📊 View Grades & Progress
-            </ActionButton>
-            
-            {/* Debug button for testing what data is actually being received */}
-            <ActionButton 
-              onClick={() => {
-                console.log('🔍 REAL DATA ANALYSIS - What we received from backend:');
-                console.log('📊 Full Course Object:', course);
-                console.log('📚 Modules Count:', course.modules?.length || 0);
-                
-                if (course.modules && course.modules.length > 0) {
-                  course.modules.forEach((module, idx) => {
-                    console.log(`📖 Module ${idx + 1}:`, {
-                      id: module._id,
-                      title: module.title,
-                      type: module.type,
-                      quizzes: module.quizzes?.length || 0,
-                      discussions: module.discussions?.length || 0,
-                      assessments: module.assessments?.length || 0,
-                      hasContent: !!module.content,
-                      hasDescription: !!module.description
-                    });
-                    
-                    if (module.quizzes && module.quizzes.length > 0) {
-                      console.log(`  🧠 Module ${idx + 1} Quizzes:`, module.quizzes.map(q => ({
-                        id: q._id,
-                        title: q.title,
-                        questions: q.questions?.length || 0,
-                        instructorId: q.instructorId,
-                        courseId: q.courseId
-                      })));
-                    }
-                    
-                    if (module.discussions && module.discussions.length > 0) {
-                      console.log(`  💬 Module ${idx + 1} Discussions:`, module.discussions.map(d => ({
-                        id: d._id,
-                        title: d.title,
-                        hasContent: !!d.content,
-                        instructorId: d.instructorId,
-                        courseId: d.courseId
-                      })));
-                    }
-                  });
-                  
-                  // Test navigation to first available content
-                  const firstModule = course.modules[0];
-                  if (firstModule.discussions && firstModule.discussions.length > 0) {
-                    const firstDiscussion = firstModule.discussions[0];
-                    console.log('🎯 Testing navigation to discussion:', firstDiscussion.title);
-                    navigate(`/courses/${courseId}/modules/${firstModule._id}/discussion/${firstDiscussion._id}`);
-                  } else if (firstModule.quizzes && firstModule.quizzes.length > 0) {
-                    const firstQuiz = firstModule.quizzes[0];
-                    console.log('🎯 Testing navigation to quiz:', firstQuiz.title);
-                    navigate(`/courses/${courseId}/modules/${firstModule._id}/quiz/${firstQuiz._id}`);
-                  } else {
-                    alert('✅ Real data confirmed, but no instructor-created quizzes/discussions found in first module');
-                  }
-                } else {
-                  alert('❌ No modules found in course data');
-                }
-              }}
-              style={{ marginLeft: '1rem' }}
-            >
-              🔍 Analyze Real Data
-            </ActionButton>
-            
-            {/* Test Click Handler Button */}
-            <ActionButton 
-              onClick={() => {
-                console.log('🔧 TESTING CLICK HANDLERS...');
-                console.log('🔧 Course ID:', courseId);
-                console.log('🔧 Navigate function:', typeof navigate);
-                
-                // Test direct navigation
-                try {
-                  const testUrl = `/courses/${courseId}/overview`;
-                  console.log('🔧 Testing direct navigation to:', testUrl);
-                  navigate(testUrl);
-                  console.log('✅ Direct navigation test successful');
-                } catch (error) {
-                  console.error('❌ Direct navigation test failed:', error);
-                  alert('Navigation test failed. Check console for details.');
-                }
-              }}
-              style={{ marginLeft: '1rem', backgroundColor: '#28a745' }}
-            >
-              🔧 Test Navigation
-            </ActionButton>
-            
-            {/* Module Access Test Button */}
-            <ActionButton 
-              onClick={() => {
-                console.log('🧪 MODULE ACCESS TEST STARTING...');
-                console.log('🧪 Available modules:', course.modules?.length || 0);
-                
-                if (course.modules && course.modules.length > 0) {
-                  const firstModule = course.modules[0];
-                  console.log('🧪 Testing with first module:', {
-                    id: firstModule._id,
-                    title: firstModule.title,
-                    hasDescription: !!firstModule.description,
-                    hasContent: !!firstModule.content,
-                    hasDiscussions: firstModule.discussions?.length || 0,
-                    hasQuizzes: firstModule.quizzes?.length || 0
-                  });
-                  
-                  // Test multiple navigation paths
-                  const testPaths = [];
-                  
-                  if (firstModule.description) {
-                    testPaths.push({
-                      name: 'Module Description',
-                      url: `/courses/${courseId}/modules/${firstModule._id}/description`,
-                      type: 'description'
-                    });
-                  }
-                  
-                  if (firstModule.content) {
-                    testPaths.push({
-                      name: 'Module Content', 
-                      url: `/courses/${courseId}/modules/${firstModule._id}/content`,
-                      type: 'content'
-                    });
-                  }
-                  
-                  if (firstModule.discussions && firstModule.discussions.length > 0) {
-                    testPaths.push({
-                      name: 'Discussion: ' + firstModule.discussions[0].title,
-                      url: `/courses/${courseId}/modules/${firstModule._id}/discussion/${firstModule.discussions[0]._id}`,
-                      type: 'discussion'
-                    });
-                  }
-                  
-                  if (firstModule.quizzes && firstModule.quizzes.length > 0) {
-                    testPaths.push({
-                      name: 'Quiz: ' + firstModule.quizzes[0].title,
-                      url: `/courses/${courseId}/modules/${firstModule._id}/quiz/${firstModule.quizzes[0]._id}`,
-                      type: 'quiz'
-                    });
-                  }
-                  
-                  console.log('🧪 Available test paths:', testPaths);
-                  
-                  if (testPaths.length > 0) {
-                    const selectedPath = testPaths[0]; // Test the first available path
-                    console.log('🧪 Testing navigation to:', selectedPath);
-                    
-                    try {
-                      navigate(selectedPath.url);
-                      console.log('✅ Module access test navigation successful to:', selectedPath.name);
-                    } catch (error) {
-                      console.error('❌ Module access test failed:', error);
-                      alert('Module navigation test failed: ' + error.message);
-                    }
-                  } else {
-                    alert('❌ No content available to test in the first module');
-                  }
-                } else {
-                  alert('❌ No modules found to test');
-                }
-              }}
-              style={{ marginLeft: '1rem', backgroundColor: '#dc3545' }}
-            >
-              🧪 Test Module Access
             </ActionButton>
           </div>
 
@@ -2008,9 +2155,9 @@ const StudentCourseOverview = () => {
                               console.log('🎯 Content item file:', item.fileName);
                               
                               try {
-                                // Navigate to internal content viewer for all content items
+                                // Navigate to internal content viewer for all content items using correct route
                                 const returnUrl = `/courses/${courseId}/overview`;
-                                const contentUrl = `/courses/${courseId}/modules/${module._id}/content-item/${idx}?return=${encodeURIComponent(returnUrl)}`;
+                                const contentUrl = `/courses/${courseId}/content/${module._id}/${item.type}/${item._id || idx}?return=${encodeURIComponent(returnUrl)}`;
                                 console.log('🚀 Attempting navigation to:', contentUrl);
                                 
                                 // Use window.location.href for reliable navigation (same as quizzes/discussions)

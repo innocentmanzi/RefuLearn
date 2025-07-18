@@ -8,6 +8,7 @@ import {
   MenuBook, School, Star, TrendingUp, LightbulbOutlined, Psychology, Assessment,
   Article, AudioFile, AttachFile
 } from '@mui/icons-material';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 1rem;
@@ -644,26 +645,58 @@ export default function CourseOverview() {
       setLoading(true);
       setError('');
       const token = localStorage.getItem('token');
+      const isOnline = navigator.onLine;
       
       console.log('Fetching course with ID:', courseId);
       
-      const response = await fetch(`/api/courses/${courseId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+      let courseData = null;
+
+      if (isOnline) {
+        try {
+          // Try online API calls first (preserving existing behavior)
+          console.log('🌐 Online mode: Fetching course overview from API...');
+          
+          const response = await fetch(`/api/courses/${courseId}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          console.log('Response status:', response.status);
+          console.log('Response ok:', response.ok);
+
+          if (response.ok) {
+            const data = await response.json();
+            console.log('Course data received:', data);
+            console.log('Course modules:', data.data?.course?.modules);
+            
+            if (data.success && data.data && data.data.course) {
+              courseData = data.data.course;
+              console.log('✅ Course overview data received from API');
+              
+              // Store course data for offline use
+              await offlineIntegrationService.storeCourseData(courseId, courseData);
+            } else {
+              throw new Error('Invalid course data received');
+            }
+          } else {
+            const errorText = await response.text();
+            console.error('Failed response:', response.status, errorText);
+            throw new Error(`Failed to load course: ${response.status} ${errorText}`);
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+          // Fall back to offline data if online fails
+          courseData = await offlineIntegrationService.getCourseData(courseId);
         }
-      });
+      } else {
+        // Offline mode: use offline services
+        console.log('📴 Offline mode: Using offline course overview data...');
+        courseData = await offlineIntegrationService.getCourseData(courseId);
+      }
 
-      console.log('Response status:', response.status);
-      console.log('Response ok:', response.ok);
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Course data received:', data);
-        console.log('Course modules:', data.data?.course?.modules);
-        
-        if (data.success && data.data && data.data.course) {
-          const courseData = data.data.course;
+      if (courseData) {
           
           // Ensure modules is an array
           if (courseData.modules && Array.isArray(courseData.modules)) {
@@ -709,21 +742,16 @@ export default function CourseOverview() {
           
           setCourse(courseData);
         } else {
-          console.error('Invalid response structure:', data);
-          setError('Invalid course data received');
+          console.error('No course data available');
+          setError(isOnline ? 'Invalid course data received' : 'Course not available offline');
         }
-      } else {
-        const errorText = await response.text();
-        console.error('Failed response:', response.status, errorText);
-        setError(`Failed to load course: ${response.status} ${errorText}`);
+      } catch (err) {
+        console.error('❌ Error fetching course:', err);
+        setError(`Network error: ${err.message}`);
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      console.error('Error fetching course:', err);
-      setError(`Network error: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
 
   const toggleModuleExpansion = (moduleId) => {
     setExpandedModules(prev => {
@@ -740,25 +768,73 @@ export default function CourseOverview() {
   const handleTogglePublish = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/courses/${courseId}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          isPublished: !course.isPublished
-        })
-      });
+      const isOnline = navigator.onLine;
+      const newPublishStatus = !course.isPublished;
+      
+      let success = false;
 
-      if (response.ok) {
-        setCourse(prev => ({ ...prev, isPublished: !prev.isPublished }));
-        alert(`Course ${!course.isPublished ? 'published' : 'unpublished'} successfully!`);
+      if (isOnline) {
+        try {
+          // Try online course update first (preserving existing behavior)
+          console.log('🌐 Online mode: Updating course publish status...');
+          
+          const response = await fetch(`/api/courses/${courseId}`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              isPublished: newPublishStatus
+            })
+          });
+
+          if (response.ok) {
+            success = true;
+            console.log('✅ Course publish status updated successfully');
+            setCourse(prev => ({ ...prev, isPublished: newPublishStatus }));
+            alert(`Course ${newPublishStatus ? 'published' : 'unpublished'} successfully!`);
+          } else {
+            throw new Error('Failed to update course status');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online course update failed, using offline:', onlineError);
+          // Fall back to offline course update
+          const offlineResult = await offlineIntegrationService.storeCourseUpdate(courseId, {
+            isPublished: newPublishStatus
+          });
+          
+          if (offlineResult.success) {
+            success = true;
+            console.log('✅ Course publish status update queued for offline sync');
+            setCourse(prev => ({ ...prev, isPublished: newPublishStatus }));
+            alert(`Course ${newPublishStatus ? 'published' : 'unpublished'} offline! Will sync when online.`);
+          } else {
+            throw new Error('Failed to update course status offline');
+          }
+        }
       } else {
+        // Offline course update
+        console.log('📴 Offline mode: Updating course publish status offline...');
+        const offlineResult = await offlineIntegrationService.storeCourseUpdate(courseId, {
+          isPublished: newPublishStatus
+        });
+        
+        if (offlineResult.success) {
+          success = true;
+          console.log('✅ Course publish status update queued for offline sync');
+          setCourse(prev => ({ ...prev, isPublished: newPublishStatus }));
+          alert(`Course ${newPublishStatus ? 'published' : 'unpublished'} offline! Will sync when online.`);
+        } else {
+          throw new Error('Failed to update course status offline');
+        }
+      }
+
+      if (!success) {
         alert('Failed to update course status');
       }
     } catch (err) {
-      console.error('Error updating course:', err);
+      console.error('❌ Error updating course:', err);
       alert('Failed to update course status');
     }
   };
@@ -770,22 +846,65 @@ export default function CourseOverview() {
 
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/courses/${courseId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const isOnline = navigator.onLine;
+      
+      let success = false;
 
-      if (response.ok) {
-        alert('Course deleted successfully!');
-        navigate('/instructor/courses');
+      if (isOnline) {
+        try {
+          // Try online course deletion first (preserving existing behavior)
+          console.log('🌐 Online mode: Deleting course...');
+          
+          const response = await fetch(`/api/courses/${courseId}`, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.ok) {
+            success = true;
+            console.log('✅ Course deleted successfully');
+            alert('Course deleted successfully!');
+            navigate('/instructor/courses');
+          } else {
+            throw new Error('Failed to delete course');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online course deletion failed, using offline:', onlineError);
+          // Fall back to offline course deletion
+          const offlineResult = await offlineIntegrationService.storeCourseDelete(courseId);
+          
+          if (offlineResult.success) {
+            success = true;
+            console.log('✅ Course deletion queued for offline sync');
+            alert('Course deleted offline! Will sync when online.');
+            navigate('/instructor/courses');
+          } else {
+            throw new Error('Failed to delete course offline');
+          }
+        }
       } else {
+        // Offline course deletion
+        console.log('📴 Offline mode: Deleting course offline...');
+        const offlineResult = await offlineIntegrationService.storeCourseDelete(courseId);
+        
+        if (offlineResult.success) {
+          success = true;
+          console.log('✅ Course deletion queued for offline sync');
+          alert('Course deleted offline! Will sync when online.');
+          navigate('/instructor/courses');
+        } else {
+          throw new Error('Failed to delete course offline');
+        }
+      }
+
+      if (!success) {
         alert('Failed to delete course');
       }
     } catch (err) {
-      console.error('Error deleting course:', err);
+      console.error('❌ Error deleting course:', err);
       alert('Failed to delete course');
     }
   };

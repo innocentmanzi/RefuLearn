@@ -8,6 +8,29 @@ import PouchDB from 'pouchdb';
 import { connectCouchDB } from '../config/couchdb';
 import { sendCourseCompletionEmail } from '../config/email';
 
+// Use proper authenticated request type
+interface AuthenticatedRequest extends Request {
+  user?: {
+    _id: string;
+    role?: string;
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    [key: string]: any;
+  };
+}
+
+// Helper function to ensure user authentication
+const ensureAuth = (req: AuthenticatedRequest): { userId: string; user: NonNullable<AuthenticatedRequest['user']> } => {
+  if (!req.user?._id) {
+    throw new Error('User authentication required');
+  }
+  return {
+    userId: req.user._id.toString(),
+    user: req.user as NonNullable<AuthenticatedRequest['user']>
+  };
+};
+
 // Use proper CouchDB connection with authentication
 let couchConnection: any = null;
 
@@ -40,7 +63,7 @@ router.get('/debug-test', (req: Request, res: Response) => {
 });
 
 // File download route - PLACED AT THE VERY TOP TO AVOID ANY CONFLICTS
-router.get('/file-download/:submissionId', authenticateToken, authorizeRoles('instructor', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/file-download/:submissionId', authenticateToken, authorizeRoles('instructor', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   console.log('📁 FILE DOWNLOAD ROUTE HIT - Submission ID:', req.params.submissionId);
   console.log('📁 Request URL:', req.originalUrl);
   console.log('📁 Request method:', req.method);
@@ -148,14 +171,35 @@ router.use((req, res, next) => {
 
 // Helper function to ensure database is available
 const ensureDb = async (): Promise<any> => {
-  if (!couchConnection) {
-    console.log('⚠️ Database not available, reinitializing...');
-    const connectionSuccess = await initializeDatabase();
-    if (!connectionSuccess || !couchConnection) {
-      throw new Error('Database connection failed');
+  try {
+    if (!couchConnection) {
+      console.log('⚠️ Database not available, initializing...');
+      couchConnection = await connectCouchDB();
+      if (!couchConnection) {
+        throw new Error('Failed to establish database connection');
+      }
+      console.log('✅ Database connection established');
+    }
+    
+    const database = couchConnection.getDatabase();
+    if (!database) {
+      console.log('❌ Database object is null, reinitializing...');
+      couchConnection = await connectCouchDB();
+      return couchConnection.getDatabase();
+    }
+    
+    return database;
+  } catch (error) {
+    console.error('❌ Database connection error:', error);
+    // Try to reconnect
+    try {
+      couchConnection = await connectCouchDB();
+      return couchConnection.getDatabase();
+    } catch (retryError) {
+      console.error('❌ Database retry failed:', retryError);
+      throw new Error('Database connection failed after retry');
     }
   }
-  return couchConnection.getDatabase();
 };
 
 interface CourseDoc {
@@ -183,13 +227,15 @@ interface CourseDoc {
   instructor: string;
   submissions?: string[];
   image?: string | undefined;
-  modules?: any[];
+  modules?: string[]; // Array of module IDs
   createdAt?: Date;
   instructor_id?: string;
   duration?: string;
   difficult_level?: string;
   is_active?: boolean;
   course_profile_picture?: string;
+  moduleCount?: number;
+  role?: string; // Add role property for user objects
   [key: string]: any;
 }
 
@@ -373,6 +419,8 @@ interface DiscussionDoc {
     _id?: string;
     user: string;
     content: string;
+    likes?: number;
+    likedBy?: string[];
     createdAt: Date;
     updatedAt?: Date;
   }>;
@@ -382,10 +430,7 @@ interface DiscussionDoc {
 }
 
 // Use the globally augmented Express.Request (from types/express/index.d.ts)
-// Do NOT redeclare user property here, only add files for multer
-interface MulterRequest extends Request {
-  files?: Express.Multer.File[] | { [fieldname: string]: Express.Multer.File[] };
-}
+// No custom interface needed - use type assertions for multer files
 
 // Optionally, update ModuleDoc interface for new fields
 interface ModuleDoc {
@@ -428,7 +473,7 @@ interface ModuleDoc {
 }
 
 // List all courses with optional filtering
-router.get('/', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { category, level, published, page = 1, limit = 10 } = req.query;
     
@@ -455,7 +500,14 @@ router.get('/', authenticateToken, asyncHandler(async (req: Request, res: Respon
     });
     
     // Apply default filter for published courses (handle both boolean and string values)
-    courses = courses.filter((course: any) => course.isPublished === true || course.isPublished === 'true');
+    console.log('🔍 Before filtering - total courses:', courses.length);
+    console.log('🔍 Sample course isPublished values:', courses.slice(0, 3).map(c => ({ title: c.title, isPublished: c.isPublished, type: typeof c.isPublished })));
+    
+    courses = courses.filter((course: any) => {
+      const isPublished = course.isPublished === true || course.isPublished === 'true';
+      console.log(`📋 Course "${course.title}": isPublished = ${course.isPublished} (${typeof course.isPublished}) -> included: ${isPublished}`);
+      return isPublished;
+    });
     console.log('📚 Published courses found:', courses.length);
     
     // Apply filtering
@@ -512,7 +564,7 @@ router.get('/', authenticateToken, asyncHandler(async (req: Request, res: Respon
         } 
       });
   } catch (error: unknown) {
-    console.error('Error in courses endpoint:', error);
+    console.error('❌ Error in courses endpoint:', error);
     
     // Return error instead of fallback courses
     res.status(500).json({
@@ -524,7 +576,7 @@ router.get('/', authenticateToken, asyncHandler(async (req: Request, res: Respon
 }));
 
 // Get courses by category
-router.get('/category/:categoryName', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/category/:categoryName', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { categoryName } = req.params;
     const { level, page = 1, limit = 10 } = req.query;
@@ -716,9 +768,15 @@ router.get('/recommended', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // Enroll in course
-router.post('/:courseId/enroll', authenticateToken, authorizeRoles('instructor', 'admin', 'refugee'), asyncHandler(async (req: Request, res: Response) => {
+router.post('/:courseId/enroll', authenticateToken, authorizeRoles('instructor', 'admin', 'refugee'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { courseId } = req.params;
-  const userId = req.user._id.toString();
+  const userId = req.user?._id?.toString();
+  if (!userId) {
+    return res.status(401).json({
+      success: false,
+      message: 'User authentication required'
+    });
+  }
   const database = await ensureDb();
   let course = await database.get(courseId) as CourseDoc;
   if (!course) {
@@ -749,9 +807,15 @@ router.post('/:courseId/enroll', authenticateToken, authorizeRoles('instructor',
 }));
 
 // Unenroll from course
-router.delete('/:courseId/enroll', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/:courseId/enroll', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { courseId } = req.params;
-  const userId = req.user._id.toString();
+  const userId = req.user?._id?.toString();
+  if (!userId) {
+    return res.status(401).json({
+      success: false,
+      message: 'User authentication required'
+    });
+  }
   const database = await ensureDb();
   let course = await database.get(courseId) as CourseDoc;
   if (!course) {
@@ -783,10 +847,16 @@ router.put('/:courseId/progress', authenticateToken, authorizeRoles('instructor'
   body('contentType').optional().isString(),
   body('itemIndex').optional().isInt(),
   body('completionKey').optional().isString()
-], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
+], handleValidationErrors, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { courseId } = req.params;
   const { moduleId, completed, score, contentType, itemIndex, completionKey } = req.body;
-  const userId = req.user._id.toString();
+  const userId = req.user?._id?.toString();
+  if (!userId) {
+    return res.status(401).json({
+      success: false,
+      message: 'User authentication required'
+    });
+  }
 
   console.log('📝 Progress update request:', {
     courseId,
@@ -988,9 +1058,9 @@ router.put('/:courseId/progress', authenticateToken, authorizeRoles('instructor'
 }));
 
 // Get user's course progress
-router.get('/:courseId/progress', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/:courseId/progress', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { courseId } = req.params;
-  const userId = req.user._id.toString();
+  const { userId } = ensureAuth(req);
 
   console.log('📊 Fetching progress for:', { courseId, userId });
 
@@ -1095,8 +1165,8 @@ router.get('/:courseId/progress', authenticateToken, authorizeRoles('instructor'
 }));
 
 // Get enrolled courses for user (all or by courseId)
-router.get('/enrolled/courses/:courseId?', authenticateToken, authorizeRoles('admin', 'instructor', 'employer', 'refugee'), asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user._id.toString();
+router.get('/enrolled/courses/:courseId?', authenticateToken, authorizeRoles('admin', 'instructor', 'employer', 'refugee'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const database = await ensureDb();
   const user = await database.get(userId) as UserDoc;
   if (!user) {
@@ -1134,9 +1204,9 @@ router.get('/enrolled/courses/:courseId?', authenticateToken, authorizeRoles('ad
 }));
 
 // Get user's learning path
-router.get('/learning-path', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/learning-path', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = req.user._id.toString();
+    const { userId } = ensureAuth(req);
     const database = await ensureDb();
     
     console.log('🔍 Learning path endpoint called for user:', userId);
@@ -1174,9 +1244,9 @@ router.get('/learning-path', authenticateToken, asyncHandler(async (req: Request
 }));
 
 // Get course recommendations for user
-router.get('/recommendations', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/recommendations', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = req.user._id.toString();
+    const { userId } = ensureAuth(req);
     const database = await ensureDb();
     
     console.log('🔍 Recommendations endpoint called for user:', userId);
@@ -1224,7 +1294,7 @@ router.get('/recommendations', authenticateToken, asyncHandler(async (req: Reque
 }));
 
 // Create a new course with modules (instructor, admin)
-router.post('/', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), upload.single('course_profile_picture'), asyncHandler(async (req: Request, res: Response) => {
+router.post('/', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), upload.single('course_profile_picture'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const database = await ensureDb();
     
@@ -1307,8 +1377,8 @@ router.post('/', authenticateToken, authorizeRoles('instructor', 'admin', 'user'
       category: category,
       level: level || 'Beginner',
       difficult_level: level || 'Beginner', // Keep for backward compatibility
-      instructor: req.user._id.toString(),
-      instructor_id: req.user._id.toString(),
+      instructor: ensureAuth(req).userId,
+      instructor_id: ensureAuth(req).userId,
       course_profile_picture: normalizedPath,
       isPublished: false, // Default to unpublished
       is_active: true,
@@ -1409,7 +1479,7 @@ router.post('/', authenticateToken, authorizeRoles('instructor', 'admin', 'user'
 }));
 
 // Update a course (instructor, admin)
-router.put('/:courseId', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), upload.single('course_profile_picture'), asyncHandler(async (req: Request, res: Response) => {
+router.put('/:courseId', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), upload.single('course_profile_picture'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { courseId } = req.params;
   const database = await ensureDb();
   const allowedFields = [
@@ -1420,8 +1490,10 @@ router.put('/:courseId', authenticateToken, authorizeRoles('instructor', 'admin'
     return res.status(404).json({ success: false, message: 'Course not found' });
   }
   
+  const { userId, user } = ensureAuth(req);
+  
   // Check if user is authorized to update this course
-  if (req.user.role !== 'admin' && course.instructor !== req.user._id.toString()) {
+  if (user.role !== 'admin' && course.instructor !== userId) {
     return res.status(403).json({ success: false, message: 'Not authorized to update this course' });
   }
   
@@ -1513,7 +1585,7 @@ router.put('/:courseId', authenticateToken, authorizeRoles('instructor', 'admin'
 }));
 
 // Delete a course (instructor, admin)
-router.delete('/:courseId', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/:courseId', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { courseId } = req.params;
   
   try {
@@ -1532,9 +1604,11 @@ router.delete('/:courseId', authenticateToken, authorizeRoles('instructor', 'adm
     
     console.log('✅ Course found:', course.title);
     
+    const { userId, user } = ensureAuth(req);
+    
     // Only allow instructor who owns the course or admin
-    if (req.user.role !== 'admin' && course.instructor !== req.user._id.toString()) {
-      console.log('❌ Authorization failed - user:', req.user._id, 'instructor:', course.instructor);
+    if (user.role !== 'admin' && course.instructor !== userId) {
+      console.log('❌ Authorization failed - user:', userId, 'instructor:', course.instructor);
       return res.status(403).json({ success: false, message: 'Not authorized to delete this course' });
     }
     
@@ -1631,7 +1705,7 @@ router.delete('/:courseId', authenticateToken, authorizeRoles('instructor', 'adm
 }));
 
 // Get course analytics (instructor only)
-router.get('/:courseId/analytics', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/:courseId/analytics', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { courseId } = req.params;
   const database = await ensureDb();
 
@@ -1643,8 +1717,10 @@ router.get('/:courseId/analytics', authenticateToken, authorizeRoles('instructor
     });
   }
 
+  const { userId } = ensureAuth(req);
+
   // Check if user is the instructor or admin
-  if (course.instructor !== req.user._id.toString()) {
+  if (course.instructor !== userId) {
     return res.status(403).json({
       success: false,
       message: 'Not authorized to view analytics for this course'
@@ -1815,7 +1891,7 @@ router.post('/discussions', authenticateToken, authorizeRoles('instructor', 'adm
   body('content').notEmpty().withMessage('Content is required'),
   body('author').notEmpty().withMessage('Author is required'),
   body('status').optional().isString().withMessage('Status must be a string')
-], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
+], handleValidationErrors, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const database = await ensureDb();
   const { course, title, content, author, status } = req.body;
   const discussionId = `discussion_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -1861,17 +1937,20 @@ router.patch('/discussions/:discussionId', authenticateToken, authorizeRoles('in
 }));
 
 // Delete discussion (only author or admin)
-router.delete('/discussions/:discussionId', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/discussions/:discussionId', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const database = await ensureDb();
   const discussion = await database.get(req.params.discussionId);
   if (!discussion) {
     return res.status(404).json({ success: false, message: 'Discussion not found' });
   }
+  
+  const { userId, user } = ensureAuth(req);
+  
   // Allow delete if user is author, instructor, or admin
   if (
-    (discussion as any).author !== req.user._id &&
-    req.user.role !== 'admin' &&
-    req.user.role !== 'instructor'
+    (discussion as any).author !== userId &&
+    user.role !== 'admin' &&
+    user.role !== 'instructor'
   ) {
     return res.status(403).json({ success: false, message: 'Not authorized' });
   }
@@ -1882,16 +1961,22 @@ router.delete('/discussions/:discussionId', authenticateToken, authorizeRoles('i
 // Add reply to discussion
 router.post('/discussions/:discussionId/replies', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), [
   body('content').trim().notEmpty().withMessage('Content is required')
-], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
+], handleValidationErrors, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const database = await ensureDb();
   const discussion = await database.get(req.params.discussionId) as DiscussionDoc;
   if (!discussion) {
     return res.status(404).json({ success: false, message: 'Discussion not found' });
   }
+  
+  const { userId } = ensureAuth(req);
+  
   if (!discussion.replies) discussion.replies = [];
   const reply = {
-    user: req.user._id,
+    _id: `reply_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    user: userId,
     content: req.body.content,
+    likes: 0,
+    likedBy: [],
     createdAt: new Date()
   };
   discussion.replies.push(reply);
@@ -1900,21 +1985,106 @@ router.post('/discussions/:discussionId/replies', authenticateToken, authorizeRo
   res.status(201).json({ success: true, message: 'Reply added', data: { discussion: updatedDiscussion } });
 }));
 
+// Like/Unlike a reply in a discussion (exact frontend URL pattern)
+router.post('/courses/discussions/:discussionId/replies/:replyId/like', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), [
+  body('action').optional().isIn(['like', 'unlike']).withMessage('Action must be like or unlike')
+], handleValidationErrors, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { discussionId, replyId } = req.params;
+  const { action } = req.body;
+  
+  try {
+    const { userId } = ensureAuth(req);
+    const database = await ensureDb();
+    const discussion = await database.get(discussionId) as DiscussionDoc;
+    
+    if (!discussion || discussion.type !== 'discussion') {
+      return res.status(404).json({
+        success: false,
+        message: 'Discussion not found'
+      });
+    }
+    
+    // Find the reply to like/unlike
+    if (!discussion.replies) {
+      discussion.replies = [];
+    }
+    
+    const replyIndex = discussion.replies.findIndex((reply: any) => reply._id === replyId);
+    if (replyIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Reply not found'
+      });
+    }
+    
+    const reply = discussion.replies[replyIndex] as any;
+    
+    // Initialize likes fields if they don't exist
+    if (!reply.likes) reply.likes = 0;
+    if (!reply.likedBy) reply.likedBy = [];
+    
+    // Check if user has already liked this reply
+    const hasLiked = reply.likedBy.includes(userId);
+    
+    // Determine action (toggle if not specified)
+    const shouldLike = action === 'like' ? true : action === 'unlike' ? false : !hasLiked;
+    
+    if (shouldLike && !hasLiked) {
+      // Add like
+      reply.likes += 1;
+      reply.likedBy.push(userId);
+    } else if (!shouldLike && hasLiked) {
+      // Remove like
+      reply.likes = Math.max(0, reply.likes - 1);
+      reply.likedBy = reply.likedBy.filter((id: string) => id !== userId);
+    }
+    
+    // Update the reply in the discussion
+    discussion.replies[replyIndex] = reply;
+    discussion.updatedAt = new Date();
+    
+    // Save updated discussion
+    const updatedDiscussion = await database.insert(discussion);
+    
+    console.log('✅ REPLY LIKE UPDATED - Reply ID:', replyId);
+    console.log('✅ REPLY LIKE UPDATED - Likes:', reply.likes, 'Action:', shouldLike ? 'liked' : 'unliked');
+    
+    res.json({
+      success: true,
+      message: shouldLike ? 'Reply liked successfully' : 'Reply unliked successfully',
+      data: { 
+        reply,
+        likes: reply.likes,
+        hasLiked: reply.likedBy.includes(userId)
+      }
+    });
+  } catch (err) {
+    console.error('Error updating reply like:', err instanceof Error ? err.message : 'Unknown error');
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update like'
+    });
+  }
+}));
+
 // Update reply (only author or admin)
 router.patch('/discussions/:discussionId/replies/:replyId', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), [
   body('content').trim().notEmpty().withMessage('Content is required')
-], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
+], handleValidationErrors, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const database = await ensureDb();
   const discussion = await database.get(req.params.discussionId) as DiscussionDoc;
   if (!discussion) {
     return res.status(404).json({ success: false, message: 'Discussion not found' });
   }
+  
+  const { userId } = ensureAuth(req);
+  
   if (!discussion.replies) discussion.replies = [];
   const reply = discussion.replies.find((r: any) => r._id === req.params.replyId);
   if (!reply) {
     return res.status(404).json({ success: false, message: 'Reply not found' });
   }
-  if (reply.user !== req.user._id) {
+  if (reply.user !== userId) {
     return res.status(403).json({ success: false, message: 'Not authorized' });
   }
   reply.content = req.body.content;
@@ -1925,18 +2095,21 @@ router.patch('/discussions/:discussionId/replies/:replyId', authenticateToken, a
 }));
 
 // Delete reply (only author or admin)
-router.delete('/discussions/:discussionId/replies/:replyId', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/discussions/:discussionId/replies/:replyId', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const database = await ensureDb();
   const discussion = await database.get(req.params.discussionId) as DiscussionDoc;
   if (!discussion) {
     return res.status(404).json({ success: false, message: 'Discussion not found' });
   }
+  
+  const { userId } = ensureAuth(req);
+  
   if (!discussion.replies) discussion.replies = [];
   const reply = discussion.replies.find((r: any) => r._id === req.params.replyId);
   if (!reply) {
     return res.status(404).json({ success: false, message: 'Reply not found' });
   }
-  if (reply.user !== req.user._id) {
+  if (reply.user !== userId) {
     return res.status(403).json({ success: false, message: 'Not authorized' });
   }
   discussion.replies = discussion.replies.filter((r: any) => r._id !== req.params.replyId);
@@ -1983,9 +2156,10 @@ router.get('/enrollments', authenticateToken, authorizeRoles('admin', 'instructo
 router.post('/enrollments', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), [
   body('course').notEmpty().withMessage('Course is required'),
   body('user').optional()
-], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
+], handleValidationErrors, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const database = await ensureDb();
-  const userId = req.body.user || req.user._id.toString();
+  const { userId: authenticatedUserId } = ensureAuth(req);
+  const userId = req.body.user || authenticatedUserId;
   const { course } = req.body;
   // Prevent duplicate enrollment
   let existing = await database.get(course) as CourseDoc;
@@ -2004,13 +2178,16 @@ router.post('/enrollments', authenticateToken, authorizeRoles('instructor', 'adm
 }));
 
 // Get enrollment by ID (only user, admin, or instructor)
-router.get('/enrollments/:enrollmentId', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/enrollments/:enrollmentId', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const database = await ensureDb();
   const enrollment = await database.get(req.params.enrollmentId) as EnrollmentDoc;
   if (!enrollment) {
     return res.status(404).json({ success: false, message: 'Enrollment not found' });
   }
-  if (req.user.role !== 'admin' && req.user.role !== 'instructor' && enrollment.user !== req.user._id) {
+  
+  const { userId, user } = ensureAuth(req);
+  
+  if (user.role !== 'admin' && user.role !== 'instructor' && enrollment.user !== userId) {
     return res.status(403).json({ success: false, message: 'Not authorized' });
   }
   res.json({ success: true, data: { enrollment } });
@@ -2020,13 +2197,16 @@ router.get('/enrollments/:enrollmentId', authenticateToken, authorizeRoles('inst
 router.patch('/enrollments/:enrollmentId', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), [
   body('status').optional().isIn(['active', 'completed', 'dropped']),
   body('progress').optional().isFloat({ min: 0, max: 100 })
-], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
+], handleValidationErrors, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const database = await ensureDb();
   const enrollment = await database.get(req.params.enrollmentId) as EnrollmentDoc;
   if (!enrollment) {
     return res.status(404).json({ success: false, message: 'Enrollment not found' });
   }
-  if (req.user.role !== 'admin' && req.user.role !== 'instructor' && enrollment.user !== req.user._id) {
+  
+  const { userId, user } = ensureAuth(req);
+  
+  if (user.role !== 'admin' && user.role !== 'instructor' && enrollment.user !== userId) {
     return res.status(403).json({ success: false, message: 'Not authorized' });
   }
   const updates = req.body;
@@ -2035,13 +2215,16 @@ router.patch('/enrollments/:enrollmentId', authenticateToken, authorizeRoles('in
 }));
 
 // Unenroll (delete enrollment, only user, admin, or instructor)
-router.delete('/enrollments/:enrollmentId', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/enrollments/:enrollmentId', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const database = await ensureDb();
   const enrollment = await database.get(req.params.enrollmentId) as EnrollmentDoc;
   if (!enrollment) {
     return res.status(404).json({ success: false, message: 'Enrollment not found' });
   }
-  if (req.user.role !== 'admin' && req.user.role !== 'instructor' && enrollment.user !== req.user._id) {
+  
+  const { userId, user } = ensureAuth(req);
+  
+  if (user.role !== 'admin' && user.role !== 'instructor' && enrollment.user !== userId) {
     return res.status(403).json({ success: false, message: 'Not authorized' });
   }
   
@@ -2062,9 +2245,11 @@ router.post('/assessments', authenticateToken, authorizeRoles('instructor', 'adm
   body('courseId').trim().notEmpty().withMessage('Course ID is required'),
   body('timeLimit').isInt({ min: 1 }).withMessage('Time limit must be a positive integer'),
   body('questions').isArray({ min: 1 }).withMessage('At least one question is required')
-], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
+], handleValidationErrors, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const database = await ensureDb();
   const { title, description, moduleId, courseId, timeLimit, questions } = req.body;
+  
+  const { userId } = ensureAuth(req);
   
   // Calculate total points
   const totalPoints = questions.reduce((sum: number, q: any) => sum + (q.points || 0), 0);
@@ -2077,7 +2262,7 @@ router.post('/assessments', authenticateToken, authorizeRoles('instructor', 'adm
     description: description || '',
     moduleId,
     courseId,
-    instructor: req.user._id.toString(),
+    instructor: userId,
     timeLimit,
     totalPoints,
     questions: questions.map((q: any, index: number) => ({
@@ -2114,16 +2299,18 @@ router.put('/assessments/:assessmentId', authenticateToken, authorizeRoles('inst
   body('title').trim().notEmpty().withMessage('Title is required'),
   body('timeLimit').isInt({ min: 1 }).withMessage('Time limit must be a positive integer'),
   body('questions').isArray({ min: 1 }).withMessage('At least one question is required')
-], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
+], handleValidationErrors, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const database = await ensureDb();
   const { assessmentId } = req.params;
   const { title, description, timeLimit, questions } = req.body;
+  
+  const { userId, user } = ensureAuth(req);
   
   try {
     const existingAssessment = await database.get(assessmentId) as AssessmentDoc;
     
     // Check if user is the instructor who created this assessment
-    if (existingAssessment.instructor !== req.user._id.toString() && req.user.role !== 'admin') {
+    if (existingAssessment.instructor !== userId && user.role !== 'admin') {
       return res.status(403).json({ success: false, message: 'Not authorized to update this assessment' });
     }
     
@@ -2156,15 +2343,17 @@ router.put('/assessments/:assessmentId', authenticateToken, authorizeRoles('inst
 }));
 
 // Delete an assessment
-router.delete('/assessments/:assessmentId', authenticateToken, authorizeRoles('instructor', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/assessments/:assessmentId', authenticateToken, authorizeRoles('instructor', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const database = await ensureDb();
   const { assessmentId } = req.params;
+  
+  const { userId, user } = ensureAuth(req);
   
   try {
     const existingAssessment = await database.get(assessmentId) as AssessmentDoc;
     
     // Check if user is the instructor who created this assessment
-    if (existingAssessment.instructor !== req.user._id.toString() && req.user.role !== 'admin') {
+    if (existingAssessment.instructor !== userId && user.role !== 'admin') {
       return res.status(403).json({ success: false, message: 'Not authorized to delete this assessment' });
     }
     
@@ -2180,11 +2369,11 @@ router.delete('/assessments/:assessmentId', authenticateToken, authorizeRoles('i
 router.post('/assessments/:assessmentId/submit', authenticateToken, authorizeRoles('refugee', 'user'), [
   body('answers').isArray().withMessage('Answers must be an array'),
   body('timeSpent').isInt({ min: 0 }).withMessage('Time spent must be a non-negative integer')
-], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
+], handleValidationErrors, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const database = await ensureDb();
   const { assessmentId } = req.params;
   const { answers, timeSpent } = req.body;
-  const userId = req.user._id.toString();
+  const { userId } = ensureAuth(req);
   
   try {
     const assessment = await database.get(assessmentId) as AssessmentDoc;
@@ -2254,21 +2443,19 @@ router.post('/assessments/:assessmentId/submit', authenticateToken, authorizeRol
 }));
 
 // Get user's assessment attempts
-router.get('/assessments/:assessmentId/attempts', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/assessments/:assessmentId/attempts', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { assessmentId } = req.params;
-  const userId = req.user._id.toString();
+  const { userId } = ensureAuth(req);
   
   try {
     const database = await ensureDb();
-    const result = await database.find({
-      selector: {
-        type: 'user_assessment_attempt',
-        userId,
-        assessmentId
-      }
-    });
+      const result = await database.list({ include_docs: true });
+      
+      const attempts = result.rows
+        .map((row: any) => row.doc)
+        .filter((doc: any) => doc && doc.type === 'user_assessment_attempt' && doc.userId === userId && doc.assessmentId === assessmentId);
     
-    res.json({ success: true, data: { attempts: result.docs } });
+      res.json({ success: true, data: { attempts } });
   } catch (err) {
     console.error('Error fetching attempts:', err instanceof Error ? err.message : 'Unknown error');
     res.status(500).json({ success: false, message: 'Failed to fetch attempts' });
@@ -2281,19 +2468,302 @@ router.get('/:courseId/assessments', authenticateToken, authorizeRoles('instruct
   
   try {
     const database = await ensureDb();
-    const result = await database.find({
-      selector: {
-        type: 'assessment',
-        courseId,
-        isActive: true
-      },
-      sort: [{ createdAt: 'asc' }]
-    });
+      const result = await database.list({ include_docs: true });
+      
+      const assessments = result.rows
+        .map((row: any) => row.doc)
+        .filter((doc: any) => doc && doc.type === 'assessment' && doc.courseId === courseId && doc.isActive === true)
+        .sort((a: any, b: any) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
     
-    res.json({ success: true, data: { assessments: result.docs } });
+      res.json({ success: true, data: { assessments } });
   } catch (err) {
     console.error('Error fetching course assessments:', err instanceof Error ? err.message : 'Unknown error');
     res.status(500).json({ success: false, message: 'Failed to fetch assessments' });
+  }
+}));
+
+// Get specific assessment for a course
+router.get('/:courseId/assessments/:assessmentId', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), asyncHandler(async (req: Request, res: Response) => {
+  const { courseId, assessmentId } = req.params;
+  
+  try {
+    const database = await ensureDb();
+    const assessment = await database.get(assessmentId);
+    
+    console.log('🔍 ASSESSMENT DEBUG - Raw assessment from DB:', JSON.stringify(assessment, null, 2));
+    
+    if (!assessment || assessment.type !== 'assessment') {
+      return res.status(404).json({
+        success: false,
+        message: 'Assessment not found'
+      });
+    }
+    
+    // Verify assessment belongs to the specified course
+    if (assessment.courseId !== courseId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Assessment not found in this course'
+      });
+    }
+    
+    console.log('🔍 ASSESSMENT DEBUG - Raw assessment data:', JSON.stringify(assessment, null, 2));
+    console.log('🔍 ASSESSMENT DEBUG - Questions count:', assessment.questions?.length || 0);
+    console.log('🔍 ASSESSMENT DEBUG - Duration:', assessment.duration || assessment.timeLimit || 'No duration set');
+    
+    res.json({ 
+      success: true, 
+      data: { assessment } 
+    });
+  } catch (err) {
+    console.error('Error fetching course assessment:', err instanceof Error ? err.message : 'Unknown error');
+    if ((err as any).status === 404) {
+      res.status(404).json({ success: false, message: 'Assessment not found' });
+    } else {
+      res.status(500).json({ success: false, message: 'Failed to fetch assessment' });
+    }
+  }
+}));
+
+// Get specific discussion for a course  
+router.get('/:courseId/discussions/:discussionId', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), asyncHandler(async (req: Request, res: Response) => {
+  const { courseId, discussionId } = req.params;
+  
+  try {
+    const database = await ensureDb();
+    const discussion = await database.get(discussionId);
+    
+    console.log('🔍 DISCUSSION DEBUG - Raw discussion from DB:', JSON.stringify(discussion, null, 2));
+    
+    if (!discussion || discussion.type !== 'discussion') {
+      return res.status(404).json({
+        success: false,
+        message: 'Discussion not found'
+      });
+    }
+    
+    // Verify discussion belongs to the specified course (check both courseId and course fields)
+    if (discussion.courseId !== courseId && discussion.course !== courseId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Discussion not found in this course'
+      });
+    }
+    
+    console.log('🔍 DISCUSSION DEBUG - Discussion title:', discussion.title);
+    console.log('🔍 DISCUSSION DEBUG - Replies count:', discussion.replies?.length || 0);
+    
+    res.json({ 
+      success: true, 
+      data: { discussion } 
+    });
+  } catch (err) {
+    console.error('Error fetching course discussion:', err instanceof Error ? err.message : 'Unknown error');
+    if ((err as any).status === 404) {
+      res.status(404).json({ success: false, message: 'Discussion not found' });
+    } else {
+      res.status(500).json({ success: false, message: 'Failed to fetch discussion' });
+    }
+  }
+}));
+
+// Get replies for a course-specific discussion
+router.get('/:courseId/discussions/:discussionId/replies', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), asyncHandler(async (req: Request, res: Response) => {
+  const { courseId, discussionId } = req.params;
+  
+  try {
+    const database = await ensureDb();
+    const discussion = await database.get(discussionId) as DiscussionDoc;
+    
+    if (!discussion || discussion.type !== 'discussion') {
+      return res.status(404).json({
+        success: false,
+        message: 'Discussion not found'
+      });
+    }
+    
+    // Verify discussion belongs to the specified course  
+    if (discussion.courseId !== courseId && discussion.course !== courseId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Discussion not found in this course'
+      });
+    }
+    
+    const replies = discussion.replies || [];
+    console.log('🔍 DISCUSSION REPLIES DEBUG - Replies count:', replies.length);
+    
+    res.json({ 
+      success: true, 
+      data: { replies } 
+    });
+  } catch (err) {
+    console.error('Error fetching discussion replies:', err instanceof Error ? err.message : 'Unknown error');
+    if ((err as any).status === 404) {
+      res.status(404).json({ success: false, message: 'Discussion not found' });
+    } else {
+      res.status(500).json({ success: false, message: 'Failed to fetch discussion replies' });
+    }
+  }
+}));
+
+// Add reply to a course-specific discussion
+router.post('/:courseId/discussions/:discussionId/replies', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), [
+  body('content').trim().notEmpty().withMessage('Reply content is required'),
+  body('author').optional().trim()
+], handleValidationErrors, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { courseId, discussionId } = req.params;
+  const { content, author } = req.body;
+  
+  try {
+    const { userId, user } = ensureAuth(req);
+    const database = await ensureDb();
+    const discussion = await database.get(discussionId) as DiscussionDoc;
+    
+    if (!discussion || discussion.type !== 'discussion') {
+      return res.status(404).json({
+        success: false,
+        message: 'Discussion not found'
+      });
+    }
+    
+    // Verify discussion belongs to the specified course
+    if (discussion.courseId !== courseId && discussion.course !== courseId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Discussion not found in this course'
+      });
+    }
+    
+    // Create new reply
+    const newReply = {
+      _id: `reply_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      user: userId,
+      author: author || user.name || user.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Anonymous',
+      content: content.trim(),
+      likes: 0,
+      likedBy: [],
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    
+    // Add reply to discussion
+    if (!discussion.replies) {
+      discussion.replies = [];
+    }
+    discussion.replies.push(newReply);
+    discussion.updatedAt = new Date();
+    
+    // Save updated discussion
+    const updatedDiscussion = await database.insert(discussion);
+    
+    console.log('✅ DISCUSSION REPLY ADDED - Reply ID:', newReply._id);
+    console.log('✅ DISCUSSION REPLY ADDED - Total replies now:', discussion.replies.length);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Reply added successfully',
+      data: { 
+        reply: newReply,
+        discussion: updatedDiscussion 
+      }
+    });
+  } catch (err) {
+    console.error('Error adding discussion reply:', err instanceof Error ? err.message : 'Unknown error');
+    res.status(500).json({
+      success: false,
+      message: 'Failed to add reply'
+    });
+  }
+}));
+
+// Like/Unlike a reply in a course-specific discussion
+router.post('/:courseId/discussions/:discussionId/replies/:replyId/like', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), [
+  body('action').optional().isIn(['like', 'unlike']).withMessage('Action must be like or unlike')
+], handleValidationErrors, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { courseId, discussionId, replyId } = req.params;
+  const { action } = req.body;
+  
+  try {
+    const { userId } = ensureAuth(req);
+    const database = await ensureDb();
+    const discussion = await database.get(discussionId) as DiscussionDoc;
+    
+    if (!discussion || discussion.type !== 'discussion') {
+      return res.status(404).json({
+        success: false,
+        message: 'Discussion not found'
+      });
+    }
+    
+    // Verify discussion belongs to the specified course
+    if (discussion.courseId !== courseId && discussion.course !== courseId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Discussion not found in this course'
+      });
+    }
+    
+    // Find the reply to like/unlike
+    if (!discussion.replies) {
+      discussion.replies = [];
+    }
+    
+    const replyIndex = discussion.replies.findIndex((reply: any) => reply._id === replyId);
+    if (replyIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Reply not found'
+      });
+    }
+    
+    const reply = discussion.replies[replyIndex] as any;
+    
+    // Initialize likes fields if they don't exist
+    if (!reply.likes) reply.likes = 0;
+    if (!reply.likedBy) reply.likedBy = [];
+    
+    // Check if user has already liked this reply
+    const hasLiked = reply.likedBy.includes(userId);
+    
+    // Determine action (toggle if not specified)
+    const shouldLike = action === 'like' ? true : action === 'unlike' ? false : !hasLiked;
+    
+    if (shouldLike && !hasLiked) {
+      // Add like
+      reply.likes += 1;
+      reply.likedBy.push(userId);
+    } else if (!shouldLike && hasLiked) {
+      // Remove like
+      reply.likes = Math.max(0, reply.likes - 1);
+      reply.likedBy = reply.likedBy.filter((id: string) => id !== userId);
+    }
+    
+    // Update the reply in the discussion
+    discussion.replies[replyIndex] = reply;
+    discussion.updatedAt = new Date();
+    
+    // Save updated discussion
+    const updatedDiscussion = await database.insert(discussion);
+    
+    console.log('✅ REPLY LIKE UPDATED - Reply ID:', replyId);
+    console.log('✅ REPLY LIKE UPDATED - Likes:', reply.likes, 'Action:', shouldLike ? 'liked' : 'unliked');
+    
+    res.json({
+      success: true,
+      message: shouldLike ? 'Reply liked successfully' : 'Reply unliked successfully',
+      data: { 
+        reply,
+        likes: reply.likes,
+        hasLiked: reply.likedBy.includes(userId)
+      }
+    });
+  } catch (err) {
+    console.error('Error updating reply like:', err instanceof Error ? err.message : 'Unknown error');
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update like'
+    });
   }
 }));
 
@@ -2343,7 +2813,7 @@ router.post('/modules/comprehensive', authenticateToken, authorizeRoles('instruc
   body('content_text').optional().isString(),
   body('content_file').optional(),
   body('contentItems').optional().isString()
-], handleValidationErrors, asyncHandler(async (req: MulterRequest, res: Response) => {
+], handleValidationErrors, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const database = await ensureDb();
     
@@ -2510,7 +2980,7 @@ router.post('/modules/comprehensive', authenticateToken, authorizeRoles('instruc
           course.updatedAt = new Date();
           
           // Update the course document
-          await database.put(course);
+          await database.insert(course);
           console.log('✅ Module added to course modules array');
         }
       }
@@ -2537,7 +3007,7 @@ router.post('/modules/comprehensive', authenticateToken, authorizeRoles('instruc
               moduleId: moduleId,
               module: moduleId,
               course: courseId,
-              user: req.user!._id.toString(),
+            user: ensureAuth(req).userId,
               replies: [],
               createdAt: new Date(),
               updatedAt: new Date()
@@ -2583,7 +3053,7 @@ router.post('/modules', authenticateToken, authorizeRoles('instructor', 'admin',
   body('content_text').optional().isString(),
   body('content_file').optional(),
   body('contentItems').optional().isString()
-], handleValidationErrors, asyncHandler(async (req: MulterRequest, res: Response) => {
+], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
   const database = await ensureDb();
   const { courseId, title, description, content_type, duration, isMandatory, order, content_text, contentItems } = req.body;
   let content = '';
@@ -2647,7 +3117,7 @@ router.post('/modules', authenticateToken, authorizeRoles('instructor', 'admin',
         course.updatedAt = new Date();
         
         // Update the course document
-        await database.put(course);
+        await database.insert(course);
         console.log('✅ Module added to course modules array (basic endpoint)');
       }
     }
@@ -2717,7 +3187,7 @@ router.get('/modules/:moduleId/content-check', authenticateToken, authorizeRoles
 }));
 
 // Update module (instructor/admin only, full update, multipart/form-data)
-router.put('/modules/:moduleId', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), upload.any(), asyncHandler(async (req: MulterRequest, res: Response) => {
+router.put('/modules/:moduleId', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), upload.any(), asyncHandler(async (req: Request, res: Response) => {
   const database = await ensureDb();
   const moduleId = req.params.moduleId;
   let module = await database.get(moduleId) as ModuleDoc;
@@ -2938,26 +3408,32 @@ router.post('/user-progress', authenticateToken, authorizeRoles('instructor', 'a
 }));
 
 // Get user progress by ID (only user, admin, or instructor)
-router.get('/user-progress/:userProgressId', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/user-progress/:userProgressId', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const database = await ensureDb();
   let userProgress = await database.get(req.params.userProgressId) as any;
   if (!userProgress) {
     return res.status(404).json({ success: false, message: 'User progress not found' });
   }
-  if (req.user.role !== 'admin' && req.user.role !== 'instructor' && userProgress.user !== req.user._id) {
+  
+  const { userId, user } = ensureAuth(req);
+  
+  if (user.role !== 'admin' && user.role !== 'instructor' && userProgress.user !== userId) {
     return res.status(403).json({ success: false, message: 'Not authorized' });
   }
   res.json({ success: true, data: { userProgress } });
 }));
 
 // Delete user progress (only user, admin, or instructor)
-router.delete('/user-progress/:userProgressId', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/user-progress/:userProgressId', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const database = await ensureDb();
   let userProgress = await database.get(req.params.userProgressId) as any;
   if (!userProgress) {
     return res.status(404).json({ success: false, message: 'User progress not found' });
   }
-  if (req.user.role !== 'admin' && req.user.role !== 'instructor' && userProgress.user !== req.user._id) {
+  
+  const { userId, user } = ensureAuth(req);
+  
+  if (user.role !== 'admin' && user.role !== 'instructor' && userProgress.user !== userId) {
     return res.status(403).json({ success: false, message: 'Not authorized' });
   }
   await database.destroy(req.params.userProgressId, userProgress._rev);
@@ -2965,19 +3441,21 @@ router.delete('/user-progress/:userProgressId', authenticateToken, authorizeRole
 }));
 
 // Get user course stats
-router.get('/user/:userId/stats', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/user/:userId/stats', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { userId } = req.params;
   
-  console.log('📊 Stats endpoint called for user:', userId, 'by user:', req.user?._id);
+  const { userId: requestingUserId, user } = ensureAuth(req);
+  
+  console.log('📊 Stats endpoint called for user:', userId, 'by user:', requestingUserId);
   console.log('🔍 Request user object:', { 
-    _id: req.user?._id, 
-    role: req.user?.role, 
-    email: req.user?.email 
+    _id: requestingUserId, 
+    role: user.role, 
+    email: user.email 
   });
   
   // Only allow the user to access their own stats or admin
-  if (req.user?._id.toString() !== userId && req.user?.role !== 'admin') {
-    console.log('❌ Authorization failed - user requesting:', req.user?._id, 'for userId:', userId);
+  if (requestingUserId !== userId && user.role !== 'admin') {
+    console.log('❌ Authorization failed - user requesting:', requestingUserId, 'for userId:', userId);
     return res.status(403).json({ success: false, message: 'Not authorized' });
   }
 
@@ -3254,10 +3732,10 @@ router.get('/:courseId', authenticateToken, asyncHandler(async (req: Request, re
 
 // --- SUBMISSION ENDPOINTS ---
 // Submit assignment
-router.post('/submissions', authenticateToken, authorizeRoles('refugee', 'user', 'instructor'), upload.any(), asyncHandler(async (req: MulterRequest, res: Response) => {
+router.post('/submissions', authenticateToken, authorizeRoles('refugee', 'user', 'instructor'), upload.any(), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { assessmentId, courseId, moduleId, submissionType, submissionText, submissionLink } = req.body;
-    const userId = (req as any).user?.id || (req as any).user?._id;
+    const { userId } = ensureAuth(req);
     
     const files = req.files as Express.Multer.File[] | undefined;
     
@@ -3283,15 +3761,12 @@ router.post('/submissions', authenticateToken, authorizeRoles('refugee', 'user',
     const database = await ensureDb();
     
     // Check if submission already exists
-    const existingSubmissions = await database.find({
-      selector: {
-        type: 'assignment_submission',
-        userId,
-        assessmentId
-      }
-    });
+    const result = await database.list({ include_docs: true });
+    const existingSubmissions = result.rows
+      .map((row: any) => row.doc)
+      .filter((doc: any) => doc && doc.type === 'assignment_submission' && doc.userId === userId && doc.assessmentId === assessmentId);
 
-    if (existingSubmissions.docs.length > 0) {
+    if (existingSubmissions.length > 0) {
       return res.status(409).json({
         success: false,
         message: 'Assignment has already been submitted'
@@ -3453,7 +3928,7 @@ router.put('/submissions/:submissionId/grade', authenticateToken, authorizeRoles
       status: 'graded'
     };
 
-    await database.put(updatedSubmission);
+    await database.insert(updatedSubmission);
 
     res.json({
       success: true,
@@ -3483,21 +3958,21 @@ router.get('/test-route', (req: Request, res: Response) => {
 });
 
 // Get submissions for a course (for checking if already submitted)
-router.get('/:courseId/submissions', authenticateToken, authorizeRoles('refugee', 'user', 'instructor', 'admin'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/:courseId/submissions', authenticateToken, authorizeRoles('refugee', 'user', 'instructor', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     console.log('📋 GET submissions endpoint called');
     
     const { courseId } = req.params;
     const { assessmentId } = req.query;
-    const userId = (req as any).user?.id || (req as any).user?._id;
-    const userRole = (req as any).user?.role;
+
+    const { userId: requestingUserId, user: requestingUser } = ensureAuth(req);
 
     console.log('📋 Submissions GET request:', {
       courseId,
       assessmentId,
-      userId,
-      userRole,
-      userObject: (req as any).user
+      userId: requestingUserId,
+      userRole: requestingUser.role,
+      userObject: requestingUser
     });
 
     console.log('📋 About to get database...');
@@ -3510,8 +3985,8 @@ router.get('/:courseId/submissions', authenticateToken, authorizeRoles('refugee'
     };
 
     // If refugee/user, only show their own submissions
-    if (userRole === 'refugee' || userRole === 'user') {
-      selector.userId = userId;
+    if (requestingUser.role === 'refugee' || requestingUser.role === 'user') {
+      selector.userId = requestingUserId;
     }
 
     // Filter by assessment if provided
@@ -3521,18 +3996,30 @@ router.get('/:courseId/submissions', authenticateToken, authorizeRoles('refugee'
 
     console.log('📋 Database selector:', selector);
 
-    const submissions = await database.find({
-      selector
+    const result = await database.list({ include_docs: true });
+    let submissions = result.rows
+      .map((row: any) => row.doc)
+      .filter((doc: any) => {
+        if (!doc || doc.type !== 'assignment_submission' || doc.courseId !== courseId) {
+          return false;
+        }
+        if ((requestingUser.role === 'refugee' || requestingUser.role === 'user') && doc.userId !== requestingUserId) {
+          return false;
+        }
+        if (assessmentId && doc.assessmentId !== assessmentId) {
+          return false;
+        }
+        return true;
     });
 
-    console.log('📋 Raw submissions found:', submissions.docs.length);
-    console.log('📋 Raw submissions data:', submissions.docs);
+    console.log('📋 Raw submissions found:', submissions.length);
+    console.log('📋 Raw submissions data:', submissions);
 
     console.log('📋 Starting enrichment process...');
     
     // For now, return submissions without enrichment to avoid the 500 error
     // We can add enrichment back later once the basic functionality works
-    const enrichedSubmissions = submissions.docs.map((submission: AssignmentSubmissionDoc) => {
+    const enrichedSubmissions = submissions.map((submission: AssignmentSubmissionDoc) => {
       return {
         ...submission,
         studentName: `User ${submission.userId}`,
@@ -3574,5 +4061,186 @@ router.all('*', (req: Request, res: Response) => {
   console.log('🔍 CATCH-ALL ROUTE HIT:', req.method, req.originalUrl);
   res.status(404).json({ message: 'Route not found in course routes', path: req.originalUrl });
 });
+
+// Submit quiz through course route (alternative submission method)
+router.post('/:courseId/quiz/:quizId/submit', authenticateToken, authorizeRoles('refugee', 'user'), [
+  body('answers').isObject().withMessage('Answers must be an object'),
+  body('timeSpent').optional().isInt({ min: 0 }).withMessage('Time spent must be non-negative')
+], handleValidationErrors, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { courseId, quizId } = req.params;
+  const { answers, timeSpent } = req.body;
+  const { userId } = ensureAuth(req);
+
+  console.log('📤 Quiz submission via course route:', { courseId, quizId, userId });
+
+  const database = await ensureDb();
+
+  // Check if user is enrolled in the course
+  const course = await database.get(courseId) as CourseDoc;
+  if (!course) {
+    return res.status(404).json({
+      success: false,
+      message: 'Course not found'
+    });
+  }
+
+  if (!course.enrolledStudents?.includes(userId)) {
+    return res.status(403).json({
+      success: false,
+      message: 'You must be enrolled in this course to submit quizzes'
+    });
+  }
+
+  // Get the quiz document
+  const quiz = await database.get(quizId);
+  if (!quiz) {
+    return res.status(404).json({
+      success: false,
+      message: 'Quiz not found'
+    });
+  }
+
+  // Check for existing completed session
+  const result = await database.list({ include_docs: true });
+  const existingSessions = result.rows
+    .map((row: any) => row.doc)
+    .filter((doc: any) => doc && doc.type === 'quiz_session' && doc.userId === userId && doc.quizId === quizId && doc.status === 'completed')
+    .slice(0, 1);
+
+  if (existingSessions.length > 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'You have already completed this quiz'
+    });
+  }
+
+  // Calculate score
+  let correctAnswers = 0;
+  if (quiz.questions) {
+    quiz.questions.forEach((question: any, index: number) => {
+      const userAnswer = answers[index];
+      const correctAnswer = question.correctAnswer;
+      
+      if (question.type === 'multiple-choice' || question.type === 'multiple_choice') {
+        if (userAnswer === correctAnswer) {
+          correctAnswers++;
+        }
+      } else if (question.type === 'true-false' || question.type === 'true_false') {
+        const normalizedUserAnswer = userAnswer === true || userAnswer === 'true' || userAnswer === 1 || userAnswer === '1';
+        const normalizedCorrectAnswer = correctAnswer === true || correctAnswer === 'true' || correctAnswer === 1 || correctAnswer === '1';
+        
+        if (normalizedUserAnswer === normalizedCorrectAnswer) {
+          correctAnswers++;
+        }
+      } else if (question.type === 'short-answer' || question.type === 'short_answer') {
+        if (userAnswer && userAnswer.toString().trim().length > 0) {
+          if (correctAnswer && typeof correctAnswer === 'string') {
+            const userAnswerLower = userAnswer.toString().toLowerCase().trim();
+            const correctAnswerLower = correctAnswer.toLowerCase().trim();
+            if (userAnswerLower === correctAnswerLower || userAnswerLower.includes(correctAnswerLower)) {
+              correctAnswers++;
+            }
+          } else {
+            correctAnswers++;
+          }
+        }
+      }
+    });
+  }
+  
+  const score = quiz.questions ? Math.round((correctAnswers / quiz.questions.length) * 100) : 0;
+  const now = new Date();
+
+  // Create a quiz session record
+  const sessionDoc = {
+    _id: `quiz_session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    type: 'quiz_session',
+    userId,
+    quizId,
+    courseId,
+    moduleId: quiz.moduleId,
+    startTime: now,
+    durationMinutes: quiz.duration || 30,
+    endTime: now,
+    status: 'completed',
+    answers,
+    timeSpent: timeSpent || 0,
+    score,
+    submittedAt: now,
+    isExpired: false,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  await database.insert(sessionDoc);
+
+  // Update course progress (same logic as quiz-session routes)
+  try {
+    const moduleDoc = await database.get(quiz.moduleId);
+    if (moduleDoc && moduleDoc.quizzes) {
+      const quizIndex = moduleDoc.quizzes.findIndex((q: any) => q._id === quizId);
+      if (quizIndex !== -1) {
+        let itemIndex = 0;
+        if (moduleDoc.description) itemIndex++;
+        if (moduleDoc.content) itemIndex++;
+        if (moduleDoc.videoUrl) itemIndex++;
+        if (moduleDoc.resources) itemIndex += moduleDoc.resources.length;
+        if (moduleDoc.assessments) itemIndex += moduleDoc.assessments.length;
+        itemIndex += quizIndex;
+        
+        const completionKey = `quiz-${itemIndex}`;
+        
+        if (!course.studentProgress) {
+          course.studentProgress = [];
+        }
+        
+        let moduleProgress = course.studentProgress.find(
+          (p: any) => p.student === userId && p.moduleId === quiz.moduleId
+        );
+        
+        if (!moduleProgress) {
+          moduleProgress = {
+            student: userId,
+            moduleId: quiz.moduleId,
+            completed: false,
+            score: 0,
+            completedAt: null,
+            completedItems: []
+          };
+          course.studentProgress.push(moduleProgress);
+        }
+        
+        if (!moduleProgress.completedItems) {
+          moduleProgress.completedItems = [];
+        }
+        
+        if (!moduleProgress.completedItems.includes(completionKey)) {
+          moduleProgress.completedItems.push(completionKey);
+          
+          course.updatedAt = new Date();
+          const latestCourse = await database.get(course._id);
+          course._rev = latestCourse._rev;
+          await database.insert(course);
+          
+          console.log('✅ Course progress updated via course quiz submission');
+        }
+      }
+    }
+  } catch (progressError: any) {
+    console.error('⚠️ Failed to update course progress:', progressError.message);
+  }
+
+  res.json({
+    success: true,
+    message: 'Quiz submitted successfully',
+    data: {
+      sessionId: sessionDoc._id,
+      score,
+      timeSpent: timeSpent || 0,
+      submittedAt: now,
+      answers
+    }
+  });
+}));
 
 export default router;

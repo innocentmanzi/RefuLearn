@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
@@ -261,24 +262,54 @@ const HelpManagement = () => {
     const fetchTickets = async () => {
       setLoading(true);
       setError('');
-      try {
-        let url = '/api/help/all-tickets';
-        const params = [];
-        if (statusFilter !== 'all') params.push(`status=${statusFilter}`);
-        if (priorityFilter !== 'all') params.push(`priority=${priorityFilter}`);
-        if (params.length > 0) url += '?' + params.join('&');
-        const res = await fetch(url, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+      
+      const isOnline = navigator.onLine;
+      let ticketsData = [];
+
+      if (isOnline) {
+        try {
+          // Try online API calls first (preserving existing behavior)
+          console.log('🌐 Online mode: Fetching admin help tickets from API...');
+          
+          let url = '/api/help/all-tickets';
+          const params = [];
+          if (statusFilter !== 'all') params.push(`status=${statusFilter}`);
+          if (priorityFilter !== 'all') params.push(`priority=${priorityFilter}`);
+          if (params.length > 0) url += '?' + params.join('&');
+          const res = await fetch(url, {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+            }
+          });
+          const data = await res.json();
+          if (data.success) {
+            ticketsData = data.data.tickets || [];
+            
+            // Store tickets data for offline use
+            await offlineIntegrationService.storeAdminHelpTickets(ticketsData);
+            console.log('✅ Admin help tickets stored for offline use');
+          } else {
+            throw new Error(data.message || 'Failed to fetch tickets.');
           }
-        });
-        const data = await res.json();
-        if (data.success) {
-          setTickets(data.data.tickets || []);
-          setFilteredTickets(data.data.tickets || []);
-        } else {
-          setError(data.message || 'Failed to fetch tickets.');
+        } catch (onlineError) {
+          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+          
+          // Fall back to offline data if online fails
+          ticketsData = await offlineIntegrationService.getAdminHelpTickets();
+          
+          if (ticketsData.length === 0) {
+            throw onlineError;
+          }
         }
+      } else {
+        // Offline mode: use offline services
+        console.log('📴 Offline mode: Using offline admin help tickets data...');
+        ticketsData = await offlineIntegrationService.getAdminHelpTickets();
+      }
+
+      try {
+        setTickets(ticketsData);
+        setFilteredTickets(ticketsData);
       } catch (err) {
         setError('Network error.');
       } finally {

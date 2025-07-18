@@ -4,6 +4,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowBack, Add, Edit, Delete, Quiz, Assignment, Assessment } from '@mui/icons-material';
 import { useUser } from '../../contexts/UserContext';
 import AssessmentCreator from '../../components/AssessmentCreator';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
@@ -234,26 +235,48 @@ const Quizzes = () => {
       setLoading(true);
       console.log('🔍 Fetching quizzes from /api/instructor/quizzes...'); // Debug log
       
-      const response = await fetch('/api/instructor/quizzes', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+      const isOnline = navigator.onLine;
+      let quizzesData = [];
+
+      if (isOnline) {
+        try {
+          // Try online API calls first (preserving existing behavior)
+          console.log('🌐 Online mode: Fetching instructor quizzes from API...');
+          
+          const response = await fetch('/api/instructor/quizzes', {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          console.log('📡 Quiz fetch response status:', response.status); // Debug log
+
+          if (!response.ok) {
+            throw new Error('Failed to fetch quizzes');
+          }
+
+          const data = await response.json();
+          console.log('📚 Quiz fetch response data:', data); // Debug log
+          
+          quizzesData = data.data?.quizzes || [];
+          console.log(`✅ Found ${quizzesData.length} quizzes:`, quizzesData.map(q => ({ id: q._id, title: q.title, moduleId: q.moduleId }))); // Debug log
+          
+          // Store quizzes data for offline use
+          await offlineIntegrationService.storeInstructorQuizzes(quizzesData);
+          
+        } catch (onlineError) {
+          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+          // Fall back to offline data if online fails
+          quizzesData = await offlineIntegrationService.getInstructorQuizzes();
         }
-      });
-
-      console.log('📡 Quiz fetch response status:', response.status); // Debug log
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch quizzes');
+      } else {
+        // Offline mode: use offline services
+        console.log('📴 Offline mode: Using offline instructor quizzes data...');
+        quizzesData = await offlineIntegrationService.getInstructorQuizzes();
       }
 
-      const data = await response.json();
-      console.log('📚 Quiz fetch response data:', data); // Debug log
-      
-      const quizzes = data.data?.quizzes || [];
-      console.log(`✅ Found ${quizzes.length} quizzes:`, quizzes.map(q => ({ id: q._id, title: q.title, moduleId: q.moduleId }))); // Debug log
-      
-      setQuizzes(quizzes);
+      setQuizzes(quizzesData || []);
     } catch (err) {
       console.error('❌ Error fetching quizzes:', err); // Debug log
       setError(err.message || 'Failed to load quizzes');
@@ -265,87 +288,219 @@ const Quizzes = () => {
   const fetchCourses = async () => {
     try {
       console.log('🔍 Fetching courses for dropdown...');
-      const response = await fetch('/api/instructor/courses', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+      
+      const isOnline = navigator.onLine;
+      let coursesData = [];
+
+      if (isOnline) {
+        try {
+          // Try online API calls first (preserving existing behavior)
+          console.log('🌐 Online mode: Fetching instructor courses for quizzes...');
+          
+          const response = await fetch('/api/instructor/courses', {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          console.log('📡 Courses API response status:', response.status);
+
+          if (!response.ok) {
+            throw new Error('Failed to fetch courses');
+          }
+
+          const data = await response.json();
+          console.log('📚 Courses API response:', data);
+          coursesData = data.data?.courses || [];
+          console.log(`✅ Found ${coursesData.length} courses for dropdown:`, coursesData.map(c => ({ id: c._id, title: c.title })));
+          
+          // Store courses data for offline use
+          await offlineIntegrationService.storeInstructorCourses(coursesData);
+          
+        } catch (onlineError) {
+          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+          // Fall back to offline data if online fails
+          coursesData = await offlineIntegrationService.getInstructorCourses();
         }
-      });
-
-      console.log('📡 Courses API response status:', response.status);
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch courses');
+      } else {
+        // Offline mode: use offline services
+        console.log('📴 Offline mode: Using offline instructor courses for quizzes...');
+        coursesData = await offlineIntegrationService.getInstructorCourses();
       }
 
-      const data = await response.json();
-      console.log('📚 Courses API response:', data);
-      const courses = data.data?.courses || [];
-      console.log(`✅ Found ${courses.length} courses for dropdown:`, courses.map(c => ({ id: c._id, title: c.title })));
-      setCourses(courses);
+      setCourses(coursesData || []);
     } catch (err) {
       console.error('❌ Error fetching courses:', err);
     }
   };
 
   const createQuiz = async (quizData) => {
-    const response = await fetch('/api/instructor/quizzes', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify(quizData)
-    });
+    const isOnline = navigator.onLine;
+    let success = false;
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || 'Failed to create quiz');
+    if (isOnline) {
+      try {
+        // Try online quiz creation first (preserving existing behavior)
+        console.log('🌐 Online mode: Creating quiz...');
+        
+        const response = await fetch('/api/instructor/quizzes', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(quizData)
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Failed to create quiz');
+        }
+
+        success = true;
+        console.log('✅ Quiz created successfully online');
+        
+        // Show success message and refresh quiz list
+        const successMessage = returnUrl ? 'Quiz created successfully!' : 'Quiz created successfully';
+        setSuccess(successMessage);
+        fetchQuizzes();
+        
+        // Clear success message after delay
+        setTimeout(() => setSuccess(''), 3000);
+        
+      } catch (onlineError) {
+        console.warn('⚠️ Online quiz creation failed, using offline:', onlineError);
+        // Fall back to offline quiz creation
+        const offlineResult = await offlineIntegrationService.storeQuizCreation(quizData);
+        
+        if (offlineResult.success) {
+          success = true;
+          console.log('✅ Quiz creation queued for offline sync');
+          
+          const successMessage = returnUrl ? 'Quiz created offline! Will sync when online.' : 'Quiz created offline! Will sync when online.';
+          setSuccess(successMessage);
+          fetchQuizzes();
+          
+          // Clear success message after delay
+          setTimeout(() => setSuccess(''), 3000);
+        } else {
+          throw new Error('Failed to create quiz offline');
+        }
+      }
+    } else {
+      // Offline quiz creation
+      console.log('📴 Offline mode: Creating quiz offline...');
+      const offlineResult = await offlineIntegrationService.storeQuizCreation(quizData);
+      
+      if (offlineResult.success) {
+        success = true;
+        console.log('✅ Quiz creation queued for offline sync');
+        
+        const successMessage = returnUrl ? 'Quiz created offline! Will sync when online.' : 'Quiz created offline! Will sync when online.';
+        setSuccess(successMessage);
+        fetchQuizzes();
+        
+        // Clear success message after delay
+        setTimeout(() => setSuccess(''), 3000);
+      } else {
+        throw new Error('Failed to create quiz offline');
+      }
     }
 
-    // Show success message and refresh quiz list
-    const successMessage = returnUrl ? 'Quiz created successfully!' : 'Quiz created successfully';
-    setSuccess(successMessage);
-    fetchQuizzes();
-    
-    // Clear success message after delay
-    setTimeout(() => setSuccess(''), 3000);
-    
+    if (!success) {
+      throw new Error('Failed to create quiz');
+    }
+
     return { success: true };
   };
 
   const updateQuiz = async (quizId, quizData) => {
     console.log('🔄 updateQuiz called with:', { quizId, quizData });
     
-    const response = await fetch(`/api/instructor/quizzes/${quizId}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify(quizData)
-    });
+    const isOnline = navigator.onLine;
+    let success = false;
 
-    console.log('📡 API response status:', response.status);
-    console.log('📡 API response ok:', response.ok);
+    if (isOnline) {
+      try {
+        // Try online quiz update first (preserving existing behavior)
+        console.log('🌐 Online mode: Updating quiz...');
+        
+        const response = await fetch(`/api/instructor/quizzes/${quizId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(quizData)
+        });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.error('❌ API error response:', errorData);
-      throw new Error(errorData.message || 'Failed to update quiz');
+        console.log('📡 API response status:', response.status);
+        console.log('📡 API response ok:', response.ok);
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error('❌ API error response:', errorData);
+          throw new Error(errorData.message || 'Failed to update quiz');
+        }
+
+        const responseData = await response.json();
+        console.log('✅ API success response:', responseData);
+
+        success = true;
+        console.log('✅ Quiz updated successfully online');
+        
+        // Show success message and refresh quiz list
+        const successMessage = returnUrl ? 'Quiz updated successfully!' : 'Quiz updated successfully';
+        setSuccess(successMessage);
+        fetchQuizzes();
+        
+        // Clear success message after delay
+        setTimeout(() => setSuccess(''), 3000);
+        
+      } catch (onlineError) {
+        console.warn('⚠️ Online quiz update failed, using offline:', onlineError);
+        // Fall back to offline quiz update
+        const offlineResult = await offlineIntegrationService.storeQuizUpdate(quizId, quizData);
+        
+        if (offlineResult.success) {
+          success = true;
+          console.log('✅ Quiz update queued for offline sync');
+          
+          const successMessage = returnUrl ? 'Quiz updated offline! Will sync when online.' : 'Quiz updated offline! Will sync when online.';
+          setSuccess(successMessage);
+          fetchQuizzes();
+          
+          // Clear success message after delay
+          setTimeout(() => setSuccess(''), 3000);
+        } else {
+          throw new Error('Failed to update quiz offline');
+        }
+      }
+    } else {
+      // Offline quiz update
+      console.log('📴 Offline mode: Updating quiz offline...');
+      const offlineResult = await offlineIntegrationService.storeQuizUpdate(quizId, quizData);
+      
+      if (offlineResult.success) {
+        success = true;
+        console.log('✅ Quiz update queued for offline sync');
+        
+        const successMessage = returnUrl ? 'Quiz updated offline! Will sync when online.' : 'Quiz updated offline! Will sync when online.';
+        setSuccess(successMessage);
+        fetchQuizzes();
+        
+        // Clear success message after delay
+        setTimeout(() => setSuccess(''), 3000);
+      } else {
+        throw new Error('Failed to update quiz offline');
+      }
     }
 
-    const responseData = await response.json();
-    console.log('✅ API success response:', responseData);
+    if (!success) {
+      throw new Error('Failed to update quiz');
+    }
 
-    // Show success message and refresh quiz list
-    const successMessage = returnUrl ? 'Quiz updated successfully!' : 'Quiz updated successfully';
-    setSuccess(successMessage);
-    fetchQuizzes();
-    
-    // Clear success message after delay
-    setTimeout(() => setSuccess(''), 3000);
-    
     console.log('✅ updateQuiz completed successfully');
     return { success: true };
   };

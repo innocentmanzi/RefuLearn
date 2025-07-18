@@ -1,4 +1,27 @@
 import express, { Request, Response } from 'express';
+
+// Use proper authenticated request type
+interface AuthenticatedRequest extends Request {
+  user?: {
+    _id: string;
+    role?: string;
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    [key: string]: any;
+  };
+}
+
+// Helper function to ensure user authentication
+const ensureAuth = (req: AuthenticatedRequest): { userId: string; user: NonNullable<AuthenticatedRequest['user']> } => {
+  if (!req.user?._id) {
+    throw new Error('User authentication required');
+  }
+  return {
+    userId: req.user._id.toString(),
+    user: req.user as NonNullable<AuthenticatedRequest['user']>
+  };
+};
 import { body } from 'express-validator';
 import jwt, { Secret, SignOptions } from 'jsonwebtoken';
 import crypto from 'crypto';
@@ -413,9 +436,10 @@ router.post('/login', validate(loginValidation), asyncHandler(async (req: Reques
 }));
 
 // Get current user
-router.get('/me', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/me', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const database = await ensureDb();
-  const user = await database.get((req.user as any)._id) as UserDoc;
+  const user = await database.get(userId) as UserDoc;
   const { password, ...userWithoutPassword } = user;
   
   res.json({
@@ -556,10 +580,11 @@ router.post('/change-password', authenticateToken, [
   body('old_password').notEmpty().withMessage('Old password is required'),
   body('new_password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters long'),
   body('confirm_new_password').custom((value, { req }) => value === req.body.new_password).withMessage('Passwords do not match')
-], validate([body('old_password'), body('new_password'), body('confirm_new_password')]), asyncHandler(async (req: Request, res: Response) => {
+], validate([body('old_password'), body('new_password'), body('confirm_new_password')]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { old_password, new_password } = req.body;
+  const { userId } = ensureAuth(req);
   const database = await ensureDb();
-  const user = await database.get(req.user._id) as UserDoc;
+  const user = await database.get(userId) as UserDoc;
   if (!user) {
     res.status(404).json({ success: false, message: 'User not found' });
     return;
@@ -578,9 +603,10 @@ router.post('/change-password', authenticateToken, [
 }));
 
 // Get user settings
-router.get('/settings', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/settings', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const database = await ensureDb();
-  const user = await database.get(req.user._id) as UserDoc;
+  const user = await database.get(userId) as UserDoc;
   if (!user) {
     return res.status(404).json({ success: false, message: 'User not found' });
   }
@@ -617,9 +643,10 @@ router.put('/settings', authenticateToken, [
   body('timezone').optional().isString().withMessage('Invalid timezone'),
   body('notifications').optional().isObject().withMessage('Notifications must be an object'),
   body('privacy').optional().isObject().withMessage('Privacy must be an object')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const database = await ensureDb();
-  const user = await database.get(req.user._id) as UserDoc;
+  const user = await database.get(userId) as UserDoc;
   if (!user) {
     return res.status(404).json({ success: false, message: 'User not found' });
   }
@@ -683,9 +710,10 @@ router.put('/settings', authenticateToken, [
 
 // Profile update (PATCH, multipart/form-data)
 const upload = multer({ dest: 'uploads/' });
-router.patch('/profile', authenticateToken, upload.single('profile_picture'), asyncHandler(async (req: Request, res: Response) => {
+router.patch('/profile', authenticateToken, upload.single('profile_picture'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const database = await ensureDb();
-  const user = await database.get(req.user._id) as UserDoc;
+  const user = await database.get(userId) as UserDoc;
   if (!user) {
     return res.status(404).json({ success: false, message: 'User not found' });
   }

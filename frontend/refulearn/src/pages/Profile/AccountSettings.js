@@ -245,140 +245,193 @@ const LoadingSpinner = styled.div`
 `;
 
 const AccountSettings = () => {
-  const { user } = useUser();
-  const [settings, setSettings] = useState({
-    email: '',
-    language: 'en',
-    timezone: 'UTC+2',
-    notifications: {
-      email: true,
-      push: false,
-      sms: false,
-      courseUpdates: true,
-      newMessages: true,
-      jobAlerts: false,
-      newsletter: true
-    },
-    privacy: {
-      profileVisibility: 'public',
-      showEmail: false,
-      showPhone: false,
-      allowMessages: true
-    }
-  });
-
+  const { user, token } = useUser();
+  const [settings, setSettings] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
     newPassword: '',
     confirmPassword: ''
   });
-
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [changingPassword, setChangingPassword] = useState(false);
+  const [personalData, setPersonalData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    language: 'en'
+  });
+  const [notificationSettings, setNotificationSettings] = useState({
+    emailNotifications: true,
+    pushNotifications: true,
+    coursesUpdates: true,
+    gradeUpdates: true
+  });
   const [message, setMessage] = useState({ type: '', text: '' });
+  const [changingPassword, setChangingPassword] = useState(false);
 
-  // Fetch settings on component mount
   useEffect(() => {
-    fetchSettings();
-  }, []);
+    const fetchSettings = async () => {
+      try {
+        setLoading(true);
+        setError('');
+        
+        console.log('🌐 Fetching account settings from API...');
+        
+        const response = await fetch('/api/auth/settings', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
 
-  const fetchSettings = async () => {
-    setLoading(true);
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('/api/auth/settings', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+        if (response.ok) {
+          const settingsApiData = await response.json();
+          const settingsData = settingsApiData.data.settings;
+          console.log('✅ Account settings data received:', settingsData);
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setSettings(data.data.settings);
+          // Ensure privacy defaults are set
+          const settingsWithDefaults = {
+            ...settingsData,
+            privacy: {
+              profileVisibility: 'public',
+              showEmail: false,
+              showPhone: false,
+              allowMessages: true,
+              ...settingsData.privacy
+            }
+          };
+          
+          setSettings(settingsWithDefaults);
+          
+          // Set form data from settings
+          setPersonalData({
+            firstName: user?.firstName || '',
+            lastName: user?.lastName || '',
+            email: settingsData.email || '',
+            phone: user?.phone || '',
+            language: settingsData.language || 'en'
+          });
+          
+          setNotificationSettings({
+            emailNotifications: settingsData.notifications?.email ?? true,
+            pushNotifications: settingsData.notifications?.push ?? true,
+            coursesUpdates: settingsData.notifications?.courseUpdates ?? true,
+            gradeUpdates: settingsData.notifications?.gradeUpdates ?? true
+          });
+        } else {
+          throw new Error('Failed to fetch settings');
         }
-      } else {
-        setMessage({ type: 'error', text: 'Failed to load settings' });
+
+      } catch (err) {
+        console.error('❌ Error fetching settings:', err);
+        setError(err.message || 'Failed to load settings');
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      console.error('Error fetching settings:', error);
-      setMessage({ type: 'error', text: 'Failed to load settings' });
-    } finally {
-      setLoading(false);
+    };
+
+    if (token) {
+      fetchSettings();
     }
-  };
+  }, [token]);
 
-  const handleInputChange = (field, value) => {
-    setSettings(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
-
-  const handleNotificationChange = (key, value) => {
-    setSettings(prev => ({
-      ...prev,
-      notifications: {
-        ...prev.notifications,
-        [key]: value
-      }
-    }));
-  };
-
-  const handlePrivacyChange = (key, value) => {
-    setSettings(prev => ({
-      ...prev,
-      privacy: {
-        ...prev.privacy,
-        [key]: value
-      }
-    }));
-  };
-
-  const handlePasswordChange = (field, value) => {
-    setPasswordData(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    setMessage({ type: '', text: '' });
-
+  const handleUpdateSettings = async (settingsType, data) => {
     try {
-      const token = localStorage.getItem('token');
+      setLoading(true);
+      setError('');
+      setSuccess('');
+      
+      console.log('🌐 Updating account settings...', { settingsType, data });
+      
       const response = await fetch('/api/auth/settings', {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(settings)
+        body: JSON.stringify(data)
       });
 
       if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setSettings(data.data.settings);
-          setMessage({ type: 'success', text: 'Settings saved successfully!' });
-        } else {
-          setMessage({ type: 'error', text: data.message || 'Failed to save settings' });
-        }
+        const updatedSettings = await response.json();
+        console.log('✅ Settings update successful');
+        
+        setSettings(updatedSettings.data.settings);
+        setSuccess('Settings updated successfully!');
       } else {
-        const errorData = await response.json();
-        setMessage({ type: 'error', text: errorData.message || 'Failed to save settings' });
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to update settings');
       }
-    } catch (error) {
-      console.error('Error saving settings:', error);
-      setMessage({ type: 'error', text: 'Failed to save settings' });
+
+    } catch (err) {
+      console.error('❌ Error updating settings:', err);
+      setError(err.message || 'Failed to update settings');
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   };
 
-  const handleChangePassword = async () => {
+  const handleInputChange = (field, value) => {
+    setPersonalData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleNotificationChange = (key, value) => {
+    setNotificationSettings(prev => ({
+      ...prev,
+      [key]: value
+    }));
+  };
+
+  const handlePrivacyChange = async (key, value) => {
+    try {
+      const updatedSettings = {
+        ...settings,
+        privacy: {
+          ...settings.privacy,
+          [key]: value
+        }
+      };
+      
+      setSettings(updatedSettings);
+      
+      // Update backend
+      const response = await fetch('/api/auth/settings', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ settings: updatedSettings })
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to update privacy settings');
+      }
+      
+      setMessage('Privacy settings updated successfully!');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (error) {
+      console.error('Error updating privacy settings:', error);
+      setError('Failed to update privacy settings. Please try again.');
+      setTimeout(() => setError(''), 3000);
+    }
+  };
+
+  const handlePasswordChange = async (field, value) => {
+    setPasswordData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    
     if (passwordData.newPassword !== passwordData.confirmPassword) {
       setMessage({ type: 'error', text: 'New passwords do not match' });
       return;
@@ -393,7 +446,8 @@ const AccountSettings = () => {
     setMessage({ type: '', text: '' });
 
     try {
-      const token = localStorage.getItem('token');
+      console.log('🌐 Changing password...');
+      
       const response = await fetch('/api/auth/change-password', {
         method: 'POST',
         headers: {
@@ -408,30 +462,64 @@ const AccountSettings = () => {
       });
 
       if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setMessage({ type: 'success', text: 'Password changed successfully!' });
-          setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
-        } else {
-          setMessage({ type: 'error', text: data.message || 'Failed to change password' });
-        }
+        console.log('✅ Password change successful');
+        setMessage({ type: 'success', text: 'Password changed successfully!' });
+        setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
       } else {
-        const errorData = await response.json();
-        setMessage({ type: 'error', text: errorData.message || 'Failed to change password' });
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to change password');
       }
     } catch (error) {
-      console.error('Error changing password:', error);
-      setMessage({ type: 'error', text: 'Failed to change password' });
+      console.error('❌ Error changing password:', error);
+      setMessage({ type: 'error', text: error.message || 'Failed to change password' });
     } finally {
       setChangingPassword(false);
     }
   };
 
-  const handleResetToDefault = () => {
-    if (window.confirm('Are you sure you want to reset all settings to default?')) {
-      fetchSettings();
-      setMessage({ type: 'info', text: 'Settings reset to default' });
+  const handleSave = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      setSuccess('');
+
+      // Prepare settings data structure matching backend expectations
+      const settingsData = {
+        language: personalData.language,
+        notifications: {
+          email: notificationSettings.emailNotifications,
+          push: notificationSettings.pushNotifications,
+          courseUpdates: notificationSettings.coursesUpdates,
+          gradeUpdates: notificationSettings.gradeUpdates
+        }
+      };
+
+      await handleUpdateSettings('all', settingsData);
+      
+      setSuccess('All settings saved successfully!');
+    } catch (error) {
+      console.error('❌ Error saving settings:', error);
+      setError(error.message || 'Failed to save settings');
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const handleResetToDefault = () => {
+    setPersonalData({
+      firstName: user?.firstName || '',
+      lastName: user?.lastName || '',
+      email: user?.email || '',
+      phone: user?.phone || '',
+      language: 'en'
+    });
+    setNotificationSettings({
+      emailNotifications: true,
+      pushNotifications: true,
+      coursesUpdates: true,
+      gradeUpdates: true
+    });
+    setMessage({ type: 'info', text: 'Settings reset to default values' });
   };
 
   if (loading) {
@@ -450,10 +538,16 @@ const AccountSettings = () => {
     <Container>
       <Title>Account Settings</Title>
       
-      {message.text && (
-        <Alert className={message.type}>
-          {message.type === 'error' && <FiAlertCircle />}
-          {message.text}
+      {error && (
+        <Alert className="error">
+          <FiAlertCircle />
+          {error}
+        </Alert>
+      )}
+      {success && (
+        <Alert className="success">
+          <FiSave />
+          {success}
         </Alert>
       )}
       
@@ -468,37 +562,51 @@ const AccountSettings = () => {
           </CardHeader>
           
           <FormGroup>
+            <Label>First Name</Label>
+            <Input
+              type="text"
+              value={personalData.firstName}
+              onChange={(e) => handleInputChange('firstName', e.target.value)}
+            />
+          </FormGroup>
+          
+          <FormGroup>
+            <Label>Last Name</Label>
+            <Input
+              type="text"
+              value={personalData.lastName}
+              onChange={(e) => handleInputChange('lastName', e.target.value)}
+            />
+          </FormGroup>
+          
+          <FormGroup>
             <Label>Email Address</Label>
             <Input
               type="email"
-              value={settings.email}
+              value={personalData.email}
               onChange={(e) => handleInputChange('email', e.target.value)}
+            />
+          </FormGroup>
+          
+          <FormGroup>
+            <Label>Phone Number</Label>
+            <Input
+              type="tel"
+              value={personalData.phone}
+              onChange={(e) => handleInputChange('phone', e.target.value)}
             />
           </FormGroup>
           
           <FormGroup>
             <Label>Language</Label>
             <Select
-              value={settings.language}
+              value={personalData.language}
               onChange={(e) => handleInputChange('language', e.target.value)}
             >
               <option value="en">English</option>
               <option value="fr">French</option>
               <option value="ar">Arabic</option>
               <option value="sw">Swahili</option>
-            </Select>
-          </FormGroup>
-          
-          <FormGroup>
-            <Label>Timezone</Label>
-            <Select
-              value={settings.timezone}
-              onChange={(e) => handleInputChange('timezone', e.target.value)}
-            >
-              <option value="UTC+2">UTC+2 (East Africa)</option>
-              <option value="UTC+1">UTC+1 (West Africa)</option>
-              <option value="UTC+0">UTC+0 (GMT)</option>
-              <option value="UTC-5">UTC-5 (Eastern US)</option>
             </Select>
           </FormGroup>
         </SettingsCard>
@@ -520,8 +628,8 @@ const AccountSettings = () => {
             <ToggleSwitch>
               <ToggleInput
                 type="checkbox"
-                checked={settings.notifications.email}
-                onChange={(e) => handleNotificationChange('email', e.target.checked)}
+                checked={notificationSettings.emailNotifications}
+                onChange={(e) => handleNotificationChange('emailNotifications', e.target.checked)}
               />
               <ToggleSlider />
             </ToggleSwitch>
@@ -535,8 +643,8 @@ const AccountSettings = () => {
             <ToggleSwitch>
               <ToggleInput
                 type="checkbox"
-                checked={settings.notifications.push}
-                onChange={(e) => handleNotificationChange('push', e.target.checked)}
+                checked={notificationSettings.pushNotifications}
+                onChange={(e) => handleNotificationChange('pushNotifications', e.target.checked)}
               />
               <ToggleSlider />
             </ToggleSwitch>
@@ -550,8 +658,8 @@ const AccountSettings = () => {
             <ToggleSwitch>
               <ToggleInput
                 type="checkbox"
-                checked={settings.notifications.courseUpdates}
-                onChange={(e) => handleNotificationChange('courseUpdates', e.target.checked)}
+                checked={notificationSettings.coursesUpdates}
+                onChange={(e) => handleNotificationChange('coursesUpdates', e.target.checked)}
               />
               <ToggleSlider />
             </ToggleSwitch>
@@ -559,29 +667,14 @@ const AccountSettings = () => {
           
           <NotificationItem>
             <NotificationText>
-              <NotificationTitle>New Messages</NotificationTitle>
-              <NotificationDescription>Get notified about new messages from instructors and administrators</NotificationDescription>
+              <NotificationTitle>Grade Updates</NotificationTitle>
+              <NotificationDescription>Get notified about grade updates</NotificationDescription>
             </NotificationText>
             <ToggleSwitch>
               <ToggleInput
                 type="checkbox"
-                checked={settings.notifications.newMessages}
-                onChange={(e) => handleNotificationChange('newMessages', e.target.checked)}
-              />
-              <ToggleSlider />
-            </ToggleSwitch>
-          </NotificationItem>
-          
-          <NotificationItem>
-            <NotificationText>
-              <NotificationTitle>Job Alerts</NotificationTitle>
-              <NotificationDescription>Receive job opportunities and alerts</NotificationDescription>
-            </NotificationText>
-            <ToggleSwitch>
-              <ToggleInput
-                type="checkbox"
-                checked={settings.notifications.jobAlerts}
-                onChange={(e) => handleNotificationChange('jobAlerts', e.target.checked)}
+                checked={notificationSettings.gradeUpdates}
+                onChange={(e) => handleNotificationChange('gradeUpdates', e.target.checked)}
               />
               <ToggleSlider />
             </ToggleSwitch>
@@ -597,16 +690,19 @@ const AccountSettings = () => {
             <CardTitle>Privacy Settings</CardTitle>
           </CardHeader>
           
-          <FormGroup>
-            <Label>Profile Visibility</Label>
+          <NotificationItem>
+            <NotificationText>
+              <NotificationTitle>Profile Visibility</NotificationTitle>
+              <NotificationDescription>Allow others to see your profile</NotificationDescription>
+            </NotificationText>
             <Select
-              value={settings.privacy.profileVisibility}
+              value={settings?.privacy?.profileVisibility || "public"}
               onChange={(e) => handlePrivacyChange('profileVisibility', e.target.value)}
             >
               <option value="public">Public</option>
               <option value="private">Private</option>
             </Select>
-          </FormGroup>
+          </NotificationItem>
           
           <NotificationItem>
             <NotificationText>
@@ -616,7 +712,7 @@ const AccountSettings = () => {
             <ToggleSwitch>
               <ToggleInput
                 type="checkbox"
-                checked={settings.privacy.showEmail}
+                checked={settings?.privacy?.showEmail || false}
                 onChange={(e) => handlePrivacyChange('showEmail', e.target.checked)}
               />
               <ToggleSlider />
@@ -631,7 +727,7 @@ const AccountSettings = () => {
             <ToggleSwitch>
               <ToggleInput
                 type="checkbox"
-                checked={settings.privacy.showPhone}
+                checked={settings?.privacy?.showPhone || false}
                 onChange={(e) => handlePrivacyChange('showPhone', e.target.checked)}
               />
               <ToggleSlider />
@@ -646,7 +742,7 @@ const AccountSettings = () => {
             <ToggleSwitch>
               <ToggleInput
                 type="checkbox"
-                checked={settings.privacy.allowMessages}
+                checked={settings?.privacy?.allowMessages || false}
                 onChange={(e) => handlePrivacyChange('allowMessages', e.target.checked)}
               />
               <ToggleSlider />
@@ -695,18 +791,18 @@ const AccountSettings = () => {
           
           <Button 
             onClick={handleChangePassword}
-            disabled={changingPassword || !passwordData.currentPassword || !passwordData.newPassword || !passwordData.confirmPassword}
+            disabled={false} // This button is not directly editable via this UI, it's part of the backend
           >
-            {changingPassword ? <LoadingSpinner /> : <FiLock />}
-            {changingPassword ? 'Changing Password...' : 'Change Password'}
+            {/* {changingPassword ? <LoadingSpinner /> : <FiLock />} */}
+            Change Password
           </Button>
         </SettingsCard>
       </SettingsGrid>
       
       <div style={{ marginTop: '2rem', textAlign: 'center' }}>
-        <Button onClick={handleSave} disabled={saving}>
-          {saving ? <LoadingSpinner /> : <FiSave />}
-          {saving ? 'Saving...' : 'Save All Changes'}
+        <Button onClick={handleSave} disabled={loading}>
+          {loading ? <LoadingSpinner /> : <FiSave />}
+          {loading ? 'Saving...' : 'Save All Changes'}
         </Button>
         <Button className="secondary" onClick={handleResetToDefault}>
           Reset to Default

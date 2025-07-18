@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useNavigate, Link } from 'react-router-dom';
+import { FaEye, FaEyeSlash } from 'react-icons/fa';
 import Logo from '../../components/Logo';
 import { useUser } from '../../contexts/UserContext';
 import { useTranslation } from 'react-i18next';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   min-height: 100vh;
@@ -105,6 +107,80 @@ const LoadingSpinner = styled.div`
   }
 `;
 
+const OfflineInfo = styled.div`
+  background: #e7f3ff;
+  border: 1px solid #b3d9ff;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: #0066cc;
+`;
+
+const OfflineTitle = styled.h4`
+  margin: 0 0 0.5rem 0;
+  color: #0066cc;
+  font-size: 1rem;
+`;
+
+const OfflineCredentials = styled.div`
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  padding: 0.75rem;
+  margin-top: 0.5rem;
+  font-family: monospace;
+  font-size: 0.85rem;
+`;
+
+const PasswordWrapper = styled.div`
+  position: relative;
+  width: 100%;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+`;
+
+const PasswordInput = styled.input`
+  width: 100%;
+  padding: 0.75rem 3rem 0.75rem 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+  
+  &:disabled {
+    background: #f5f5f5;
+    cursor: not-allowed;
+  }
+`;
+
+const PasswordToggle = styled.button`
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #666;
+  font-size: 1rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  
+  &:hover {
+    color: ${({ theme }) => theme.colors.primary};
+  }
+  
+  &:focus {
+    outline: none;
+    color: ${({ theme }) => theme.colors.primary};
+  }
+`;
+
 const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -112,16 +188,39 @@ const Login = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+  const [debugInfo, setDebugInfo] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const { login, isAuthenticated } = useUser();
   const navigate = useNavigate();
-  
-  // Redirect authenticated users to their dashboard
+
+  // Check for cached credentials when offline
   useEffect(() => {
-    if (isAuthenticated) {
-      console.log('🔄 User already authenticated, redirecting to dashboard');
-      navigate('/dashboard');
+    if (!navigator.onLine) {
+      const checkOfflineCapabilities = () => {
+        const cachedCreds = localStorage.getItem('offline_credentials');
+        const lastAuth = localStorage.getItem('last_online_auth');
+        const cachedUser = localStorage.getItem('user');
+        
+        if (cachedCreds && lastAuth) {
+          const authData = JSON.parse(lastAuth);
+          setDebugInfo(`Previously logged in as: ${authData.email}`);
+          console.log('✅ Cached credentials found for offline login');
+        } else if (cachedUser) {
+          const userData = JSON.parse(cachedUser);
+          setDebugInfo(`Session available for: ${userData.email}`);
+          console.log('✅ User session found');
+        } else {
+          setDebugInfo('Ready for offline login with database credentials');
+          console.log('💡 Ready for offline login');
+        }
+      };
+      
+      checkOfflineCapabilities();
     }
-  }, [isAuthenticated, navigate]);
+  }, []);
+  
+  // Allow access to login page even if authenticated
+  // (Users can login as different users)
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -136,48 +235,109 @@ const Login = () => {
     setLoading(true);
     
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email,
-          password
-        }),
-      });
+      // First try online authentication
+      let loginSuccess = false;
+      let userData = null;
+      
+      try {
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email,
+            password
+          }),
+        });
 
-      const data = await response.json();
+        const data = await response.json();
 
-      if (data.success) {
-        // Store tokens
-        localStorage.setItem('token', data.data.accessToken);
-        localStorage.setItem('refreshToken', data.data.refreshToken);
+        if (data.success) {
+          // Store tokens
+          localStorage.setItem('token', data.data.accessToken);
+          localStorage.setItem('refreshToken', data.data.refreshToken);
+          
+          // Set user data in context
+          userData = {
+            ...data.data.user,
+            role: data.data.user.role || 'refugee',
+            profilePic: data.data.user.profilePic || null
+          };
+          
+          // Store credentials and user data for offline use
+          console.log('💾 Storing credentials for offline access...');
+          try {
+            const credResult = await offlineIntegrationService.storeUserCredentials(email, password);
+            console.log('✅ Credential storage result:', credResult);
+            
+            const authResult = await offlineIntegrationService.storeOnlineAuthData(userData, password);
+            console.log('✅ Auth data storage result:', authResult);
+            
+            // Verify storage worked
+            console.log('🔍 Verification - lastUserEmail:', localStorage.getItem('lastUserEmail'));
+            console.log('🔍 Verification - hasUserData:', !!localStorage.getItem('lastUserData'));
+            console.log('🔍 Verification - hasPassword:', !!localStorage.getItem('lastUserPassword'));
+          } catch (storageError) {
+            console.error('❌ Failed to store offline credentials:', storageError);
+          }
+          
+          loginSuccess = true;
+          console.log('✅ Online login successful');
+        } else {
+          setError(data.message || 'Login failed');
+        }
+      } catch (onlineError) {
+        console.log('❌ Online login failed, trying offline authentication...');
         
-        // Set user data in context
-        const userData = {
-          ...data.data.user,
-          role: data.data.user.role || 'refugee',
-          profilePic: data.data.user.profilePic || null
-        };
-        
+        // Try offline authentication
+        try {
+          const offlineResult = await offlineIntegrationService.login({ email, password });
+          
+          if (offlineResult?.success) {
+            userData = offlineResult.user;
+            loginSuccess = true;
+            console.log('✅ Offline login successful');
+            setSuccess('Login successful offline! Some features may be limited until you go online.');
+          } else {
+            setError(offlineResult?.message || 'Invalid credentials. Please check your email and password.');
+          }
+        } catch (offlineError) {
+          console.error('❌ Offline login also failed:', offlineError);
+          setError('Invalid credentials. Please check your email and password.');
+        }
+      }
+      
+      if (loginSuccess && userData) {
         login(userData);
         setSuccess('Login successful! Redirecting...');
         
         // Redirect based on user role
         setTimeout(() => {
-          if (userData.role === 'refugee') navigate('/dashboard');
-          else if (userData.role === 'instructor') navigate('/instructor/dashboard');
-          else if (userData.role === 'admin') navigate('/admin/dashboard');
-          else if (userData.role === 'employer') navigate('/employer/dashboard');
-          else navigate('/');
+          const userRole = userData.role || 'refugee';
+          
+          console.log('🚀 Redirecting user with role:', userRole);
+          
+          switch (userRole) {
+            case 'admin':
+              navigate('/admin/dashboard');
+              break;
+            case 'instructor':
+              navigate('/instructor/dashboard');
+              break;
+            case 'employer':
+              navigate('/employer/dashboard');
+              break;
+            case 'refugee':
+            default:
+              navigate('/dashboard');
+              break;
+          }
         }, 1000);
-      } else {
-        setError(data.message || 'Login failed');
       }
     } catch (err) {
       console.error('Login error:', err);
-      setError('Network error. Please try again.');
+      setError('Authentication failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -195,6 +355,20 @@ const Login = () => {
         {error && <ErrorMessage>{error}</ErrorMessage>}
         {success && <SuccessMessage>{success}</SuccessMessage>}
         
+        {!navigator.onLine && (
+          <OfflineInfo>
+            <OfflineTitle>🔌 Offline Mode</OfflineTitle>
+            <p>You're currently offline. You can still login using your database credentials.</p>
+            <p>Enter your actual email and password:</p>
+            <OfflineCredentials>
+              Use your normal login credentials - the same ones you use when online
+              {debugInfo && <div style={{marginTop: '0.5rem', fontSize: '0.8em', opacity: 0.7}}>
+                Status: {debugInfo}
+              </div>}
+            </OfflineCredentials>
+          </OfflineInfo>
+        )}
+        
         <Input
           type="email"
           placeholder="Email"
@@ -202,17 +376,33 @@ const Login = () => {
           onChange={e => setEmail(e.target.value)}
           required
         />
-        <Input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-          required
-        />
+        <PasswordWrapper>
+          <PasswordInput
+            type={showPassword ? "text" : "password"}
+            placeholder="Password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            disabled={loading}
+            required
+          />
+          <PasswordToggle
+            type="button"
+            onClick={() => setShowPassword(!showPassword)}
+            disabled={loading}
+          >
+            {showPassword ? <FaEyeSlash /> : <FaEye />}
+          </PasswordToggle>
+        </PasswordWrapper>
         
         <Button type="submit" disabled={loading}>
           {loading ? 'Logging in...' : 'Login'}
         </Button>
+        
+        <div style={{ marginTop: '1rem', textAlign: 'center' }}>
+          <Link to="/forgot-password" style={{ color: '#007bff', textDecoration: 'none', fontSize: '0.9rem' }}>
+            Forgot your password?
+          </Link>
+        </div>
       </Form>
       
       <div style={{ marginTop: '1rem', textAlign: 'center' }}>

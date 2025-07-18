@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
 import ContentWrapper from '../../components/ContentWrapper';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem 2.5rem 2rem 2.5rem;
@@ -283,55 +284,186 @@ const BrowseCourses = () => {
       try {
         setLoading(true);
         const token = localStorage.getItem('token');
+              const isOnline = navigator.onLine;
+      console.log('🔍 Network status - isOnline:', isOnline);
+      console.log('🔍 Token available:', !!token);
 
-        // Fetch all courses
-        const coursesResponse = await fetch('/api/courses', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
+      let coursesData = [];
+      let categoriesData = [];
+      let enrolledData = [];
+
+              if (isOnline) {
+          try {
+            // Try online API calls first (preserving existing behavior)
+            console.log('🌐 Online mode: Fetching data from API...');
+            console.log('🔍 About to fetch courses from /api/courses');
+            
+            // Fetch all courses
+            try {
+              const coursesResponse = await fetch('/api/courses', {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+              
+              console.log('🔍 Courses fetch completed. Status:', coursesResponse.status);
+
+              if (coursesResponse.ok) {
+              const coursesApiData = await coursesResponse.json();
+              console.log('✅ Courses API Response:', coursesApiData);
+              console.log('🔍 RAW RESPONSE STRING:', JSON.stringify(coursesApiData, null, 2));
+              console.log('🔍 API Response Keys:', Object.keys(coursesApiData));
+              
+              // Log raw API response for debugging
+              console.log('📋 Raw API Response structure:', {
+                type: typeof coursesApiData,
+                keys: Object.keys(coursesApiData),
+                hasData: !!coursesApiData.data,
+                dataType: typeof coursesApiData.data,
+                dataKeys: coursesApiData.data ? Object.keys(coursesApiData.data) : 'none'
+              });
+              
+              // EXTRACT COURSES - Based on actual backend API structure
+              let extractedCourses = [];
+              
+              // Backend returns: { success: true, data: { courses: [...], pagination: {...} } }
+              if (coursesApiData.data && coursesApiData.data.courses && Array.isArray(coursesApiData.data.courses)) {
+                extractedCourses = coursesApiData.data.courses;
+                console.log('✅ Found courses in: coursesApiData.data.courses');
+              } else {
+                console.log('❌ Courses not found in expected location. Response structure:', Object.keys(coursesApiData));
+              }
+              
+              coursesData = extractedCourses;
+              console.log('🎯 Final courses data length:', coursesData.length);
+              
+
+              
+              // Store courses for offline use
+              await offlineIntegrationService.storeCourses(coursesData);
+                          } else {
+                console.error('❌ Courses API failed:', coursesResponse.status);
+                throw new Error('Courses API failed');
+              }
+            } catch (coursesFetchError) {
+              console.error('❌ Error fetching courses:', coursesFetchError);
+              throw coursesFetchError;
+            }
+
+            // Fetch categories
+            console.log('🔍 About to fetch categories from /api/courses/categories');
+            try {
+              const categoriesResponse = await fetch('/api/courses/categories', {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+              
+              console.log('🔍 Categories fetch completed. Status:', categoriesResponse.status);
+
+              if (categoriesResponse.ok) {
+              const categoriesApiData = await categoriesResponse.json();
+              console.log('✅ Categories API Response:', categoriesApiData);
+              console.log('🔍 RAW CATEGORIES RESPONSE STRING:', JSON.stringify(categoriesApiData, null, 2));
+              console.log('🔍 Categories API Response Keys:', Object.keys(categoriesApiData));
+              
+              // Log raw API response for debugging
+              console.log('📂 Raw Categories API Response structure:', {
+                type: typeof categoriesApiData,
+                keys: Object.keys(categoriesApiData),
+                hasData: !!categoriesApiData.data,
+                dataType: typeof categoriesApiData.data,
+                dataKeys: categoriesApiData.data ? Object.keys(categoriesApiData.data) : 'none'
+              });
+              
+              // EXTRACT CATEGORIES - Based on actual backend API structure  
+              let extractedCategories = [];
+              
+              // Backend returns: { success: true, data: { categories: [...] } }
+              if (categoriesApiData.data && categoriesApiData.data.categories && Array.isArray(categoriesApiData.data.categories)) {
+                extractedCategories = categoriesApiData.data.categories;
+                console.log('✅ Found categories in: categoriesApiData.data.categories');
+              } else {
+                console.log('❌ Categories not found in expected location. Response structure:', Object.keys(categoriesApiData));
+                console.log('❌ Data keys:', categoriesApiData.data ? Object.keys(categoriesApiData.data) : 'No data object');
+              }
+              
+              categoriesData = extractedCategories;
+              console.log('🎯 Final categories data length:', categoriesData.length);
+              
+
+              
+              // Store categories for offline use
+              await offlineIntegrationService.storeCategories(categoriesData);
+                          } else {
+                console.error('❌ Categories API failed:', categoriesResponse.status);
+                throw new Error('Categories API failed');
+              }
+            } catch (categoriesFetchError) {
+              console.error('❌ Error fetching categories:', categoriesFetchError);
+              throw categoriesFetchError;
+            }
+
+            // Fetch enrolled courses
+            console.log('🔍 About to fetch enrolled courses');
+            try {
+            const enrolledResponse = await fetch('/api/courses/enrolled/courses', {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (enrolledResponse.ok) {
+              const enrolledApiData = await enrolledResponse.json();
+              // Backend returns: { success: true, data: { courses: [...] } }
+              const enrolledCourses = enrolledApiData.data?.courses || [];
+              enrolledData = enrolledCourses.map(course => course._id);
+              
+              // Store enrolled courses for offline use
+              await offlineIntegrationService.storeEnrolledCourses(enrolledData);
+            }
+
+          } catch (enrolledFetchError) {
+            console.error('❌ Error fetching enrolled courses:', enrolledFetchError);
+            // Don't throw here as enrolled courses is optional
           }
-        });
 
-        if (coursesResponse.ok) {
-          const coursesData = await coursesResponse.json();
-          console.log('✅ Courses API Response:', coursesData);
-          console.log('📊 Courses received:', coursesData.data.courses?.length || 0);
-          console.log('📋 Course details:', coursesData.data.courses);
-          setCourses(coursesData.data.courses || []);
+          } catch (onlineError) {
+            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+            // Fall back to offline data if online fails
+            const offlineData = await fetchOfflineData();
+            coursesData = offlineData.courses;
+            categoriesData = offlineData.categories;
+            enrolledData = offlineData.enrolled;
+          }
         } else {
-          console.error('❌ Courses API failed:', coursesResponse.status);
+          // Offline mode: use offline services
+          console.log('📴 Offline mode: Using offline data...');
+          const offlineData = await fetchOfflineData();
+          coursesData = offlineData.courses;
+          categoriesData = offlineData.categories;
+          enrolledData = offlineData.enrolled;
         }
 
-        // Fetch categories
-        const categoriesResponse = await fetch('/api/courses/categories', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
+        // Update state with fetched data
+        console.log('🔍 DEBUG: About to set state with:', {
+          coursesData: coursesData,
+          coursesLength: coursesData?.length,
+          categoriesData: categoriesData,
+          categoriesLength: categoriesData?.length,
+          enrolledData: enrolledData,
+          firstCourse: coursesData?.[0]?.title,
+          firstCategory: categoriesData?.[0]?.name
         });
-
-        if (categoriesResponse.ok) {
-          const categoriesData = await categoriesResponse.json();
-          console.log('✅ Categories API Response:', categoriesData);
-          console.log('📊 Categories received:', categoriesData.data.categories?.length || 0);
-          console.log('📋 Category details:', categoriesData.data.categories);
-          setCategories(categoriesData.data.categories || []);
-        } else {
-          console.error('❌ Categories API failed:', categoriesResponse.status);
-        }
-
-        // Fetch enrolled courses
-        const enrolledResponse = await fetch('/api/courses/enrolled/courses', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (enrolledResponse.ok) {
-          const enrolledData = await enrolledResponse.json();
-          setEnrolled(enrolledData.data.courses?.map(course => course._id) || []);
-        }
+        
+        setCourses(coursesData || []);
+        setCategories(categoriesData || []);
+        setEnrolled(enrolledData || []);
+        
+        console.log('🎯 State has been set! Will check updated state in next useEffect...');
 
       } catch (err) {
         console.error('Error fetching data:', err);
@@ -341,8 +473,39 @@ const BrowseCourses = () => {
       }
     };
 
+    // Helper function to fetch offline data
+    const fetchOfflineData = async () => {
+      try {
+        const courses = await offlineIntegrationService.getCourses() || [];
+        const categories = await offlineIntegrationService.getCategories() || [];
+        const enrolled = await offlineIntegrationService.getEnrolledCourses() || [];
+        
+        console.log('📱 Offline data loaded:', {
+          courses: courses.length,
+          categories: categories.length,
+          enrolled: enrolled.length
+        });
+        
+        return { courses, categories, enrolled };
+      } catch (error) {
+        console.error('❌ Failed to load offline data:', error);
+        return { courses: [], categories: [], enrolled: [] };
+      }
+    };
+
     fetchData();
   }, []);
+
+  // Debug log when state changes
+  useEffect(() => {
+    console.log('🔍 DEBUG: State updated:', {
+      coursesCount: courses.length,
+      categoriesCount: categories.length,
+      enrolledCount: enrolled.length,
+      firstCourse: courses[0]?.title,
+      firstCategory: categories[0]?.name
+    });
+  }, [courses, categories, enrolled]);
 
   // Search courses when search term changes
   useEffect(() => {
@@ -355,22 +518,71 @@ const BrowseCourses = () => {
       try {
         setSearchLoading(true);
         const token = localStorage.getItem('token');
+        const isOnline = navigator.onLine;
         
-        const response = await fetch(`/api/courses?search=${encodeURIComponent(search)}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
+        let searchResults = [];
 
-        if (response.ok) {
-          const data = await response.json();
-          setSearchResults(data.data.courses || []);
+        if (isOnline) {
+          try {
+            // Try online search first (preserving existing behavior)
+            console.log('🌐 Online search for:', search);
+            const response = await fetch(`/api/courses?search=${encodeURIComponent(search)}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (response.ok) {
+              const data = await response.json();
+              // Backend returns: { success: true, data: { courses: [...] } }
+              searchResults = data.data?.courses || [];
+              
+              // Store search results for offline use
+              try {
+                await offlineIntegrationService.storeSearchResults(search, searchResults);
+              } catch (storeError) {
+                console.warn('⚠️ Failed to store search results offline:', storeError);
+              }
+            } else {
+              console.error('Search failed:', response.status);
+              // Fall back to offline search
+              searchResults = await performOfflineSearch(search);
+            }
+          } catch (error) {
+            console.error('Online search error:', error);
+            // Fall back to offline search
+            searchResults = await performOfflineSearch(search);
+          }
+        } else {
+          // Offline search
+          console.log('📴 Offline search for:', search);
+          searchResults = await performOfflineSearch(search);
         }
+
+        setSearchResults(searchResults);
       } catch (err) {
         console.error('Error searching courses:', err);
+        setSearchResults([]);
       } finally {
         setSearchLoading(false);
+      }
+    };
+
+    // Helper function for offline search
+    const performOfflineSearch = async (searchTerm) => {
+      try {
+        const offlineCourses = await offlineIntegrationService.getCourses() || [];
+        const searchLower = searchTerm.toLowerCase();
+        
+        return offlineCourses.filter(course => 
+          course.title?.toLowerCase().includes(searchLower) ||
+          course.description?.toLowerCase().includes(searchLower) ||
+          course.category?.toLowerCase().includes(searchLower)
+        );
+      } catch (error) {
+        console.error('❌ Offline search failed:', error);
+        return [];
       }
     };
 
@@ -395,7 +607,14 @@ const BrowseCourses = () => {
         alert('Successfully enrolled in course!');
       } else {
         const errorData = await response.json();
-        alert(errorData.message || 'Failed to enroll in course');
+        // Check if user is already enrolled
+        if (errorData.message && errorData.message.includes('Already enrolled')) {
+          // Update local state to reflect enrollment status
+          setEnrolled(prev => [...prev, courseId]);
+          alert('You are already enrolled in this course!');
+        } else {
+          alert(errorData.message || 'Failed to enroll in course');
+        }
       }
     } catch (err) {
       console.error('Error enrolling in course:', err);
@@ -409,40 +628,18 @@ const BrowseCourses = () => {
     count: courses.filter(course => course.category === category.name).length
   }));
 
-  // Debug: Log category counts calculation in detail
-  console.log('🔢 Category counts calculation:');
-  console.log('📚 Total courses received from API:', courses.length);
-  console.log('📂 Total categories from API:', categories.length);
-  
-  console.log('📋 All courses received from /api/courses:');
-  courses.forEach((course, index) => {
-    console.log(`  ${index + 1}. "${course.title}"`);
-    console.log(`      Category: "${course.category}"`);
-    console.log(`      Published: ${course.isPublished}`);
-    console.log(`      ID: ${course._id}`);
+  // Debug: Log summary of data and counts
+  console.log('🔢 Data Summary:', {
+    totalCourses: courses.length,
+    totalCategories: categories.length,
+    firstCourse: courses[0]?.title || 'None',
+    firstCategory: categories[0]?.name || 'None',
+    categoriesWithCourses: categoriesWithCounts.filter(cat => cat.count > 0).length
   });
   
-  console.log('📋 All category names from /api/courses/categories:');
-  categories.forEach((cat, index) => {
-    console.log(`  ${index + 1}. "${cat.name}" - Description: "${cat.description}"`);
-  });
-  
-  console.log('🔍 Category count calculations (exact matching):');
-  categoriesWithCounts.forEach(cat => {
-    const matchingCourses = courses.filter(course => {
-      const matches = course.category === cat.name;
-      console.log(`    "${course.title}" category "${course.category}" === "${cat.name}"? ${matches}`);
-      return matches;
-    });
-    console.log(`📁 ${cat.name}: ${cat.count} courses`);
-    console.log(`    Matching courses:`, matchingCourses.map(c => c.title));
-  });
-  
-  console.log('🎯 Final categories with counts > 0:');
-  const nonEmptyCategories = categoriesWithCounts.filter(cat => cat.count > 0);
-  nonEmptyCategories.forEach(cat => {
-    console.log(`  ✅ ${cat.name}: ${cat.count} courses`);
-  });
+  if (courses.length > 0 && categories.length > 0) {
+    console.log('📊 Category Counts:', categoriesWithCounts.map(cat => `${cat.name}: ${cat.count}`));
+  }
 
   // Find matching category if no course matches
   const matchingCategory = categories.find(cat =>
@@ -494,6 +691,9 @@ const BrowseCourses = () => {
             />
           </SearchContainer>
         </HeroSection>
+
+
+
         {search.trim() ? (
           <>
             {searchLoading ? (

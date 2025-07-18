@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowBack, Download, Person, Assessment, Quiz } from '@mui/icons-material';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   max-width: 1200px;
@@ -185,75 +186,118 @@ export default function Grades() {
   const { courseId } = useParams();
   const navigate = useNavigate();
   const [grades, setGrades] = useState([]);
-  const [course, setCourse] = useState(null);
+  const [courseInfo, setCourseInfo] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [stats, setStats] = useState({
     totalStudents: 0,
     averageGrade: 0,
     passRate: 0,
-    totalAssessments: 0
+    totalAssignments: 0
   });
 
   useEffect(() => {
-    fetchGrades();
-    fetchCourse();
-  }, [courseId]);
+    const fetchGrades = async () => {
+      try {
+        setLoading(true);
+        setError('');
+        
+        const token = localStorage.getItem('token');
+        const isOnline = navigator.onLine;
+        
+        let gradesData = [];
+        let courseData = null;
 
-  const fetchCourse = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`/api/courses/${courseId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+        if (isOnline) {
+          try {
+            // Try online API calls first (preserving existing behavior)
+            console.log('🌐 Online mode: Fetching grades from API...');
+            
+            // Fetch grades
+            const gradesResponse = await fetch(`/api/instructor/courses/${courseId}/grades`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (gradesResponse.ok) {
+              const gradesApiData = await gradesResponse.json();
+              gradesData = gradesApiData.data.grades || [];
+              console.log('✅ Grades data received:', gradesData.length);
+              
+              // Store grades for offline use
+              await offlineIntegrationService.storeGrades(courseId, gradesData);
+            } else {
+              throw new Error('Failed to fetch grades');
+            }
+
+            // Fetch course info
+            const courseResponse = await fetch(`/api/courses/${courseId}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (courseResponse.ok) {
+              const courseApiData = await courseResponse.json();
+              courseData = courseApiData.data.course;
+              console.log('✅ Course info received');
+              
+              // Store course data for offline use
+              await offlineIntegrationService.storeCourseData(courseId, courseData);
+            } else {
+              throw new Error('Failed to fetch course info');
+            }
+
+          } catch (onlineError) {
+            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+            
+            // Fall back to offline data if online fails
+            gradesData = await offlineIntegrationService.getGrades(courseId);
+            courseData = await offlineIntegrationService.getCourseData(courseId);
+            
+            if (!gradesData) {
+              throw onlineError;
+            }
+          }
+        } else {
+          // Offline mode: use offline services
+          console.log('📴 Offline mode: Using offline grades data...');
+          gradesData = await offlineIntegrationService.getGrades(courseId);
+          courseData = await offlineIntegrationService.getCourseData(courseId);
         }
-      });
 
-      if (response.ok) {
-        const data = await response.json();
-        setCourse(data.data.course);
-      }
-    } catch (error) {
-      console.error('Error fetching course:', error);
-    }
-  };
-
-  const fetchGrades = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`/api/courses/${courseId}/all-grades`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const studentGrades = data.data.studentGrades;
-        setGrades(studentGrades);
-
+        setGrades(gradesData);
+        setCourseInfo(courseData);
+        
         // Calculate stats
-        const totalStudents = studentGrades.length;
-        const totalGrades = studentGrades.reduce((sum, student) => sum + student.overallGrade, 0);
-        const averageGrade = totalStudents > 0 ? Math.round(totalGrades / totalStudents) : 0;
-        const passedStudents = studentGrades.filter(student => student.overallGrade >= 70).length;
-        const passRate = totalStudents > 0 ? Math.round((passedStudents / totalStudents) * 100) : 0;
-        const totalAssessments = studentGrades.reduce((sum, student) => sum + student.totalAssessments, 0);
+        if (gradesData.length > 0) {
+          const totalStudents = gradesData.length;
+          const averageGrade = gradesData.reduce((sum, grade) => sum + (grade.score || 0), 0) / totalStudents;
+          const passRate = (gradesData.filter(grade => (grade.score || 0) >= 70).length / totalStudents) * 100;
+          
+          setStats({
+            totalStudents,
+            averageGrade: averageGrade.toFixed(1),
+            passRate: passRate.toFixed(1),
+            totalAssignments: gradesData[0]?.assignments?.length || 0
+          });
+        }
 
-        setStats({
-          totalStudents,
-          averageGrade,
-          passRate,
-          totalAssessments
-        });
+      } catch (err) {
+        console.error('❌ Error fetching grades:', err);
+        setError(err.message || 'Failed to load grades');
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      console.error('Error fetching grades:', error);
-    } finally {
-      setLoading(false);
+    };
+
+    if (courseId) {
+      fetchGrades();
     }
-  };
+  }, [courseId]);
 
   const exportGrades = () => {
     const csvContent = [
@@ -271,7 +315,7 @@ export default function Grades() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${course?.title || 'course'}_grades.csv`;
+    a.download = `${courseInfo?.title || 'course'}_grades.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
   };
@@ -294,7 +338,7 @@ export default function Grades() {
           Back to Course
         </BackButton>
         <Title>Course Grades</Title>
-        <Subtitle>{course?.title}</Subtitle>
+        <Subtitle>{courseInfo?.title}</Subtitle>
       </Header>
 
       <StatsGrid>
@@ -311,7 +355,7 @@ export default function Grades() {
           <StatLabel>Pass Rate</StatLabel>
         </StatCard>
         <StatCard>
-          <StatValue>{stats.totalAssessments}</StatValue>
+          <StatValue>{stats.totalAssignments}</StatValue>
           <StatLabel>Total Submissions</StatLabel>
         </StatCard>
       </StatsGrid>

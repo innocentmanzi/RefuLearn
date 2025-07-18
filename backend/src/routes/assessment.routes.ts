@@ -12,6 +12,18 @@ const router = express.Router();
 PouchDB.plugin(PouchDBFind);
 const db = new PouchDB('http://Manzi:Clarisse101@localhost:5984/refulearn');
 
+// Use proper authenticated request type
+interface AuthenticatedRequest extends Request {
+  user?: {
+    _id: string;
+    role?: string;
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    [key: string]: any;
+  };
+}
+
 interface AssessmentDoc {
   _id: string;
   _rev: string;
@@ -76,27 +88,36 @@ interface UserDoc {
   [key: string]: any;
 }
 
+// Helper function to ensure user authentication
+const ensureAuth = (req: AuthenticatedRequest) => {
+  if (!req.user?._id) {
+    throw new Error('User authentication required');
+  }
+  return (req.user as any)?._id?.toString();
+};
+
 // Get available assessments for user
 router.get('/', authenticateToken, [
   query('courseId').optional(),
   query('status').optional().isIn(['draft', 'published', 'archived']),
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 50 })
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { courseId, status, page = 1, limit = 10 } = req.query;
   
-  const query: any = { type: 'assessment', status: 'published' };
-  
-  if (courseId) {
-    query.course = courseId;
-  }
-  
-  if (status) {
-    query.status = status;
-  }
+  // Use allDocs instead of find
+  const result = await db.allDocs({ include_docs: true });
+  let assessments = result.rows
+    .map((row: any) => row.doc)
+    .filter((doc: any) => doc && doc.type === 'assessment' && doc.status === 'published') as AssessmentDoc[];
 
-  const result = await db.find({ selector: query });
-  const assessments = result.docs as AssessmentDoc[];
+  if (courseId) {
+    assessments = assessments.filter((a: any) => a.course === courseId);
+  }
+  
+  if (status && status !== 'published') {
+    assessments = assessments.filter((a: any) => a.status === status);
+  }
 
   // Pagination
   const total = assessments.length;
@@ -118,7 +139,7 @@ router.get('/', authenticateToken, [
 }));
 
 // Get assessment by ID
-router.get('/:assessmentId', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/:assessmentId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const assessment = await db.get(req.params['assessmentId']) as AssessmentDoc;
     res.json({
@@ -139,10 +160,10 @@ router.post('/:assessmentId/submit', authenticateToken, [
   body('answers.*.questionId').notEmpty().withMessage('Question ID is required'),
   body('answers.*.answer').notEmpty().withMessage('Answer is required'),
   body('timeSpent').optional().isInt({ min: 0 }).withMessage('Time spent must be non-negative')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { assessmentId } = req.params;
   const { answers, timeSpent } = req.body;
-  const userId = req.user._id.toString();
+  const userId = ensureAuth(req);
 
   const assessment = await db.get(assessmentId) as AssessmentDoc;
   if (!assessment) {
@@ -212,12 +233,12 @@ router.get('/submissions/user', authenticateToken, [
   query('status').optional().isIn(['submitted', 'graded', 'late']),
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 50 })
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { status, page = 1, limit = 10 } = req.query;
   
   const selector: any = {
     type: 'assessment',
-    'submissions.student': req.user._id
+    'submissions.student': ensureAuth(req)
   };
   
   if (status) {
@@ -228,8 +249,16 @@ router.get('/submissions/user', authenticateToken, [
   const assessments = result.docs as AssessmentDoc[];
 
   const submissions = assessments.map((assessment: AssessmentDoc) => {
+    const userId = ensureAuth(req);
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'User authentication required'
+      });
+    }
+    
     const submission = assessment.submissions!.find(
-      (sub: any) => sub.student === req.user._id.toString()
+      (sub: any) => sub.student === userId
     );
     return {
       assessment: {
@@ -263,9 +292,15 @@ router.get('/submissions/user', authenticateToken, [
 }));
 
 // Get assessment results (for student)
-router.get('/:assessmentId/results', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/:assessmentId/results', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { assessmentId } = req.params;
-  const userId = req.user._id.toString();
+  const userId = ensureAuth(req);
+  if (!userId) {
+    return res.status(401).json({
+      success: false,
+      message: 'User authentication required'
+    });
+  }
 
   const assessment = await db.get(assessmentId) as AssessmentDoc;
   if (!assessment) {
@@ -304,8 +339,15 @@ router.get('/:assessmentId/results', authenticateToken, asyncHandler(async (req:
 }));
 
 // Get assessment analytics (instructor only)
-router.get('/:assessmentId/analytics', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/:assessmentId/analytics', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { assessmentId } = req.params;
+  
+  if (!req.user?._id) {
+    return res.status(401).json({
+      success: false,
+      message: 'User authentication required'
+    });
+  }
 
   const assessment = await db.get(assessmentId) as AssessmentDoc;
   if (!assessment) {
@@ -316,7 +358,7 @@ router.get('/:assessmentId/analytics', authenticateToken, authorizeRoles('instru
   }
 
   // Check if user is the instructor
-  if ((assessment as AssessmentDoc).instructor !== (req.user as any)._id.toString()) {
+  if (assessment.instructor !== (req.user as any)?._id?.toString()) {
     return res.status(403).json({
       success: false,
       message: 'You are not authorized to view this assessment analytics'
@@ -410,7 +452,7 @@ router.get('/course/:courseId', authenticateToken, [
   query('status').optional().isIn(['draft', 'published', 'archived']),
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 50 })
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { courseId } = req.params;
   const { status, page = 1, limit = 10 } = req.query;
   
@@ -420,8 +462,14 @@ router.get('/course/:courseId', authenticateToken, [
     selector.status = status;
   }
 
-  const result = await db.find({ selector });
-  const assessments = result.docs as AssessmentDoc[];
+  // Use list instead of find for compatibility
+  const result = await db.allDocs({ include_docs: true });
+  const allAssessments = result.rows
+    .map((row: any) => row.doc)
+    .filter((doc: any) => doc && doc.type === 'assessment' && doc.course === courseId) as AssessmentDoc[];
+
+  // Apply status filter if needed
+  const assessments = status ? allAssessments.filter((a: any) => a.status === status) : allAssessments;
 
   // Pagination
   const total = assessments.length;
@@ -442,20 +490,22 @@ router.get('/course/:courseId', authenticateToken, [
   });
 }));
 
-// Admin: Create assessment
+// Admin: Create assessment - Fix req.user access
 router.post('/', authenticateToken, authorizeRoles('admin'), [
   body('title').trim().notEmpty().withMessage('Title is required'),
   body('description').optional().trim(),
   body('dueDate').optional(),
   body('totalPoints').optional().isInt({ min: 0 }).withMessage('Total points must be non-negative'),
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const userId = ensureAuth(req);
+  
   const assessment: AssessmentDoc = {
     ...req.body,
     _id: Date.now().toString(),
     _rev: '',
     type: 'assessment',
     course: req.body.course || 'general',
-    instructor: (req.user as any)._id.toString(),
+    instructor: userId,
     status: 'published',
     questions: req.body.questions || [],
     totalPoints: req.body.totalPoints || 0,
@@ -465,12 +515,13 @@ router.post('/', authenticateToken, authorizeRoles('admin'), [
     updatedAt: new Date(),
     submissions: []
   };
-  const result = await db.put(assessment);
+  
+  const result = await db.post(assessment);
   res.status(201).json({ success: true, message: 'Assessment created successfully', data: { assessment } });
 }));
 
 // Admin: Get all assessments
-router.get('/admin/all', authenticateToken, authorizeRoles('admin'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/admin/all', authenticateToken, authorizeRoles('admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const selector: any = { type: 'assessment' };
   const result = await db.find({ selector });
   const assessments = result.docs as AssessmentDoc[];
@@ -478,7 +529,7 @@ router.get('/admin/all', authenticateToken, authorizeRoles('admin'), asyncHandle
 }));
 
 // Admin: Get assessment by ID
-router.get('/admin/:assessmentId', authenticateToken, authorizeRoles('admin'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/admin/:assessmentId', authenticateToken, authorizeRoles('admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const assessment = await db.get(req.params.assessmentId) as AssessmentDoc;
   if (!assessment) {
     return res.status(404).json({ success: false, message: 'Assessment not found' });
@@ -492,7 +543,7 @@ router.put('/admin/:assessmentId', authenticateToken, authorizeRoles('admin'), [
   body('description').optional().trim(),
   body('dueDate').optional(),
   body('totalPoints').optional().isInt({ min: 0 }),
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { assessmentId } = req.params;
   const updates = req.body;
   const assessment = await db.get(assessmentId) as AssessmentDoc;
@@ -508,7 +559,7 @@ router.put('/admin/:assessmentId', authenticateToken, authorizeRoles('admin'), [
 }));
 
 // Admin: Delete assessment
-router.delete('/admin/:assessmentId', authenticateToken, authorizeRoles('admin'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/admin/:assessmentId', authenticateToken, authorizeRoles('admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { assessmentId } = req.params;
   const assessment = await db.get(assessmentId) as AssessmentDoc;
   if (!assessment) {
@@ -534,7 +585,7 @@ router.post('/user-submissions', authenticateToken, [
   body('passed').isBoolean().withMessage('Passed must be a boolean'),
   body('completed_at').notEmpty().withMessage('Completed_at is required'),
   body('time_taken').isInt({ min: 0 }).withMessage('Time taken must be non-negative')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   // Accept all fields as provided
   const submission: UserAssessmentSubmission = {
     ...req.body,
@@ -546,7 +597,7 @@ router.post('/user-submissions', authenticateToken, [
   };
 
   try {
-    const result = await db.put(submission);
+    const result = await db.post(submission);
     res.status(201).json({
       success: true,
       message: 'Assessment submission created successfully',
@@ -573,14 +624,21 @@ router.get('/user-submissions', authenticateToken, [
   query('user').optional().isInt({ min: 1 }),
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 50 })
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { assessment, user, page = 1, limit = 10 } = req.query;
   
   const selector: any = { type: 'user_assessment_submission' };
   
   // If user is not admin/instructor, only show their own submissions
-  if (!['admin', 'instructor'].includes(req.user.role)) {
-    selector.user = parseInt(req.user._id.toString()) || req.user._id;
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      message: 'User authentication required'
+    });
+  }
+  
+  if (!['admin', 'instructor'].includes((req.user as any)?.role || '')) {
+    selector.user = parseInt((req.user as any)?._id?.toString() || '') || (req.user as any)?._id;
   } else if (user) {
     selector.user = parseInt(user as string);
   }
@@ -612,8 +670,9 @@ router.get('/user-submissions', authenticateToken, [
 }));
 
 // Get user assessment submission by ID
-router.get('/user-submissions/:submissionId', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/user-submissions/:submissionId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { submissionId } = req.params;
+  const userId = ensureAuth(req);
 
   try {
     const submission = await db.get(submissionId) as UserAssessmentSubmission;
@@ -626,8 +685,9 @@ router.get('/user-submissions/:submissionId', authenticateToken, asyncHandler(as
     }
 
     // Check if user has access to this submission
-    if (!['admin', 'instructor'].includes(req.user.role) && 
-        submission.user !== (parseInt(req.user._id.toString()) || req.user._id)) {
+    const userRole = req.user?.role || '';
+    if (!['admin', 'instructor'].includes(userRole) && 
+        submission.user !== (parseInt(userId) || userId)) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to view this submission'
@@ -646,14 +706,15 @@ router.get('/user-submissions/:submissionId', authenticateToken, asyncHandler(as
   }
 }));
 
-// Update user assessment submission
+// Update user assessment submission - Fix auth
 router.put('/user-submissions/:submissionId', authenticateToken, [
   body('score').optional().isInt({ min: 0 }).withMessage('Score must be non-negative'),
   body('passed').optional().isBoolean().withMessage('Passed must be a boolean'),
   body('answers').optional().isArray().withMessage('Answers must be an array')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { submissionId } = req.params;
   const updates = req.body;
+  const userId = ensureAuth(req);
 
   try {
     const submission = await db.get(submissionId) as UserAssessmentSubmission;
@@ -666,8 +727,9 @@ router.put('/user-submissions/:submissionId', authenticateToken, [
     }
 
     // Check if user has access to update this submission
-    if (!['admin', 'instructor'].includes(req.user.role) && 
-        submission.user !== (parseInt(req.user._id.toString()) || req.user._id)) {
+    const userRole = req.user?.role || '';
+    if (!['admin', 'instructor'].includes(userRole) && 
+        submission.user !== (parseInt(userId) || userId)) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to update this submission'
@@ -680,7 +742,7 @@ router.put('/user-submissions/:submissionId', authenticateToken, [
 
     const latest = await db.get(submission._id);
     submission._rev = latest._rev;
-    const result = await db.put(submission);
+    const result = await db.post(submission);
 
     res.json({
       success: true,
@@ -700,9 +762,10 @@ router.put('/user-submissions/:submissionId', authenticateToken, [
   }
 }));
 
-// Delete user assessment submission
-router.delete('/user-submissions/:submissionId', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+// Delete user assessment submission - Fix auth
+router.delete('/user-submissions/:submissionId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { submissionId } = req.params;
+  const userId = ensureAuth(req);
 
   try {
     const submission = await db.get(submissionId) as UserAssessmentSubmission;
@@ -715,8 +778,9 @@ router.delete('/user-submissions/:submissionId', authenticateToken, asyncHandler
     }
 
     // Check if user has access to delete this submission
-    if (!['admin', 'instructor'].includes(req.user.role) && 
-        submission.user !== (parseInt(req.user._id.toString()) || req.user._id)) {
+    const userRole = req.user?.role || '';
+    if (!['admin', 'instructor'].includes(userRole) && 
+        submission.user !== (parseInt(userId) || userId)) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to delete this submission'

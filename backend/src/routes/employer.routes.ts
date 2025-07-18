@@ -12,6 +12,15 @@ const router = express.Router();
 PouchDB.plugin(PouchDBFind);
 const db = new PouchDB('http://Manzi:Clarisse101@localhost:5984/refulearn');
 
+interface AuthenticatedRequest extends Request {
+  user?: { _id: string; role?: string; [key: string]: any; };
+}
+
+const ensureAuth = (req: AuthenticatedRequest): { userId: string; user: NonNullable<AuthenticatedRequest['user']> } => {
+  if (!req.user?._id) throw new Error('User authentication required');
+  return { userId: req.user._id.toString(), user: req.user as NonNullable<AuthenticatedRequest['user']> };
+};
+
 interface EmployerDoc {
   _id: string;
   _rev: string;
@@ -126,31 +135,32 @@ router.get('/', [
 }));
 
 // Get employer dashboard data
-router.get('/dashboard', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: Request, res: Response) => {
-  console.log('🔍 Dashboard API called by employer:', req.user._id);
+router.get('/dashboard', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
+  console.log('🔍 Dashboard API called by employer:', userId);
   
   const { period = '30' } = req.query;
   const daysAgo = new Date();
   daysAgo.setDate(daysAgo.getDate() - Number(period));
 
   // Job statistics
-  const totalJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString() } });
+  const totalJobsResult = await db.find({ selector: { type: 'job', employer: userId } });
   const totalJobs = totalJobsResult.docs.length;
-  console.log(`📊 Found ${totalJobs} total jobs for employer ${req.user._id}`);
+  console.log(`📊 Found ${totalJobs} total jobs for employer ${userId}`);
   
-  const activeJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString(), isActive: true } });
+  const activeJobsResult = await db.find({ selector: { type: 'job', employer: userId, isActive: true } });
   const activeJobs = activeJobsResult.docs.length;
   console.log(`📊 Found ${activeJobs} active jobs`);
   
-  const closedJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString(), isActive: false } });
+  const closedJobsResult = await db.find({ selector: { type: 'job', employer: userId, isActive: false } });
   const closedJobs = closedJobsResult.docs.length;
   console.log(`📊 Found ${closedJobs} closed jobs`);
   
-  const recentJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString(), createdAt: { $gte: daysAgo } } });
+  const recentJobsResult = await db.find({ selector: { type: 'job', employer: userId, createdAt: { $gte: daysAgo } } });
   const recentJobs = recentJobsResult.docs.length;
 
   // Application statistics
-  const allJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString() } });
+  const allJobsResult = await db.find({ selector: { type: 'job', employer: userId } });
   
   // Debug: Check each job's applications
   console.log('🔍 Job applications breakdown:');
@@ -178,16 +188,16 @@ router.get('/dashboard', authenticateToken, authorizeRoles('employer', 'admin'),
   console.log(`📊 Found ${hiredApplications} hired applications`);
 
   // Scholarship statistics
-  const totalScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: req.user._id.toString() } });
+  const totalScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: userId } });
   const totalScholarships = totalScholarshipsResult.docs.length;
   
-  const activeScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: req.user._id.toString(), isActive: true } });
+  const activeScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: userId, isActive: true } });
   const activeScholarships = activeScholarshipsResult.docs.length;
   
   const totalScholarshipApplications = totalScholarshipsResult.docs.reduce((sum: number, scholarship: any) => sum + (scholarship.applications?.length || 0), 0);
 
   // Recent jobs
-  const recentJobsListResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString() } });
+  const recentJobsListResult = await db.find({ selector: { type: 'job', employer: userId } });
   const recentJobsList = recentJobsListResult.docs
     .sort((a: any, b: any) => {
       const aDate = a.createdAt ? new Date(a.createdAt).getTime() : 0;
@@ -337,7 +347,7 @@ router.get('/dashboard', authenticateToken, authorizeRoles('employer', 'admin'),
   }, {});
 
   // Recent scholarships
-  const recentScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: req.user._id.toString() } });
+  const recentScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: userId } });
   const recentScholarships = recentScholarshipsResult.docs
     .sort((a: any, b: any) => {
       const aDate = a.createdAt ? new Date(a.createdAt).getTime() : 0;
@@ -469,10 +479,11 @@ router.post('/', authenticateToken, authorizeRoles('employer'), [
   body('location').trim().notEmpty().withMessage('Location is required'),
   body('description').trim().notEmpty().withMessage('Description is required'),
   body('website').optional().isURL().withMessage('Invalid website URL')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   // Check if employer profile already exists
   const existingResult = await db.find({ 
-    selector: { type: 'employer', user: req.user._id.toString() }
+    selector: { type: 'employer', user: userId }
   });
   if (existingResult.docs.length > 0) {
     return res.status(400).json({
@@ -483,7 +494,7 @@ router.post('/', authenticateToken, authorizeRoles('employer'), [
 
   const employerData = {
     ...req.body,
-    user: req.user._id.toString(),
+    user: userId,
     type: 'employer',
     isVerified: false,
     jobs: [],
@@ -509,11 +520,12 @@ router.put('/profile', authenticateToken, authorizeRoles('employer'), [
   body('location').optional().trim().notEmpty(),
   body('description').optional().trim().notEmpty(),
   body('website').optional().isURL()
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const updates = req.body;
 
   const result = await db.find({ 
-    selector: { type: 'employer', user: req.user._id.toString() }
+    selector: { type: 'employer', user: userId }
   });
   const employer = result.docs[0] as EmployerDoc;
 
@@ -542,10 +554,11 @@ router.get('/jobs/employer', authenticateToken, authorizeRoles('employer'), [
   query('status').optional().isIn(['active', 'inactive', 'closed']),
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 50 })
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const { status, page = 1, limit = 10 } = req.query;
   
-  const selector: any = { type: 'job', employer: req.user._id.toString() };
+  const selector: any = { type: 'job', employer: userId };
   if (status) {
     selector.status = status;
   }
@@ -577,10 +590,11 @@ router.get('/scholarships/employer', authenticateToken, authorizeRoles('employer
   query('status').optional().isIn(['active', 'inactive', 'closed']),
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 50 })
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const { status, page = 1, limit = 10 } = req.query;
   
-  const selector: any = { type: 'scholarship', employer: req.user._id.toString() };
+  const selector: any = { type: 'scholarship', employer: userId };
   if (status) {
     selector.status = status;
   }
@@ -612,13 +626,14 @@ router.get('/jobs/:jobId/applications', authenticateToken, authorizeRoles('emplo
   query('status').optional().isIn(['pending', 'reviewed', 'shortlisted', 'rejected', 'hired']),
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 50 })
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const { jobId } = req.params;
   const { status, page = 1, limit = 10 } = req.query;
 
   // Debug log: print jobId being fetched
   console.log('DEBUG: Fetching job applications for jobId:', jobId);
-  console.log('DEBUG: User ID:', req.user._id);
+  console.log('DEBUG: User ID:', userId);
   console.log('DEBUG: Query params:', { status, page, limit });
 
   let job: any;
@@ -639,8 +654,8 @@ router.get('/jobs/:jobId/applications', authenticateToken, authorizeRoles('emplo
     });
   }
 
-  // Check if user is the employer (compare job.employer to req.user._id)
-  if (job.employer.toString() !== req.user._id.toString()) {
+  // Check if user is the employer (compare job.employer to userId)
+  if (job.employer.toString() !== userId) {
     return res.status(403).json({
       success: false,
       message: 'Not authorized to view applications for this job'
@@ -707,7 +722,8 @@ router.get('/jobs/:jobId/applications', authenticateToken, authorizeRoles('emplo
 router.put('/jobs/:jobId/applications/:applicationId', authenticateToken, authorizeRoles('employer'), [
   body('status').isIn(['pending', 'reviewed', 'shortlisted', 'rejected', 'hired']).withMessage('Invalid status'),
   body('notes').optional().trim()
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const { jobId, applicationId } = req.params;
   const { status, notes } = req.body;
 
@@ -720,7 +736,7 @@ router.put('/jobs/:jobId/applications/:applicationId', authenticateToken, author
   }
 
   // Check if user is the employer
-  if ((job as any).employer.toString() !== (req.user._id as any).toString()) {
+  if ((job as any).employer.toString() !== userId) {
     return res.status(403).json({
       success: false,
       message: 'Not authorized to update applications for this job'
@@ -755,7 +771,8 @@ router.get('/scholarships/:scholarshipId/applications', authenticateToken, autho
   query('status').optional().isIn(['pending', 'reviewed', 'approved', 'rejected']),
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 50 })
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const { scholarshipId } = req.params;
   const { status, page = 1, limit = 10 } = req.query;
 
@@ -768,7 +785,7 @@ router.get('/scholarships/:scholarshipId/applications', authenticateToken, autho
   }
 
   // Check if user is the employer
-  if ((scholarship as any).employer.toString() !== (req.user._id as any).toString()) {
+  if ((scholarship as any).employer.toString() !== userId) {
     return res.status(403).json({
       success: false,
       message: 'Not authorized to view applications for this scholarship'
@@ -828,7 +845,8 @@ router.get('/scholarships/:scholarshipId/applications', authenticateToken, autho
 router.put('/scholarships/:scholarshipId/applications/:applicationId', authenticateToken, authorizeRoles('employer'), [
   body('status').isIn(['pending', 'accepted', 'rejected', 'shortlisted', 'reviewed', 'hired', 'closed']).withMessage('Invalid status'),
   body('feedback').optional().trim()
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const { scholarshipId, applicationId } = req.params;
   const { status, feedback } = req.body;
 
@@ -841,7 +859,7 @@ router.put('/scholarships/:scholarshipId/applications/:applicationId', authentic
   }
 
   // Check if user is the employer
-  if ((scholarship as any).employer.toString() !== (req.user._id as any).toString()) {
+  if ((scholarship as any).employer.toString() !== userId) {
     return res.status(403).json({
       success: false,
       message: 'Not authorized to update applications for this scholarship'
@@ -872,21 +890,22 @@ router.put('/scholarships/:scholarshipId/applications/:applicationId', authentic
 }));
 
 // Get employer analytics
-router.get('/analytics', authenticateToken, authorizeRoles('employer'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/analytics', authenticateToken, authorizeRoles('employer'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const { period = '30' } = req.query;
   const daysAgo = new Date();
   daysAgo.setDate(daysAgo.getDate() - Number(period));
 
   // Job statistics
-  const totalJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString() } });
+  const totalJobsResult = await db.find({ selector: { type: 'job', employer: userId } });
   const totalJobs = totalJobsResult.docs.length;
-  const activeJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString(), isActive: true } });
+  const activeJobsResult = await db.find({ selector: { type: 'job', employer: userId, isActive: true } });
   const activeJobs = activeJobsResult.docs.length;
-  const newJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString(), createdAt: { $gte: daysAgo } } });
+  const newJobsResult = await db.find({ selector: { type: 'job', employer: userId, createdAt: { $gte: daysAgo } } });
   const newJobs = newJobsResult.docs.length;
 
   // Application statistics
-  const jobs = await db.find({ selector: { type: 'job', employer: req.user._id.toString() } });
+  const jobs = await db.find({ selector: { type: 'job', employer: userId } });
   const totalApplications = jobs.docs.reduce((sum: number, job: any) => sum + ((job as any).applications?.length || 0), 0);
   
   const applicationStatusCounts = jobs.docs.reduce((acc: Record<string, number>, job) => {
@@ -897,15 +916,15 @@ router.get('/analytics', authenticateToken, authorizeRoles('employer'), asyncHan
   }, {} as Record<string, number>);
 
   // Scholarship statistics
-  const totalScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: req.user._id.toString() } });
+  const totalScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: userId } });
   const totalScholarships = totalScholarshipsResult.docs.length;
-  const activeScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: req.user._id.toString(), isActive: true } });
+  const activeScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: userId, isActive: true } });
   const activeScholarships = activeScholarshipsResult.docs.length;
-  const newScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: req.user._id.toString(), createdAt: { $gte: daysAgo } } });
+  const newScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: userId, createdAt: { $gte: daysAgo } } });
   const newScholarships = newScholarshipsResult.docs.length;
 
   // Scholarship application statistics
-  const scholarships = await db.find({ selector: { type: 'scholarship', employer: req.user._id.toString() } });
+  const scholarships = await db.find({ selector: { type: 'scholarship', employer: userId } });
   const totalScholarshipApplications = scholarships.docs.reduce((sum: number, scholarship: any) => sum + ((scholarship as any).applications?.length || 0), 0);
   
   const scholarshipApplicationStatusCounts = scholarships.docs.reduce((acc: Record<string, number>, scholarship) => {
@@ -916,13 +935,13 @@ router.get('/analytics', authenticateToken, authorizeRoles('employer'), asyncHan
   }, {} as Record<string, number>);
 
   // Recent activity
-  const recentJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString() } });
+  const recentJobsResult = await db.find({ selector: { type: 'job', employer: userId } });
   const recentJobs = recentJobsResult.docs
     .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, 5)
     .map((job: any) => ({ title: job.title, isActive: job.isActive, createdAt: job.createdAt }));
 
-  const recentScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: req.user._id.toString() } });
+  const recentScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: userId } });
   const recentScholarships = recentScholarshipsResult.docs
     .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, 5)
@@ -958,8 +977,9 @@ router.get('/analytics', authenticateToken, authorizeRoles('employer'), asyncHan
 }));
 
 // Get employer profile
-router.get('/profile', authenticateToken, authorizeRoles('employer'), asyncHandler(async (req: Request, res: Response) => {
-  const user = await db.get(req.user._id) as any;
+router.get('/profile', authenticateToken, authorizeRoles('employer'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
+  const user = await db.get(userId) as any;
   
   res.json({
     success: true,
@@ -984,12 +1004,13 @@ router.post('/jobs', authenticateToken, authorizeRoles('employer'), [
     return true;
   }),
   body('isActive').isBoolean().withMessage('isActive must be a boolean')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const jobData = {
     _id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
     ...req.body,
     type: 'job',
-    employer: req.user._id.toString(),
+    employer: userId,
     applications: [],
     createdAt: new Date(),
     updatedAt: new Date()
@@ -1022,7 +1043,8 @@ router.put('/jobs/:jobId', authenticateToken, authorizeRoles('employer'), [
     return true;
   }),
   body('isActive').optional().isBoolean()
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const { jobId } = req.params;
   const updates = req.body;
 
@@ -1035,7 +1057,7 @@ router.put('/jobs/:jobId', authenticateToken, authorizeRoles('employer'), [
   }
 
   // Check if user is the employer
-  if (job.employer.toString() !== req.user._id.toString()) {
+  if (job.employer.toString() !== userId) {
     return res.status(403).json({
       success: false,
       message: 'Not authorized to update this job'
@@ -1056,7 +1078,8 @@ router.put('/jobs/:jobId', authenticateToken, authorizeRoles('employer'), [
 }));
 
 // Delete a job
-router.delete('/jobs/:jobId', authenticateToken, authorizeRoles('employer'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/jobs/:jobId', authenticateToken, authorizeRoles('employer'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const { jobId } = req.params;
 
   const job = await db.get(jobId) as any;
@@ -1068,7 +1091,7 @@ router.delete('/jobs/:jobId', authenticateToken, authorizeRoles('employer'), asy
   }
 
   // Check if user is the employer
-  if (job.employer.toString() !== req.user._id.toString()) {
+  if (job.employer.toString() !== userId) {
     return res.status(403).json({
       success: false,
       message: 'Not authorized to delete this job'
@@ -1091,11 +1114,12 @@ router.post('/scholarships', authenticateToken, authorizeRoles('employer'), [
   body('deadline').isISO8601().withMessage('Deadline must be a valid date'),
   body('requirements').optional().trim(),
   body('isActive').isBoolean().withMessage('isActive must be a boolean')
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const scholarshipData = {
     ...req.body,
     type: 'scholarship',
-    employer: req.user._id.toString(),
+    employer: userId,
     applications: [],
     createdAt: new Date(),
     updatedAt: new Date()
@@ -1118,7 +1142,8 @@ router.put('/scholarships/:scholarshipId', authenticateToken, authorizeRoles('em
   body('deadline').optional().isISO8601(),
   body('requirements').optional().trim(),
   body('isActive').optional().isBoolean()
-], validate([]), asyncHandler(async (req: Request, res: Response) => {
+], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const { scholarshipId } = req.params;
   const updates = req.body;
 
@@ -1131,7 +1156,7 @@ router.put('/scholarships/:scholarshipId', authenticateToken, authorizeRoles('em
   }
 
   // Check if user is the employer
-  if (scholarship.employer.toString() !== req.user._id.toString()) {
+  if (scholarship.employer.toString() !== userId) {
     return res.status(403).json({
       success: false,
       message: 'Not authorized to update this scholarship'
@@ -1152,7 +1177,8 @@ router.put('/scholarships/:scholarshipId', authenticateToken, authorizeRoles('em
 }));
 
 // Delete a scholarship
-router.delete('/scholarships/:scholarshipId', authenticateToken, authorizeRoles('employer'), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/scholarships/:scholarshipId', authenticateToken, authorizeRoles('employer'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userId } = ensureAuth(req);
   const { scholarshipId } = req.params;
 
   const scholarship = await db.get(scholarshipId) as any;
@@ -1164,7 +1190,7 @@ router.delete('/scholarships/:scholarshipId', authenticateToken, authorizeRoles(
   }
 
   // Check if user is the employer
-  if (scholarship.employer.toString() !== req.user._id.toString()) {
+  if (scholarship.employer.toString() !== userId) {
     return res.status(403).json({
       success: false,
       message: 'Not authorized to delete this scholarship'

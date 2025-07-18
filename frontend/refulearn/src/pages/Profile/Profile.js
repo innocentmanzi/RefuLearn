@@ -1,142 +1,316 @@
 import React, { useState, useEffect } from 'react';
-import styled from 'styled-components';
-import { FiEdit, FiPlus, FiMapPin, FiFile } from 'react-icons/fi';
+import styled, { keyframes } from 'styled-components';
+import { FiEdit, FiPlus, FiMapPin, FiFile, FiMail, FiPhone, FiLinkedin, FiGithub, FiGlobe, FiUser, FiBriefcase, FiBookOpen, FiAward, FiStar, FiHeart } from 'react-icons/fi';
 import { useUser } from '../../contexts/UserContext';
+import profileService from '../../services/profileService';
 
+// Animations
+const fadeInUp = keyframes`
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+`;
+
+const float = keyframes`
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+`;
+
+const shimmer = keyframes`
+  0% { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+`;
+
+const pulse = keyframes`
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+`;
+
+// Container with clean background
 const Container = styled.div`
-  padding: 2rem;
-  background: ${({ theme }) => theme.colors.white};
   min-height: 100vh;
-  max-width: 100vw;
+  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+  position: relative;
+  padding: 1.5rem;
+
   @media (max-width: 900px) {
     padding: 1rem;
+  }
+`;
+
+// Clean wrapper
+const GlassWrapper = styled.div`
+  background: white;
+  border-radius: 16px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  position: relative;
+  z-index: 1;
+  max-width: 1200px;
+  margin: 0 auto;
+  animation: ${fadeInUp} 0.6s ease-out;
+`;
+
+// Clean header
+const ProfileHeader = styled.div`
+  background: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%);
+  padding: 1rem;
+  text-align: center;
+  border-radius: 12px 12px 0 0;
+
+  @media (max-width: 900px) {
+    padding: 0.75rem;
   }
 `;
 
 const Title = styled.h1`
-  color: ${({ theme }) => theme.colors.primary};
-  margin-bottom: 2rem;
+  color: white;
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+
+  @media (max-width: 900px) {
+    font-size: 1.25rem;
+  }
 `;
 
-const FlexRow = styled.div`
-  display: flex;
-  gap: 2rem;
+const Subtitle = styled.p`
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.875rem;
+  margin: 0;
+`;
+
+// Content area with padding
+const ContentArea = styled.div`
+  padding: 1rem;
+
   @media (max-width: 900px) {
-    flex-direction: column;
-    gap: 1rem;
+    padding: 0.75rem;
+  }
+`;
+
+// Responsive grid layout
+const FlexRow = styled.div`
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 1rem;
+  
+  @media (max-width: 1000px) {
+    grid-template-columns: 220px 1fr;
+    gap: 0.75rem;
+  }
+  
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
   }
 `;
 
 const LeftColumn = styled.div`
-  flex: 1;
-  min-width: 220px;
-  width: 100%;
-  @media (max-width: 600px) {
-    min-width: 0;
-  }
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 `;
 
 const RightColumn = styled.div`
-  flex: 2;
-  min-width: 280px;
-  width: 100%;
-  @media (max-width: 600px) {
-    min-width: 0;
-  }
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 `;
 
+// Clean card design
 const Section = styled.div`
-  margin-bottom: 2rem;
-  background: #e6f0fa; /* Light blue for clarity */
-  padding: 1.5rem;
+  background: white;
   border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+  padding: 1rem;
   position: relative;
-  width: 100%;
-  max-width: 100vw;
-  @media (max-width: 600px) {
-    padding: 1rem;
-    font-size: 0.98rem;
-  }
-`;
-
-const Label = styled.div`
-  font-weight: bold;
-  margin-bottom: 0.5rem;
-`;
-
-const EditButton = styled.button`
-  background: ${({ theme }) => theme.colors.primary};
-  color: ${({ theme }) => theme.colors.white};
-  border: none;
-  border-radius: 20px;
-  padding: 0.4rem 1.2rem;
-  font-size: 0.95rem;
-  cursor: pointer;
-  margin-left: 1rem;
-  margin-bottom: 0.5rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  border: 1px solid #e2e8f0;
+  transition: all 0.3s ease;
+  animation: ${fadeInUp} 0.3s ease-out;
+  
   &:hover {
-    background: ${({ theme }) => theme.colors.secondary};
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    border-color: #3b82f6;
+  }
+
+  @media (max-width: 600px) {
+    padding: 0.75rem;
   }
 `;
 
-const SaveButton = styled.button`
-  background: ${({ theme }) => theme.colors.secondary};
-  color: ${({ theme }) => theme.colors.white};
-  border: none;
-  border-radius: 20px;
-  padding: 0.4rem 1.2rem;
+// Section header with icon
+const SectionHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e2e8f0;
+`;
+
+const SectionIcon = styled.div`
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 0.75rem;
+`;
+
+const SectionTitle = styled.h3`
+  color: #1f2937;
   font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0;
+  flex: 1;
+`;
+
+// Clean buttons
+const EditButton = styled.button`
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
   cursor: pointer;
-  margin-top: 0.5rem;
-  margin-right: 0.5rem;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+    transform: translateY(-1px);
+  }
+`;
+
+const SaveButton = styled(EditButton)`
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  
+  &:hover {
+    background: linear-gradient(135deg, #047857 0%, #065f46 100%);
+  }
 `;
 
 const CancelButton = styled.button`
-  background: ${({ theme }) => theme.colors.white};
-  color: ${({ theme }) => theme.colors.primary};
-  border: 1px solid ${({ theme }) => theme.colors.primary};
-  border-radius: 20px;
-  padding: 0.4rem 1.2rem;
-  font-size: 0.95rem;
+  background: #f8fafc;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
   cursor: pointer;
-  margin-top: 0.5rem;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    background: #f1f5f9;
+    border-color: #94a3b8;
+  }
 `;
 
+// Clean form inputs
 const Input = styled.input`
   width: 100%;
-  padding: 0.75rem;
-  margin-bottom: 1rem;
-  border: 1px solid #ccc;
-  border-radius: 8px;
+  padding: 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  background: white;
+  transition: all 0.3s ease;
+  margin-bottom: 0.5rem;
+  
+  &:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+  }
+  
+  &::placeholder {
+    color: #9ca3af;
+  }
 `;
 
 const TextArea = styled.textarea`
   width: 100%;
-  padding: 0.75rem;
-  margin-bottom: 1rem;
-  border: 1px solid #ccc;
-  border-radius: 8px;
-  min-height: 80px;
+  padding: 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  background: white;
+  transition: all 0.3s ease;
+  margin-bottom: 0.5rem;
+  min-height: 60px;
+  resize: vertical;
+  font-family: inherit;
+  
+  &:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+  }
+  
+  &::placeholder {
+    color: #9ca3af;
+  }
 `;
 
-const ListInput = styled(Input)`
-  margin-bottom: 0.5rem;
+const Select = styled.select`
+  padding: 0.375rem;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: white;
+  font-size: 0.75rem;
+  transition: all 0.3s ease;
+  
+  &:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+  }
+`;
+
+// Profile picture section - compact with white background like other cards
+const ProfilePictureSection = styled(Section)`
+  text-align: center;
+  padding: 0.75rem;
+  
+  @media (max-width: 600px) {
+    padding: 0.5rem;
+  }
 `;
 
 const ProfilePicWrapper = styled.div`
-  width: 180px;
-  height: 180px;
-  margin: 0 auto 1rem auto;
+  width: 35px;
+  height: 35px;
+  margin: 0 auto 0.5rem;
   border-radius: 50%;
   overflow: hidden;
-  background: ${({ theme }) => theme.colors.black};
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+  box-shadow: 0 1px 4px rgba(59, 130, 246, 0.2);
+  transition: all 0.3s ease;
+
+  &:hover {
+    transform: scale(1.05);
+    box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
+  }
+
   @media (max-width: 600px) {
-    width: 120px;
-    height: 120px;
+    width: 32px;
+    height: 32px;
   }
 `;
 
@@ -145,64 +319,225 @@ const ProfilePic = styled.img`
   height: 100%;
   object-fit: cover;
   border-radius: 50%;
-  display: block;
-  margin: 0 auto;
 `;
 
-const EditIconButton = styled.button`
-  background: none;
-  border: none;
-  color: ${({ theme }) => theme.colors.primary};
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
-  font-size: 1.5rem;
-  cursor: pointer;
-  z-index: 2;
-  &:hover {
-    color: ${({ theme }) => theme.colors.secondary};
-  }
-`;
-
-const AddIconButton = styled.button`
-  background: ${({ theme }) => theme.colors.primary};
-  color: ${({ theme }) => theme.colors.white};
-  border: none;
-  border-radius: 50%;
-  width: 36px;
-  height: 36px;
+const ProfileInitials = styled.div`
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  position: absolute;
-  bottom: 1rem;
-  right: 1rem;
-  font-size: 1.3rem;
-  cursor: pointer;
-  z-index: 2;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  color: white;
+  font-weight: 600;
+  font-size: 0.875rem;
+  border-radius: 50%;
+`;
+
+const UserName = styled.h2`
+  color: #1f2937;
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin: 0 0 0.25rem 0;
+`;
+
+const UserRole = styled.p`
+  color: #3b82f6;
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin: 0 0 0.5rem 0;
+  text-transform: capitalize;
+`;
+
+const LocationInfo = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  color: #6b7280;
+  font-size: 0.75rem;
+`;
+
+// Contact info styling
+const ContactItem = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: #f8fafc;
+  border-radius: 6px;
+  margin-bottom: 0.375rem;
+  transition: all 0.3s ease;
+  border: 1px solid #e2e8f0;
+  font-size: 0.75rem;
+  
   &:hover {
-    background: ${({ theme }) => theme.colors.secondary};
-    color: ${({ theme }) => theme.colors.white};
+    background: #f1f5f9;
+    border-color: #cbd5e1;
   }
 `;
 
-const OutlinedList = styled.ul`
+const ContactIcon = styled.div`
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 0.625rem;
+`;
+
+// Skill tags grid
+const SkillsGrid = styled.div`
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  list-style: none;
-  padding: 0;
+`;
+
+const SkillTag = styled.div`
+  background: #eff6ff;
+  color: #1d4ed8;
+  padding: 0.375rem 0.75rem;
+  border-radius: 16px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: 1px solid #bfdbfe;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    background: #dbeafe;
+    border-color: #93c5fd;
+    transform: translateY(-1px);
+  }
+`;
+
+// Experience/Education cards
+const ExperienceCard = styled.div`
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  border-left: 3px solid #3b82f6;
+  border: 1px solid #e2e8f0;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    transform: translateY(-1px);
+  }
+`;
+
+const ExperienceTitle = styled.h4`
+  color: #1f2937;
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.25rem 0;
+`;
+
+const ExperienceCompany = styled.p`
+  color: #3b82f6;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin: 0 0 0.25rem 0;
+`;
+
+const ExperienceDate = styled.p`
+  color: #6b7280;
+  font-size: 0.75rem;
+  margin: 0 0 0.5rem 0;
+`;
+
+const ExperienceDescription = styled.p`
+  color: #4b5563;
+  font-size: 0.875rem;
+  line-height: 1.5;
   margin: 0;
 `;
 
-const OutlinedItem = styled.li`
-  border: 1px solid ${({ theme }) => theme.colors.primary};
-  border-radius: 16px;
-  padding: 0.3rem 1rem;
-  background: ${({ theme }) => theme.colors.white};
-  color: ${({ theme }) => theme.colors.primary};
-  font-size: 1rem;
+// Floating action buttons
+const FloatingEditButton = styled.button`
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 10;
+  font-size: 0.625rem;
+  
+  &:hover {
+    transform: scale(1.1);
+    background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  }
+`;
+
+const FloatingAddButton = styled(FloatingEditButton)`
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  
+  &:hover {
+    background: linear-gradient(135deg, #047857 0%, #065f46 100%);
+  }
+`;
+
+// Action buttons container
+const ActionButtons = styled.div`
+  display: flex;
+  gap: 0.375rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+`;
+
+// Form row for date selectors and input/button pairs
+const FormRow = styled.div`
+  display: flex;
+  gap: 0.375rem;
+  margin-bottom: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  
+  > input {
+    flex: 1;
+    min-width: 120px;
+  }
+  
+  > select {
+    flex: 1;
+    min-width: 80px;
+  }
+  
+  > button {
+    flex-shrink: 0;
+  }
+`;
+
+// Remove button styling - smaller to match input fields
+const RemoveButton = styled.button`
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  height: 32px;
+  min-width: 60px;
+  
+  &:hover {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+    transform: translateY(-1px);
+  }
 `;
 
 const months = [
@@ -237,37 +572,65 @@ function normalizeCertificates(certs) {
 }
 
 const Profile = ({ userRole }) => {
-  const { user, updateUserProfile, fetchUserProfile } = useUser();
+  const { user, setUser, updateUserProfile, fetchUserProfile } = useUser();
   // Editable state
   const [edit, setEdit] = useState({});
-  const [form, setForm] = useState({
-    ...user,
-    certificates: user.certificates ? user.certificates.map(c => ({ ...c })) : [],
-    // Mentor-specific fields
-    bio: user.bio || '',
-    specializations: user.specializations || [],
-    experience: user.experience || 0,
-    hourlyRate: user.hourlyRate || 0,
-    availability: user.availability || {},
-    mentorCertifications: user.mentorCertifications || [],
-  });
+  const [form, setForm] = useState({});
   const [profilePicFile, setProfilePicFile] = useState(null);
   const [degreeFiles, setDegreeFiles] = useState({});
   const [certificateFiles, setCertificateFiles] = useState({});
 
+  // Initialize form when user data is available
+  useEffect(() => {
+    if (user) {
+      console.log('🔄 Initializing form with user data:', user);
+      setForm({
+        ...user,
+        // Ensure all array fields have default empty arrays
+        certificates: Array.isArray(user.certificates) ? user.certificates.map(c => ({ ...c })) : [],
+        interests: Array.isArray(user.interests) ? [...user.interests] : [],
+        experiences: Array.isArray(user.experiences) ? [...user.experiences] : [],
+        education: Array.isArray(user.education) ? [...user.education] : [],
+        languages: Array.isArray(user.languages) ? [...user.languages] : [],
+        skills: Array.isArray(user.skills) ? [...user.skills] : [],
+        specializations: Array.isArray(user.specializations) ? [...user.specializations] : [],
+        mentorCertifications: Array.isArray(user.mentorCertifications) ? [...user.mentorCertifications] : [],
+        // Mentor-specific fields
+        bio: user.bio || '',
+        experience: user.experience || 0,
+        hourlyRate: user.hourlyRate || 0,
+        availability: user.availability || {},
+        social: user.social || { linkedin: '', twitter: '', instagram: '', facebook: '' }
+      });
+    }
+  }, [user]);
+
+  // Fetch user profile only once on mount
   useEffect(() => {
     fetchUserProfile();
-    // eslint-disable-next-line
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency array - fetchUserProfile now has internal guards
 
   // Handlers
   const handleEdit = (section) => {
     setEdit({ ...edit, [section]: true });
-    setForm(user);
+    // Reset form to current user data only for the specific section
+    if (user) {
+      setForm(prevForm => ({
+        ...prevForm,
+        [section]: user[section]
+      }));
+    }
   };
   const handleCancel = (section) => {
     setEdit({ ...edit, [section]: false });
-    setForm(user);
+    // Reset form to current user data only for the specific section
+    if (user) {
+      setForm(prevForm => ({
+        ...prevForm,
+        [section]: user[section]
+      }));
+    }
   };
   const handleChange = (e, section, idx, subfield) => {
     if (section === 'social') {
@@ -287,21 +650,225 @@ const Profile = ({ userRole }) => {
     }
   };
   const handleSave = async (section) => {
-    if (section === 'certificates') {
-      await updateUserProfile({ certificates: form.certificates });
-      setEdit({ ...edit, [section]: false });
-      return;
+    try {
+      let result;
+      
+      switch (section) {
+        case 'certificates':
+          result = await profileService.updateCertificates(form.certificates);
+          break;
+        case 'education':
+          result = await profileService.updateEducation(form.education);
+          break;
+        case 'experiences':
+          result = await profileService.updateExperience(form.experiences);
+          break;
+        case 'skills':
+          result = await profileService.updateSkills(form.skills);
+          break;
+        case 'languages':
+          result = await profileService.updateLanguages(form.languages);
+          break;
+        case 'social':
+          console.log('💾 Saving social platforms:', form.social);
+          result = await profileService.updateSocialPlatforms(form.social);
+          break;
+        case 'interests':
+          console.log('💾 Saving interests:', form.interests);
+          // Filter out empty interests before saving
+          const filteredInterests = (form.interests || []).filter(interest => interest && interest.trim() !== '');
+          console.log('💾 Filtered interests:', filteredInterests);
+          result = await profileService.updateInterests(filteredInterests);
+          break;
+        case 'contact':
+          // Contact info - save both email and phone
+          console.log('💾 Saving contact info:', { email: form.email, phone: form.phone });
+          result = await profileService.updateContactInfo({
+            email: form.email,
+            phone: form.phone
+          });
+          break;
+        case 'phone':
+        case 'email':
+        case 'country':
+        case 'city':
+        case 'address':
+        case 'summary':
+          // Individual contact info and basic profile updates
+          result = await profileService.updateContactInfo({ [section]: form[section] });
+          break;
+        default:
+          // Generic profile update for other fields
+          result = await profileService.updateProfile({ [section]: form[section] });
+          break;
+      }
+      
+      if (result.success) {
+        console.log(`✅ ${section} updated successfully`);
+        
+        // Update user context with new data directly (don't call updateUserProfile again)
+        const { user: updatedUser } = result.data;
+        setUser(updatedUser);
+        
+        // Store updated user data in localStorage for persistence
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+        
+        // Update form state with the new data from backend
+        setForm(prevForm => ({
+          ...prevForm,
+          ...updatedUser,
+          social: { ...prevForm.social, ...(updatedUser.social || {}) }
+        }));
+        
+        // Reset edit state
+        setEdit({ ...edit, [section]: false });
+        
+        // Show success message
+        alert(`${section.charAt(0).toUpperCase() + section.slice(1)} updated successfully!`);
+      }
+    } catch (error) {
+      console.error(`❌ Failed to update ${section}:`, error);
+      console.error(`❌ Error details:`, {
+        message: error.message,
+        stack: error.stack,
+        section,
+        formData: form[section]
+      });
+      alert(`Failed to update ${section}. Error: ${error.message}`);
     }
-    await updateUserProfile({ [section]: form[section] });
-    setEdit({ ...edit, [section]: false });
   };
-  const handleAddListItem = (section, template) => {
-    setForm({ ...form, [section]: [...form[section], template] });
+  const handleAddListItem = async (section, template) => {
+    try {
+      // Ensure we have a valid array to work with
+      const currentArray = form[section] || [];
+      const updatedArray = [...currentArray, template];
+      setForm({ ...form, [section]: updatedArray });
+      
+      console.log(`➕ Adding ${section} item:`, template);
+      console.log(`📝 Current ${section} array:`, currentArray);
+      console.log(`📝 Updated ${section} array:`, updatedArray);
+      
+      // For simple list items (interests, skills, languages), don't auto-save empty items
+      // Only save when user actually enters content and clicks Save
+      if (['interests', 'skills', 'languages'].includes(section) && (!template || template.trim() === '')) {
+        console.log(`⏸️ Skipping auto-save for empty ${section} item`);
+        return;
+      }
+      
+      // Auto-save to backend for complex objects or non-empty simple items
+      let result;
+      switch (section) {
+        case 'education':
+          result = await profileService.updateEducation(updatedArray);
+          break;
+        case 'experiences':
+          result = await profileService.updateExperience(updatedArray);
+          break;
+        case 'certificates':
+          result = await profileService.updateCertificates(updatedArray);
+          break;
+        case 'skills':
+          result = await profileService.updateSkills(updatedArray);
+          break;
+        case 'languages':
+          result = await profileService.updateLanguages(updatedArray);
+          break;
+        case 'interests':
+          // Filter out empty interests before saving
+          const filteredInterests = updatedArray.filter(interest => interest && interest.trim() !== '');
+          result = await profileService.updateInterests(filteredInterests);
+          break;
+        default:
+          result = await profileService.updateProfile({ [section]: updatedArray });
+          break;
+      }
+      
+      if (result.success) {
+        console.log(`✅ Added ${section} item successfully`);
+        // Update user context with new data directly
+        const { user: updatedUser } = result.data;
+        setUser(updatedUser);
+        
+        // Store updated user data in localStorage for persistence
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+        
+        // Update form state with the new data from backend
+        setForm(prevForm => ({
+          ...prevForm,
+          ...updatedUser,
+          social: { ...prevForm.social, ...(updatedUser.social || {}) }
+        }));
+      }
+    } catch (error) {
+      console.error(`❌ Failed to add ${section} item:`, error);
+      // Revert the form state on error - ensure we have a valid array
+      const currentArray = form[section] || [];
+      if (currentArray.length > 0) {
+        const revertedArray = currentArray.slice(0, -1);
+        setForm({ ...form, [section]: revertedArray });
+      }
+      alert(`Failed to add ${section} item. Please try again.`);
+    }
   };
-  const handleRemoveListItem = (section, idx) => {
-    const updated = [...form[section]];
-    updated.splice(idx, 1);
-    setForm({ ...form, [section]: updated });
+
+  const handleRemoveListItem = async (section, idx) => {
+    // Store the original item before removing it - ensure we have a valid array
+    const originalArray = [...(form[section] || [])];
+    const removedItem = originalArray[idx];
+    
+    try {
+      const updated = [...(form[section] || [])];
+      updated.splice(idx, 1);
+      setForm({ ...form, [section]: updated });
+      
+      // Auto-save to backend
+      let result;
+      switch (section) {
+        case 'education':
+          result = await profileService.updateEducation(updated);
+          break;
+        case 'experiences':
+          result = await profileService.updateExperience(updated);
+          break;
+        case 'certificates':
+          result = await profileService.updateCertificates(updated);
+          break;
+        case 'skills':
+          result = await profileService.updateSkills(updated);
+          break;
+        case 'languages':
+          result = await profileService.updateLanguages(updated);
+          break;
+        case 'interests':
+          result = await profileService.updateInterests(updated);
+          break;
+        default:
+          result = await profileService.updateProfile({ [section]: updated });
+          break;
+      }
+      
+      if (result.success) {
+        console.log(`✅ Removed ${section} item successfully`);
+        // Update user context with new data directly
+        const { user: updatedUser } = result.data;
+        setUser(updatedUser);
+        
+        // Store updated user data in localStorage for persistence
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+        
+        // Update form state with the new data from backend
+        setForm(prevForm => ({
+          ...prevForm,
+          ...updatedUser,
+          social: { ...prevForm.social, ...(updatedUser.social || {}) }
+        }));
+      }
+    } catch (error) {
+      console.error(`❌ Failed to remove ${section} item:`, error);
+      // Revert the form state on error by restoring the original array
+      setForm({ ...form, [section]: originalArray });
+      alert(`Failed to remove ${section} item. Please try again.`);
+    }
   };
 
   // Profile picture edit handler
@@ -311,35 +878,48 @@ const Profile = ({ userRole }) => {
       setForm({ ...form, profilePic: URL.createObjectURL(e.target.files[0]) });
     }
   };
+  
   const handleProfilePicSave = async () => {
-    const formData = new FormData();
-    if (profilePicFile) {
-      formData.append('profile_picture', profilePicFile);
+    if (!profilePicFile) {
+      console.warn('No profile picture file selected');
+      return;
     }
-    formData.append('country', form.country || '');
-    formData.append('city', form.city || '');
-    // Add other fields as needed
 
-    const token = localStorage.getItem('token');
-        const response = await fetch('/api/auth/profile', {
-      method: 'PATCH',
-      headers: {
-        'Authorization': `Bearer ${token}`
-        // Do NOT set Content-Type for FormData
-      },
-      body: formData,
-    });
-
-    if (response.ok) {
-      // Optionally update user context/state here
-      // You may want to call fetchUserProfile() or reload the page
-      setEdit({ ...edit, profilePic: false });
-      setProfilePicFile(null);
-    } else {
-      // Handle error
-      alert('Failed to update profile picture.');
+    try {
+      console.log('🌐 Uploading profile picture...');
+      
+      // Use the new profile service for upload
+      const result = await profileService.uploadProfilePicture(profilePicFile);
+      
+      if (result.success) {
+        console.log('✅ Profile picture uploaded successfully');
+        
+        // Update the user context with new profile data directly
+        const { user: updatedUser } = result.data;
+        setUser(updatedUser);
+        
+        // Store updated user data in localStorage for persistence
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+        
+        // Update form state with the new data from backend
+        setForm(prevForm => ({
+          ...prevForm,
+          ...updatedUser,
+          social: { ...prevForm.social, ...(updatedUser.social || {}) }
+        }));
+        
+        // Reset edit state
+        setEdit({ ...edit, profilePic: false });
+        setProfilePicFile(null);
+        
+        alert('Profile picture updated successfully!');
+      }
+    } catch (error) {
+      console.error('❌ Failed to upload profile picture:', error);
+      alert('Failed to upload profile picture. Please try again.');
     }
   };
+  
   const handleProfilePicCancel = () => {
     setForm({ ...form, profilePic: user.profilePic });
     setEdit({ ...edit, profilePic: false });
@@ -354,6 +934,7 @@ const Profile = ({ userRole }) => {
       setForm({ ...form, education: updated });
     }
   };
+  
   const handleCertificateFileChange = (e, idx) => {
     if (e.target.files && e.target.files[0]) {
       setCertificateFiles({ ...certificateFiles, [idx]: e.target.files[0] });
@@ -363,375 +944,460 @@ const Profile = ({ userRole }) => {
     }
   };
 
-  const editableFields = [
-    'firstName', 'lastName', 'email', 'phone', 'bio', 'country', 'city', 
-    'experiences', 'education', 'languages', 'skills', 'certificates', 'interests'
-  ];
+  // Don't render until we have user data
+  if (!user || !form || Object.keys(form).length === 0) {
+    return (
+      <Container>
+        <GlassWrapper>
+          <ProfileHeader>
+            <Title>Loading Profile...</Title>
+            <Subtitle>Please wait while we load your information</Subtitle>
+          </ProfileHeader>
+        </GlassWrapper>
+      </Container>
+    );
+  }
 
   return (
     <Container>
-      <Title>Profile</Title>
-      <FlexRow>
-        <LeftColumn>
-          {/* Profile Picture */}
-          <Section>
-            <EditIconButton onClick={() => setEdit({ ...edit, profilePic: true })} type="button" aria-label="Edit profile picture"><FiEdit /></EditIconButton>
-            <Label>Profile Picture</Label>
-            {edit.profilePic ? (
-              <>
-                <ProfilePicWrapper>
-                  <ProfilePic src={form.profilePic} alt="Profile" />
-                </ProfilePicWrapper>
-                <Input type="file" accept="image/*" onChange={handleProfilePicChange} />
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                  <FiMapPin style={{ color: '#007bff', fontSize: '1.2rem' }} />
-                  <Input value={form.country} onChange={e => setForm({ ...form, country: e.target.value })} placeholder="Country" style={{ marginBottom: 0 }} />
-                  <Input value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} placeholder="City" style={{ marginBottom: 0 }} />
-                </div>
-                <SaveButton onClick={handleProfilePicSave}>Save</SaveButton>
-                <CancelButton onClick={handleProfilePicCancel}>Cancel</CancelButton>
-              </>
-            ) : (
-              <>
-                <ProfilePicWrapper>
-                  <ProfilePic src={user.profilePic} alt="Profile" />
-                </ProfilePicWrapper>
-                <div style={{ marginTop: '0.5rem', color: '#333', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <FiMapPin style={{ color: '#007bff', fontSize: '1.2rem' }} />
-                  <span>{user.country}, {user.city}</span>
-                </div>
-              </>
-            )}
-          </Section>
-
-          {/* Contact Information */}
-          <Section>
-            <EditIconButton onClick={() => handleEdit('contact')} type="button" aria-label="Edit contact info"><FiEdit /></EditIconButton>
-            <Label>Contact Information</Label>
-            {edit.contact ? (
-              <>
-                <Input value={form.email} onChange={e => handleChange(e, 'email')} placeholder="Email" />
-                <Input value={form.phone} onChange={e => handleChange(e, 'phone')} placeholder="Phone" />
-                <SaveButton onClick={() => handleSave('contact')}>Save</SaveButton>
-                <CancelButton onClick={() => handleCancel('contact')}>Cancel</CancelButton>
-              </>
-            ) : (
-              <>
-                <div style={{ marginBottom: '0.5rem' }}>Email: {user.email}</div>
-                <div>Phone: {user.phone}</div>
-              </>
-            )}
-          </Section>
-
-          {/* Social Platforms */}
-          <Section>
-            <EditIconButton onClick={() => handleEdit('social')} type="button" aria-label="Edit social platforms"><FiEdit /></EditIconButton>
-            <Label>Social Platforms</Label>
-            {edit.social ? (
-              <>
-                <Input value={form.social.linkedin} onChange={e => handleChange(e, 'social', null, 'linkedin')} placeholder="LinkedIn" />
-                <Input value={form.social.twitter} onChange={e => handleChange(e, 'social', null, 'twitter')} placeholder="Twitter" />
-                <Input value={form.social.instagram} onChange={e => handleChange(e, 'social', null, 'instagram')} placeholder="Instagram" />
-                <Input value={form.social.facebook} onChange={e => handleChange(e, 'social', null, 'facebook')} placeholder="Facebook" />
-                <SaveButton onClick={() => handleSave('social')}>Save</SaveButton>
-                <CancelButton onClick={() => handleCancel('social')}>Cancel</CancelButton>
-              </>
-            ) : (
-              <>
-                {user.social?.linkedin && (
-                  <div><a href={user.social.linkedin} target="_blank" rel="noopener noreferrer">LinkedIn</a></div>
-                )}
-                {user.social?.twitter && (
-                  <div><a href={user.social.twitter} target="_blank" rel="noopener noreferrer">Twitter</a></div>
-                )}
-                {user.social?.instagram && (
-                  <div><a href={user.social.instagram} target="_blank" rel="noopener noreferrer">Instagram</a></div>
-                )}
-                {user.social?.facebook && (
-                  <div><a href={user.social.facebook} target="_blank" rel="noopener noreferrer">Facebook</a></div>
-                )}
-              </>
-            )}
-          </Section>
-
-          {/* Interests */}
-          <Section>
-            <EditIconButton onClick={() => handleEdit('interests')} type="button" aria-label="Edit interests"><FiEdit /></EditIconButton>
-            <Label>Interests</Label>
-            {edit.interests ? (
-              <>
-                {form.interests.map((interest, idx) => (
-                  <div key={idx} style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5rem' }}>
-                    <Input
-                      value={interest}
-                      onChange={e => handleChange(e, 'interests', idx)}
-                      placeholder="Interest"
-                      style={{ flex: 1, marginBottom: 0 }}
-                    />
-                    <CancelButton type="button" onClick={() => handleRemoveListItem('interests', idx)} style={{ marginLeft: '0.5rem', marginTop: 0 }}>Remove</CancelButton>
-                  </div>
-                ))}
-                <SaveButton onClick={() => handleSave('interests')}>Save</SaveButton>
-                <CancelButton onClick={() => handleCancel('interests')}>Cancel</CancelButton>
-                <AddIconButton type="button" onClick={() => handleAddListItem('interests', '')} aria-label="Add interest"><FiPlus /></AddIconButton>
-              </>
-            ) : (
-              <OutlinedList>
-                {(user.interests || []).map((interest, idx) => (
-                  <OutlinedItem key={idx}>{interest}</OutlinedItem>
-                ))}
-              </OutlinedList>
-            )}
-          </Section>
-        </LeftColumn>
-
-        <RightColumn>
-          {/* Experiences */}
-          <Section>
-            <EditIconButton onClick={() => handleEdit('experiences')} type="button" aria-label="Edit experiences"><FiEdit /></EditIconButton>
-            <Label>Work Experience</Label>
-            {edit.experiences ? (
-              <>
-                {form.experiences.map((exp, idx) => (
-                  <div key={idx} style={{ marginBottom: '0.5rem', textAlign: 'left' }}>
-                    <ListInput value={exp.title} onChange={e => handleChange(e, 'experiences', idx, 'title')} placeholder="Job Title" />
-                    <ListInput value={exp.company} onChange={e => handleChange(e, 'experiences', idx, 'company')} placeholder="Company" />
-                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                      <select value={exp.startMonth || ''} onChange={e => handleChange(e, 'experiences', idx, 'startMonth')} style={{ borderRadius: '8px', padding: '0.3rem' }}>
-                        <option value="">Start Month</option>
-                        {months.map(m => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                      <select value={exp.startYear || ''} onChange={e => handleChange(e, 'experiences', idx, 'startYear')} style={{ borderRadius: '8px', padding: '0.3rem' }}>
-                        <option value="">Start Year</option>
-                        {years.map(y => <option key={y} value={y}>{y}</option>)}
-                      </select>
-                      <select value={exp.endMonth || ''} onChange={e => handleChange(e, 'experiences', idx, 'endMonth')} style={{ borderRadius: '8px', padding: '0.3rem' }}>
-                        <option value="">End Month</option>
-                        {months.map(m => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                      <select value={exp.endYear || ''} onChange={e => handleChange(e, 'experiences', idx, 'endYear')} style={{ borderRadius: '8px', padding: '0.3rem' }}>
-                        <option value="">End Year</option>
-                        {years.map(y => <option key={y} value={y}>{y}</option>)}
-                        <option value="Present">Present</option>
-                      </select>
-                    </div>
-                    <TextArea value={exp.summary || ''} onChange={e => handleChange(e, 'experiences', idx, 'summary')} placeholder="Summary of your role and achievements" />
-                    <CancelButton type="button" onClick={() => handleRemoveListItem('experiences', idx)}>Remove</CancelButton>
-                  </div>
-                ))}
-                <SaveButton onClick={() => handleSave('experiences')}>Save</SaveButton>
-                <CancelButton onClick={() => handleCancel('experiences')}>Cancel</CancelButton>
-                <AddIconButton type="button" onClick={() => handleAddListItem('experiences', { title: '', company: '', years: '', summary: '', startMonth: '', startYear: '', endMonth: '', endYear: '' })} aria-label="Add experience"><FiPlus /></AddIconButton>
-              </>
-            ) : (
-              <ul style={{ padding: 0, margin: 0 }}>
-                {(user.experiences || []).map((exp, idx) => (
-                  <li key={idx} style={{ textAlign: 'left', marginBottom: '1rem' }}>
-                    <div style={{ fontWeight: 'bold' }}>
-                      {exp.title} at {exp.company}
-                      {exp.startMonth && exp.startYear && (
-                        <> ({exp.startMonth} {exp.startYear}
-                          {exp.endMonth && exp.endYear
-                            ? ` - ${exp.endMonth} ${exp.endYear})`
-                            : exp.endYear === 'Present'
-                              ? ' - Present)'
-                              : ')'}
-                        </>
+      <GlassWrapper>
+        <ProfileHeader>
+          <Title>Profile</Title>
+          <Subtitle>Your personal information and achievements</Subtitle>
+        </ProfileHeader>
+        <ContentArea>
+          <FlexRow>
+            <LeftColumn>
+              {/* Profile Picture */}
+              <ProfilePictureSection>
+                <FloatingEditButton onClick={() => setEdit({ ...edit, profilePic: true })} type="button" aria-label="Edit profile picture"><FiEdit /></FloatingEditButton>
+                
+                {edit.profilePic ? (
+                  <>
+                    <ProfilePicWrapper>
+                      {form.profilePic ? (
+                        <ProfilePic src={form.profilePic} alt="Profile" />
+                      ) : (
+                        // Just solid color background, no text
+                        <div style={{ width: '100%', height: '100%' }}></div>
                       )}
-                    </div>
-                    <div style={{ fontSize: '0.95em', color: '#333', marginTop: '0.2em', textAlign: 'left' }}>{exp.summary}</div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Section>
-
-          {/* Education */}
-          <Section>
-            <EditIconButton onClick={() => handleEdit('education')} type="button" aria-label="Edit education"><FiEdit /></EditIconButton>
-            <Label>Education</Label>
-            {edit.education ? (
-              <>
-                {form.education.map((edu, idx) => (
-                  <div key={idx} style={{ marginBottom: '0.5rem', textAlign: 'left' }}>
-                    <ListInput value={edu.degree} onChange={e => handleChange(e, 'education', idx, 'degree')} placeholder="Degree" />
-                    <ListInput value={edu.school} onChange={e => handleChange(e, 'education', idx, 'school')} placeholder="School" />
-                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                      <select value={edu.startMonth || ''} onChange={e => handleChange(e, 'education', idx, 'startMonth')} style={{ borderRadius: '8px', padding: '0.3rem' }}>
-                        <option value="">Start Month</option>
-                        {months.map(m => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                      <select value={edu.startYear || ''} onChange={e => handleChange(e, 'education', idx, 'startYear')} style={{ borderRadius: '8px', padding: '0.3rem' }}>
-                        <option value="">Start Year</option>
-                        {years.map(y => <option key={y} value={y}>{y}</option>)}
-                      </select>
-                      <select value={edu.endMonth || ''} onChange={e => handleChange(e, 'education', idx, 'endMonth')} style={{ borderRadius: '8px', padding: '0.3rem' }}>
-                        <option value="">End Month</option>
-                        {months.map(m => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                      <select value={edu.endYear || ''} onChange={e => handleChange(e, 'education', idx, 'endYear')} style={{ borderRadius: '8px', padding: '0.3rem' }}>
-                        <option value="">End Year</option>
-                        {years.map(y => <option key={y} value={y}>{y}</option>)}
-                        <option value="Present">Present</option>
-                      </select>
-                    </div>
-                    <TextArea value={edu.summary || ''} onChange={e => handleChange(e, 'education', idx, 'summary')} placeholder="Summary of what you studied" />
-                    <div style={{ marginBottom: '0.5rem' }}>
-                      <input type="file" accept="application/pdf,image/*" onChange={e => handleDegreeFileChange(e, idx)} />
-                      {edu.degreeFileName && <span style={{ marginLeft: '0.5rem' }}>{edu.degreeFileName}</span>}
-                    </div>
-                    <CancelButton type="button" onClick={() => handleRemoveListItem('education', idx)}>Remove</CancelButton>
-                  </div>
-                ))}
-                <SaveButton onClick={() => handleSave('education')}>Save</SaveButton>
-                <CancelButton onClick={() => handleCancel('education')}>Cancel</CancelButton>
-                <AddIconButton type="button" onClick={() => handleAddListItem('education', { degree: '', school: '', years: '', summary: '', startMonth: '', startYear: '', endMonth: '', endYear: '', degreeFileName: '' })} aria-label="Add education"><FiPlus /></AddIconButton>
-              </>
-            ) : (
-              <ul style={{ padding: 0, margin: 0 }}>
-                {(user.education || []).map((edu, idx) => (
-                  <li key={idx} style={{ textAlign: 'left', marginBottom: '1rem' }}>
-                    <div style={{ fontWeight: 'bold' }}>
-                      {edu.degree} at {edu.school}
-                      {edu.startMonth && edu.startYear && (
-                        <> ({edu.startMonth} {edu.startYear}
-                          {edu.endMonth && edu.endYear
-                            ? ` - ${edu.endMonth} ${edu.endYear})`
-                            : edu.endYear === 'Present'
-                              ? ' - Present)'
-                              : ')'}
-                        </>
+                    </ProfilePicWrapper>
+                    <Input type="file" accept="image/*" onChange={handleProfilePicChange} />
+                    <ActionButtons>
+                      <SaveButton onClick={handleProfilePicSave}>Save</SaveButton>
+                      <CancelButton onClick={handleProfilePicCancel}>Cancel</CancelButton>
+                    </ActionButtons>
+                  </>
+                ) : (
+                  <>
+                    <ProfilePicWrapper>
+                      {user.profilePic ? (
+                        <ProfilePic src={user.profilePic} alt="Profile" />
+                      ) : (
+                        // Just solid color background, no text
+                        <div style={{ width: '100%', height: '100%' }}></div>
                       )}
-                    </div>
-                    {edu.summary && <div style={{ color: '#333', marginTop: '0.2em' }}>{edu.summary}</div>}
-                    {edu.degreeFileName && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <FiFile style={{ color: '#007bff' }} />
-                        <a href="#" style={{ color: '#007bff' }} download>{edu.degreeFileName}</a>
-                      </div>
+                    </ProfilePicWrapper>
+                    <UserName>{user.firstName} {user.lastName}</UserName>
+                    <UserRole>{userRole || user.role}</UserRole>
+                    <LocationInfo>
+                      <FiMapPin />
+                      <span>{user.country}, {user.city}</span>
+                    </LocationInfo>
+                  </>
+                )}
+              </ProfilePictureSection>
+
+              {/* Contact Information */}
+              <Section>
+                <SectionHeader>
+                  <SectionIcon><FiMail /></SectionIcon>
+                  <SectionTitle>Contact Information</SectionTitle>
+                  <FloatingEditButton onClick={() => handleEdit('contact')} type="button" aria-label="Edit contact info"><FiEdit /></FloatingEditButton>
+                </SectionHeader>
+                {edit.contact ? (
+                  <>
+                    <Input value={form.email} onChange={e => handleChange(e, 'email')} placeholder="Email" />
+                    <Input value={form.phone} onChange={e => handleChange(e, 'phone')} placeholder="Phone" />
+                    <ActionButtons>
+                      <SaveButton onClick={() => handleSave('contact')}>Save</SaveButton>
+                      <CancelButton onClick={() => handleCancel('contact')}>Cancel</CancelButton>
+                    </ActionButtons>
+                  </>
+                ) : (
+                  <>
+                    <ContactItem>
+                      <ContactIcon><FiMail /></ContactIcon>
+                      <span>{user.email}</span>
+                    </ContactItem>
+                    <ContactItem>
+                      <ContactIcon><FiPhone /></ContactIcon>
+                      <span>{user.phone}</span>
+                    </ContactItem>
+                  </>
+                )}
+              </Section>
+
+              {/* Social Platforms */}
+              <Section>
+                <SectionHeader>
+                  <SectionIcon><FiGlobe /></SectionIcon>
+                  <SectionTitle>Social Platforms</SectionTitle>
+                  <FloatingEditButton onClick={() => handleEdit('social')} type="button" aria-label="Edit social platforms"><FiEdit /></FloatingEditButton>
+                </SectionHeader>
+                {edit.social ? (
+                  <>
+                    <Input value={form.social?.linkedin || ''} onChange={e => handleChange(e, 'social', null, 'linkedin')} placeholder="LinkedIn (URL or username)" />
+                    <Input value={form.social?.twitter || ''} onChange={e => handleChange(e, 'social', null, 'twitter')} placeholder="Twitter (URL or @username)" />
+                    <Input value={form.social?.instagram || ''} onChange={e => handleChange(e, 'social', null, 'instagram')} placeholder="Instagram (URL or username)" />
+                    <Input value={form.social?.facebook || ''} onChange={e => handleChange(e, 'social', null, 'facebook')} placeholder="Facebook (URL or username)" />
+                    <ActionButtons>
+                      <SaveButton onClick={() => handleSave('social')}>Save</SaveButton>
+                      <CancelButton onClick={() => handleCancel('social')}>Cancel</CancelButton>
+                    </ActionButtons>
+                  </>
+                ) : (
+                  <>
+                    {user.social?.linkedin && (
+                      <ContactItem>
+                        <ContactIcon><FiLinkedin /></ContactIcon>
+                        <a href={user.social.linkedin} target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                      </ContactItem>
                     )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Section>
-
-          {/* Skills */}
-          <Section>
-            <div style={{display:'flex',alignItems:'center',gap:'0.5rem'}}>
-              <EditIconButton onClick={() => handleEdit('skills')} type="button" aria-label="Edit skills"><FiEdit /></EditIconButton>
-              <Label>Skills</Label>
-            </div>
-            {edit.skills ? (
-              <div>
-                {(form.skills || []).map((skill, idx) => (
-                  <div key={idx} style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5rem' }}>
-                    <Input value={skill} onChange={e => handleChange(e, 'skills', idx)} />
-                    <CancelButton type="button" onClick={() => handleRemoveListItem('skills', idx)} style={{ marginLeft: '0.5rem', marginTop: 0 }}>Remove</CancelButton>
-                  </div>
-                ))}
-                <SaveButton onClick={() => handleSave('skills')}>Save</SaveButton>
-                <CancelButton onClick={() => handleCancel('skills')}>Cancel</CancelButton>
-                <AddIconButton type="button" onClick={() => handleAddListItem('skills', '')} aria-label="Add skill"><FiPlus /></AddIconButton>
-              </div>
-            ) : (
-              <SaveButton onClick={() => handleSave('skills')}>Save</SaveButton>
-            )}
-          </Section>
-          {(user.skills || []).map((skill, idx) => (
-            <OutlinedItem key={idx}>{skill}</OutlinedItem>
-          ))}
-
-          {/* Languages */}
-          <Section>
-            <EditIconButton onClick={() => handleEdit('languages')} type="button" aria-label="Edit languages"><FiEdit /></EditIconButton>
-            <Label>Languages</Label>
-            {edit.languages ? (
-              <>
-                {form.languages.map((language, idx) => (
-                  <div key={idx} style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5rem' }}>
-                    <Input
-                      value={language}
-                      onChange={e => handleChange(e, 'languages', idx)}
-                      placeholder="Language"
-                      style={{ flex: 1, marginBottom: 0 }}
-                    />
-                    <CancelButton type="button" onClick={() => handleRemoveListItem('languages', idx)} style={{ marginLeft: '0.5rem', marginTop: 0 }}>Remove</CancelButton>
-                  </div>
-                ))}
-                <SaveButton onClick={() => handleSave('languages')}>Save</SaveButton>
-                <CancelButton onClick={() => handleCancel('languages')}>Cancel</CancelButton>
-                <AddIconButton type="button" onClick={() => handleAddListItem('languages', '')} aria-label="Add language"><FiPlus /></AddIconButton>
-              </>
-            ) : (
-              <OutlinedList>
-                {(user.languages || []).map((language, idx) => (
-                  <OutlinedItem key={idx}>{language}</OutlinedItem>
-                ))}
-              </OutlinedList>
-            )}
-          </Section>
-
-          {/* Certificates */}
-          <Section>
-            <EditIconButton onClick={() => handleEdit('certificates')} type="button" aria-label="Edit certificates"><FiEdit /></EditIconButton>
-            <Label>Certificates</Label>
-            {edit.certificates ? (
-              <>
-                {form.certificates.map((cert, idx) => (
-                  <div key={idx} style={{ marginBottom: '0.5rem', textAlign: 'left' }}>
-                    <ListInput value={cert.title || ''} onChange={e => handleChange(e, 'certificates', idx, 'title')} placeholder="Certificate Title" />
-                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                      <select value={cert.startMonth || ''} onChange={e => handleChange(e, 'certificates', idx, 'startMonth')} style={{ borderRadius: '8px', padding: '0.3rem' }}>
-                        <option value="">Start Month</option>
-                        {months.map(m => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                      <select value={cert.startYear || ''} onChange={e => handleChange(e, 'certificates', idx, 'startYear')} style={{ borderRadius: '8px', padding: '0.3rem' }}>
-                        <option value="">Start Year</option>
-                        {years.map(y => <option key={y} value={y}>{y}</option>)}
-                      </select>
-                      <select value={cert.endMonth || ''} onChange={e => handleChange(e, 'certificates', idx, 'endMonth')} style={{ borderRadius: '8px', padding: '0.3rem' }}>
-                        <option value="">End Month</option>
-                        {months.map(m => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                      <select value={cert.endYear || ''} onChange={e => handleChange(e, 'certificates', idx, 'endYear')} style={{ borderRadius: '8px', padding: '0.3rem' }}>
-                        <option value="">End Year</option>
-                        {years.map(y => <option key={y} value={y}>{y}</option>)}
-                        <option value="Present">Present</option>
-                      </select>
-                    </div>
-                    <TextArea value={cert.summary || ''} onChange={e => handleChange(e, 'certificates', idx, 'summary')} placeholder="Summary of what you learned" />
-                    <div style={{ marginBottom: '0.5rem' }}>
-                      <input type="file" accept="application/pdf,image/*" onChange={e => handleCertificateFileChange(e, idx)} />
-                      {cert.certificateFileName && <span style={{ marginLeft: '0.5rem' }}>{cert.certificateFileName}</span>}
-                    </div>
-                    <CancelButton type="button" onClick={() => handleRemoveListItem('certificates', idx)}>Remove</CancelButton>
-                  </div>
-                ))}
-                <SaveButton onClick={() => handleSave('certificates')}>Save</SaveButton>
-                <CancelButton onClick={() => handleCancel('certificates')}>Cancel</CancelButton>
-                <AddIconButton type="button" onClick={() => handleAddListItem('certificates', { title: '', summary: '', certificateFileName: '', startMonth: '', startYear: '', endMonth: '', endYear: '' })} aria-label="Add certificate"><FiPlus /></AddIconButton>
-              </>
-            ) : (
-              <OutlinedList>
-                {(user.certificates || []).map((cert, idx) => (
-                  <li key={idx} style={{ textAlign: 'left', marginBottom: '1rem' }}>
-                    <div style={{ fontWeight: 'bold' }}>{cert.title || cert}</div>
-                    {(cert.startMonth && cert.startYear) && <div style={{ color: '#555', fontSize: '0.95em' }}>{cert.startMonth} {cert.startYear}{(cert.endMonth && cert.endYear) ? ` - ${cert.endMonth} ${cert.endYear}` : cert.endYear === 'Present' ? ' - Present' : ''}</div>}
-                    {cert.summary && <div style={{ color: '#333', marginTop: '0.2em' }}>{cert.summary}</div>}
-                    {cert.certificateFileName && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <FiFile style={{ color: '#007bff' }} />
-                        <a href="#" style={{ color: '#007bff' }} download>{cert.certificateFileName}</a>
-                      </div>
+                    {user.social?.twitter && (
+                      <ContactItem>
+                        <ContactIcon><FiGlobe /></ContactIcon>
+                        <a href={user.social.twitter} target="_blank" rel="noopener noreferrer">Twitter</a>
+                      </ContactItem>
                     )}
-                  </li>
-                ))}
-              </OutlinedList>
-            )}
-          </Section>
-        </RightColumn>
-      </FlexRow>
+                    {user.social?.instagram && (
+                      <ContactItem>
+                        <ContactIcon><FiGlobe /></ContactIcon>
+                        <a href={user.social.instagram} target="_blank" rel="noopener noreferrer">Instagram</a>
+                      </ContactItem>
+                    )}
+                    {user.social?.facebook && (
+                      <ContactItem>
+                        <ContactIcon><FiGlobe /></ContactIcon>
+                        <a href={user.social.facebook} target="_blank" rel="noopener noreferrer">Facebook</a>
+                      </ContactItem>
+                    )}
+                  </>
+                )}
+              </Section>
+
+              {/* Interests */}
+              <Section>
+                <SectionHeader>
+                  <SectionIcon><FiHeart /></SectionIcon>
+                  <SectionTitle>Interests</SectionTitle>
+                  <FloatingEditButton onClick={() => handleEdit('interests')} type="button" aria-label="Edit interests"><FiEdit /></FloatingEditButton>
+                </SectionHeader>
+                {edit.interests ? (
+                  <>
+                    {(form.interests || []).map((interest, idx) => (
+                      <FormRow key={idx}>
+                        <Input
+                          value={interest}
+                          onChange={e => handleChange(e, 'interests', idx)}
+                          placeholder="Interest"
+                        />
+                        <RemoveButton type="button" onClick={() => handleRemoveListItem('interests', idx)}>Remove</RemoveButton>
+                      </FormRow>
+                    ))}
+                    <ActionButtons>
+                      <SaveButton onClick={() => handleSave('interests')}>Save</SaveButton>
+                      <CancelButton onClick={() => handleCancel('interests')}>Cancel</CancelButton>
+                      <FloatingAddButton type="button" onClick={() => handleAddListItem('interests', '')} aria-label="Add interest"><FiPlus /></FloatingAddButton>
+                    </ActionButtons>
+                  </>
+                ) : (
+                  <SkillsGrid>
+                    {(user.interests || []).map((interest, idx) => (
+                      <SkillTag key={idx}>{interest}</SkillTag>
+                    ))}
+                  </SkillsGrid>
+                )}
+              </Section>
+            </LeftColumn>
+
+            <RightColumn>
+              {/* Work Experience */}
+              <Section>
+                <SectionHeader>
+                  <SectionIcon><FiBriefcase /></SectionIcon>
+                  <SectionTitle>Work Experience</SectionTitle>
+                  <FloatingEditButton onClick={() => handleEdit('experiences')} type="button" aria-label="Edit experiences"><FiEdit /></FloatingEditButton>
+                </SectionHeader>
+                {edit.experiences ? (
+                  <>
+                    {(form.experiences || []).map((exp, idx) => (
+                      <div key={idx} style={{ marginBottom: '1.5rem', textAlign: 'left' }}>
+                        <Input value={exp.title || ''} onChange={e => handleChange(e, 'experiences', idx, 'title')} placeholder="Job Title" />
+                        <Input value={exp.company || ''} onChange={e => handleChange(e, 'experiences', idx, 'company')} placeholder="Company" />
+                        <FormRow>
+                          <Select value={exp.startMonth || ''} onChange={e => handleChange(e, 'experiences', idx, 'startMonth')}>
+                            <option value="">Start Month</option>
+                            {months.map(m => <option key={m} value={m}>{m}</option>)}
+                          </Select>
+                          <Select value={exp.startYear || ''} onChange={e => handleChange(e, 'experiences', idx, 'startYear')}>
+                            <option value="">Start Year</option>
+                            {years.map(y => <option key={y} value={y}>{y}</option>)}
+                          </Select>
+                          <Select value={exp.endMonth || ''} onChange={e => handleChange(e, 'experiences', idx, 'endMonth')}>
+                            <option value="">End Month</option>
+                            {months.map(m => <option key={m} value={m}>{m}</option>)}
+                          </Select>
+                          <Select value={exp.endYear || ''} onChange={e => handleChange(e, 'experiences', idx, 'endYear')}>
+                            <option value="">End Year</option>
+                            {years.map(y => <option key={y} value={y}>{y}</option>)}
+                            <option value="Present">Present</option>
+                          </Select>
+                        </FormRow>
+                        <TextArea value={exp.summary || ''} onChange={e => handleChange(e, 'experiences', idx, 'summary')} placeholder="Summary of your role and achievements" />
+                        <RemoveButton type="button" onClick={() => handleRemoveListItem('experiences', idx)}>Remove</RemoveButton>
+                      </div>
+                    ))}
+                    <ActionButtons>
+                      <SaveButton onClick={() => handleSave('experiences')}>Save</SaveButton>
+                      <CancelButton onClick={() => handleCancel('experiences')}>Cancel</CancelButton>
+                      <FloatingAddButton type="button" onClick={() => handleAddListItem('experiences', { title: '', company: '', years: '', summary: '', startMonth: '', startYear: '', endMonth: '', endYear: '' })} aria-label="Add experience"><FiPlus /></FloatingAddButton>
+                    </ActionButtons>
+                  </>
+                ) : (
+                  <>
+                    {(user.experiences || []).map((exp, idx) => (
+                      <ExperienceCard key={idx}>
+                        <ExperienceTitle>{exp.title}</ExperienceTitle>
+                        <ExperienceCompany>{exp.company}</ExperienceCompany>
+                        {exp.startMonth && exp.startYear && (
+                          <ExperienceDate>
+                            {exp.startMonth} {exp.startYear}
+                            {exp.endMonth && exp.endYear
+                              ? ` - ${exp.endMonth} ${exp.endYear}`
+                              : exp.endYear === 'Present'
+                                ? ' - Present'
+                                : ''}
+                          </ExperienceDate>
+                        )}
+                        <ExperienceDescription>{exp.summary}</ExperienceDescription>
+                      </ExperienceCard>
+                    ))}
+                  </>
+                )}
+              </Section>
+
+              {/* Education */}
+              <Section>
+                <SectionHeader>
+                  <SectionIcon><FiBookOpen /></SectionIcon>
+                  <SectionTitle>Education</SectionTitle>
+                  <FloatingEditButton onClick={() => handleEdit('education')} type="button" aria-label="Edit education"><FiEdit /></FloatingEditButton>
+                </SectionHeader>
+                {edit.education ? (
+                  <>
+                    {(form.education || []).map((edu, idx) => (
+                      <div key={idx} style={{ marginBottom: '1.5rem', textAlign: 'left' }}>
+                        <Input value={edu.degree || ''} onChange={e => handleChange(e, 'education', idx, 'degree')} placeholder="Degree" />
+                        <Input value={edu.school || ''} onChange={e => handleChange(e, 'education', idx, 'school')} placeholder="School" />
+                        <FormRow>
+                          <Select value={edu.startMonth || ''} onChange={e => handleChange(e, 'education', idx, 'startMonth')}>
+                            <option value="">Start Month</option>
+                            {months.map(m => <option key={m} value={m}>{m}</option>)}
+                          </Select>
+                          <Select value={edu.startYear || ''} onChange={e => handleChange(e, 'education', idx, 'startYear')}>
+                            <option value="">Start Year</option>
+                            {years.map(y => <option key={y} value={y}>{y}</option>)}
+                          </Select>
+                          <Select value={edu.endMonth || ''} onChange={e => handleChange(e, 'education', idx, 'endMonth')}>
+                            <option value="">End Month</option>
+                            {months.map(m => <option key={m} value={m}>{m}</option>)}
+                          </Select>
+                          <Select value={edu.endYear || ''} onChange={e => handleChange(e, 'education', idx, 'endYear')}>
+                            <option value="">End Year</option>
+                            {years.map(y => <option key={y} value={y}>{y}</option>)}
+                            <option value="Present">Present</option>
+                          </Select>
+                        </FormRow>
+                        <TextArea value={edu.summary || ''} onChange={e => handleChange(e, 'education', idx, 'summary')} placeholder="Summary of what you studied" />
+                        <div style={{ marginBottom: '0.5rem' }}>
+                          <input type="file" accept="application/pdf,image/*" onChange={e => handleDegreeFileChange(e, idx)} />
+                          {edu.degreeFileName && <span style={{ marginLeft: '0.5rem' }}>{edu.degreeFileName}</span>}
+                        </div>
+                        <RemoveButton type="button" onClick={() => handleRemoveListItem('education', idx)}>Remove</RemoveButton>
+                      </div>
+                    ))}
+                    <ActionButtons>
+                      <SaveButton onClick={() => handleSave('education')}>Save</SaveButton>
+                      <CancelButton onClick={() => handleCancel('education')}>Cancel</CancelButton>
+                      <FloatingAddButton type="button" onClick={() => handleAddListItem('education', { degree: '', school: '', years: '', summary: '', startMonth: '', startYear: '', endMonth: '', endYear: '', degreeFileName: '' })} aria-label="Add education"><FiPlus /></FloatingAddButton>
+                    </ActionButtons>
+                  </>
+                ) : (
+                  <>
+                    {(user.education || []).map((edu, idx) => (
+                      <ExperienceCard key={idx}>
+                        <ExperienceTitle>{edu.degree}</ExperienceTitle>
+                        <ExperienceCompany>{edu.school}</ExperienceCompany>
+                        {edu.startMonth && edu.startYear && (
+                          <ExperienceDate>
+                            {edu.startMonth} {edu.startYear}
+                            {edu.endMonth && edu.endYear
+                              ? ` - ${edu.endMonth} ${edu.endYear}`
+                              : edu.endYear === 'Present'
+                                ? ' - Present'
+                                : ''}
+                          </ExperienceDate>
+                        )}
+                        {edu.summary && <ExperienceDescription>{edu.summary}</ExperienceDescription>}
+                        {edu.degreeFileName && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+                            <FiFile style={{ color: '#3b82f6' }} />
+                            <a href="#" style={{ color: '#3b82f6' }} download>{edu.degreeFileName}</a>
+                          </div>
+                        )}
+                      </ExperienceCard>
+                    ))}
+                  </>
+                )}
+              </Section>
+
+              {/* Skills */}
+              <Section>
+                <SectionHeader>
+                  <SectionIcon><FiStar /></SectionIcon>
+                  <SectionTitle>Skills</SectionTitle>
+                  <FloatingEditButton onClick={() => handleEdit('skills')} type="button" aria-label="Edit skills"><FiEdit /></FloatingEditButton>
+                </SectionHeader>
+                {edit.skills ? (
+                  <>
+                    {(form.skills || []).map((skill, idx) => (
+                      <FormRow key={idx}>
+                        <Input value={skill} onChange={e => handleChange(e, 'skills', idx)} placeholder="Skill" />
+                        <RemoveButton type="button" onClick={() => handleRemoveListItem('skills', idx)}>Remove</RemoveButton>
+                      </FormRow>
+                    ))}
+                    <ActionButtons>
+                      <SaveButton onClick={() => handleSave('skills')}>Save</SaveButton>
+                      <CancelButton onClick={() => handleCancel('skills')}>Cancel</CancelButton>
+                      <FloatingAddButton type="button" onClick={() => handleAddListItem('skills', '')} aria-label="Add skill"><FiPlus /></FloatingAddButton>
+                    </ActionButtons>
+                  </>
+                ) : (
+                  <SkillsGrid>
+                    {(user.skills || []).map((skill, idx) => (
+                      <SkillTag key={idx}>{skill}</SkillTag>
+                    ))}
+                  </SkillsGrid>
+                )}
+              </Section>
+
+              {/* Languages */}
+              <Section>
+                <SectionHeader>
+                  <SectionIcon><FiGlobe /></SectionIcon>
+                  <SectionTitle>Languages</SectionTitle>
+                  <FloatingEditButton onClick={() => handleEdit('languages')} type="button" aria-label="Edit languages"><FiEdit /></FloatingEditButton>
+                </SectionHeader>
+                {edit.languages ? (
+                  <>
+                    {(form.languages || []).map((language, idx) => (
+                      <FormRow key={idx}>
+                        <Input
+                          value={language}
+                          onChange={e => handleChange(e, 'languages', idx)}
+                          placeholder="Language"
+                        />
+                        <RemoveButton type="button" onClick={() => handleRemoveListItem('languages', idx)}>Remove</RemoveButton>
+                      </FormRow>
+                    ))}
+                    <ActionButtons>
+                      <SaveButton onClick={() => handleSave('languages')}>Save</SaveButton>
+                      <CancelButton onClick={() => handleCancel('languages')}>Cancel</CancelButton>
+                      <FloatingAddButton type="button" onClick={() => handleAddListItem('languages', '')} aria-label="Add language"><FiPlus /></FloatingAddButton>
+                    </ActionButtons>
+                  </>
+                ) : (
+                  <SkillsGrid>
+                    {(user.languages || []).map((language, idx) => (
+                      <SkillTag key={idx}>{language}</SkillTag>
+                    ))}
+                  </SkillsGrid>
+                )}
+              </Section>
+
+              {/* Certificates */}
+              <Section>
+                <SectionHeader>
+                  <SectionIcon><FiAward /></SectionIcon>
+                  <SectionTitle>Certificates</SectionTitle>
+                  <FloatingEditButton onClick={() => handleEdit('certificates')} type="button" aria-label="Edit certificates"><FiEdit /></FloatingEditButton>
+                </SectionHeader>
+                {edit.certificates ? (
+                  <>
+                    {(form.certificates || []).map((cert, idx) => (
+                      <div key={idx} style={{ marginBottom: '1.5rem', textAlign: 'left' }}>
+                        <Input value={cert.title || ''} onChange={e => handleChange(e, 'certificates', idx, 'title')} placeholder="Certificate Title" />
+                        <FormRow>
+                          <Select value={cert.startMonth || ''} onChange={e => handleChange(e, 'certificates', idx, 'startMonth')}>
+                            <option value="">Start Month</option>
+                            {months.map(m => <option key={m} value={m}>{m}</option>)}
+                          </Select>
+                          <Select value={cert.startYear || ''} onChange={e => handleChange(e, 'certificates', idx, 'startYear')}>
+                            <option value="">Start Year</option>
+                            {years.map(y => <option key={y} value={y}>{y}</option>)}
+                          </Select>
+                          <Select value={cert.endMonth || ''} onChange={e => handleChange(e, 'certificates', idx, 'endMonth')}>
+                            <option value="">End Month</option>
+                            {months.map(m => <option key={m} value={m}>{m}</option>)}
+                          </Select>
+                          <Select value={cert.endYear || ''} onChange={e => handleChange(e, 'certificates', idx, 'endYear')}>
+                            <option value="">End Year</option>
+                            {years.map(y => <option key={y} value={y}>{y}</option>)}
+                            <option value="Present">Present</option>
+                          </Select>
+                        </FormRow>
+                        <TextArea value={cert.summary || ''} onChange={e => handleChange(e, 'certificates', idx, 'summary')} placeholder="Summary of what you learned" />
+                        <div style={{ marginBottom: '0.5rem' }}>
+                          <input type="file" accept="application/pdf,image/*" onChange={e => handleCertificateFileChange(e, idx)} />
+                          {cert.certificateFileName && <span style={{ marginLeft: '0.5rem' }}>{cert.certificateFileName}</span>}
+                        </div>
+                        <RemoveButton type="button" onClick={() => handleRemoveListItem('certificates', idx)}>Remove</RemoveButton>
+                      </div>
+                    ))}
+                    <ActionButtons>
+                      <SaveButton onClick={() => handleSave('certificates')}>Save</SaveButton>
+                      <CancelButton onClick={() => handleCancel('certificates')}>Cancel</CancelButton>
+                      <FloatingAddButton type="button" onClick={() => handleAddListItem('certificates', { title: '', summary: '', certificateFileName: '', startMonth: '', startYear: '', endMonth: '', endYear: '' })} aria-label="Add certificate"><FiPlus /></FloatingAddButton>
+                    </ActionButtons>
+                  </>
+                ) : (
+                  <>
+                    {(user.certificates || []).map((cert, idx) => (
+                      <ExperienceCard key={idx}>
+                        <ExperienceTitle>{cert.title || cert}</ExperienceTitle>
+                        {(cert.startMonth && cert.startYear) && (
+                          <ExperienceDate>
+                            {cert.startMonth} {cert.startYear}
+                            {(cert.endMonth && cert.endYear) ? ` - ${cert.endMonth} ${cert.endYear}` : cert.endYear === 'Present' ? ' - Present' : ''}
+                          </ExperienceDate>
+                        )}
+                        {cert.summary && <ExperienceDescription>{cert.summary}</ExperienceDescription>}
+                        {cert.certificateFileName && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+                            <FiFile style={{ color: '#3b82f6' }} />
+                            <a href="#" style={{ color: '#3b82f6' }} download>{cert.certificateFileName}</a>
+                          </div>
+                        )}
+                      </ExperienceCard>
+                    ))}
+                  </>
+                )}
+              </Section>
+            </RightColumn>
+          </FlexRow>
+        </ContentArea>
+      </GlassWrapper>
     </Container>
   );
 };

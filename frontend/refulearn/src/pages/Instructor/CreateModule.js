@@ -3,6 +3,7 @@ import styled from 'styled-components';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowBack, Delete, Edit } from '@mui/icons-material';
 import AssessmentCreator from '../../components/AssessmentCreator';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const BLUE = '#007bff';
 const BLACK = '#000';
@@ -198,38 +199,48 @@ export default function CreateModule() {
       if (isEditMode && courseData?.courseId) {
         try {
           const token = localStorage.getItem('token');
-          const response = await fetch(`/api/courses/${courseData.courseId}/assessments`, {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
-          });
+          const isOnline = navigator.onLine;
           
-          if (response.ok) {
-            const data = await response.json();
-            setLoadedAssessments(data.data.assessments || []);
-            
-            // Group assessments by module and add them to modules
-            const assessmentsByModule = {};
-            data.data.assessments.forEach(assessment => {
-              const moduleId = assessment.moduleId;
-              if (!assessmentsByModule[moduleId]) {
-                assessmentsByModule[moduleId] = [];
+          let assessmentsData = [];
+
+          if (isOnline) {
+            try {
+              // Try online API calls first (preserving existing behavior)
+              console.log('🌐 Online mode: Fetching assessments from API...');
+              
+              const response = await fetch(`/api/courses/${courseData.courseId}/assessments`, {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+
+              if (response.ok) {
+                const data = await response.json();
+                assessmentsData = data.data.assessments || [];
+                console.log('✅ Assessments data received');
+                
+                // Store assessments for offline use
+                await offlineIntegrationService.storeAssessments(courseData.courseId, assessmentsData);
+              } else {
+                throw new Error('Failed to fetch assessments');
               }
-              assessmentsByModule[moduleId].push(assessment);
-            });
-            
-            // Update modules with their assessments
-            setModules(prevModules => 
-              prevModules.map(mod => ({
-                ...mod,
-                assessments: assessmentsByModule[`module_${courseData.courseId}_${mod.order}`] || mod.assessments || [],
-                quizzes: mod.quizzes || []
-              }))
-            );
+
+            } catch (onlineError) {
+              console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+              
+              // Fall back to offline data if online fails
+              assessmentsData = await offlineIntegrationService.getAssessments(courseData.courseId);
+            }
+          } else {
+            // Offline mode: use offline services
+            console.log('📴 Offline mode: Using offline assessments data...');
+            assessmentsData = await offlineIntegrationService.getAssessments(courseData.courseId);
           }
-        } catch (err) {
-          console.error('Error loading assessments:', err);
+
+          setLoadedAssessments(assessmentsData);
+        } catch (error) {
+          console.error('❌ Error loading assessments:', error);
         }
       }
     };
@@ -359,116 +370,192 @@ export default function CreateModule() {
   const handleAddQuiz = async (quizData, originalQuiz) => {
     try {
       const token = localStorage.getItem('token');
+      const isOnline = navigator.onLine;
       
-      // Get course ID and module ID from the current context
-      const courseId = courseData?._id || courseData?.courseId || location.state?.courseData?._id;
-      const moduleId = module?._id || editModule?._id || `module_${Date.now()}_temp`;
-      
-      console.log('🧠 Saving quiz immediately:', quizData.title);
-      console.log('📍 Course Data:', courseData);
-      console.log('📍 Course ID:', courseId, 'Module ID:', moduleId);
-      console.log('📍 Module state:', module);
-      
-      // Handle case where we might not have courseId yet for new modules
-      if (!courseId) {
-        console.warn('⚠️ No course ID available - quiz will be created without course association');
-        // You can still create the quiz, but it won't be associated with a specific course/module initially
-      }
-      
-      const quizToSave = {
-        title: quizData.title,
-        description: quizData.description || '',
-        courseId: courseId || '', // Allow empty courseId for now
-        moduleId: moduleId || '', // Allow empty moduleId for now  
-        duration: quizData.timeLimit || 30,
-        totalPoints: quizData.totalPoints || quizData.questions?.reduce((sum, q) => sum + (q.points || 1), 0) || 0,
-        passingScore: quizData.passingScore || 70,
-        dueDate: quizData.dueDate || null,
-        questions: quizData.questions || []
-      };
-      
-      console.log('💾 Quiz data to save:', quizToSave);
-      
-      if (originalQuiz && originalQuiz._id) {
-        // Update existing quiz
-        console.log('🔄 Updating existing quiz:', originalQuiz._id);
-        const response = await fetch(`/api/instructor/quizzes/${originalQuiz._id}`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(quizToSave),
-        });
+      let success = false;
+
+      if (isOnline) {
+        try {
+          // Try online quiz save first
+          console.log('🌐 Online mode: Saving quiz...');
+          
+          // Get course ID and module ID from the current context
+          const courseId = courseData?._id || courseData?.courseId || location.state?.courseData?._id;
+          const moduleId = module?._id || editModule?._id || `module_${Date.now()}_temp`;
+          
+          console.log('📍 Course Data:', courseData);
+          console.log('📍 Course ID:', courseId, 'Module ID:', moduleId);
+          console.log('📍 Module state:', module);
+          
+          // Handle case where we might not have courseId yet for new modules
+          if (!courseId) {
+            console.warn('⚠️ No course ID available - quiz will be created without course association');
+            // You can still create the quiz, but it won't be associated with a specific course/module initially
+          }
+          
+          const quizToSave = {
+            title: quizData.title,
+            description: quizData.description || '',
+            courseId: courseId || '', // Allow empty courseId for now
+            moduleId: moduleId || '', // Allow empty moduleId for now  
+            duration: quizData.timeLimit || 30,
+            totalPoints: quizData.totalPoints || quizData.questions?.reduce((sum, q) => sum + (q.points || 1), 0) || 0,
+            passingScore: quizData.passingScore || 70,
+            dueDate: quizData.dueDate || null,
+            questions: quizData.questions || []
+          };
+          
+          console.log('💾 Quiz data to save:', quizToSave);
+          
+          if (originalQuiz && originalQuiz._id) {
+            // Update existing quiz
+            console.log('🔄 Updating existing quiz:', originalQuiz._id);
+            const response = await fetch(`/api/instructor/quizzes/${originalQuiz._id}`, {
+              method: 'PUT',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(quizToSave),
+            });
+            
+            if (response.ok) {
+              await response.json(); // Just consume the response
+              console.log('✅ Quiz updated successfully');
+              
+              // Update local state
+              const updatedQuiz = { ...quizData, id: originalQuiz.id, _id: originalQuiz._id };
+              setQuizzes(quizzes.map(q => 
+                q.id === originalQuiz.id ? updatedQuiz : q
+              ));
+              
+              // Also update the module state
+              setModule(prevModule => ({
+                ...prevModule,
+                quizzes: (prevModule.quizzes || []).map(q => 
+                  q.id === originalQuiz.id ? updatedQuiz : q
+                )
+              }));
+              
+              console.log('✅ Quiz updated in local state:', updatedQuiz);
+              alert('Quiz updated successfully!');
+            } else {
+              const error = await response.json();
+              console.error('Failed to update quiz:', error);
+              alert('Failed to update quiz: ' + (error.message || 'Unknown error'));
+              return;
+            }
+            
+          } else {
+            // Create new quiz
+            console.log('🆕 Creating new quiz');
+            const response = await fetch('/api/instructor/quizzes', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(quizToSave),
+            });
+            
+            if (response.ok) {
+              const result = await response.json();
+              const savedQuiz = result.data?.quiz || result;
+              console.log('✅ Quiz created successfully:', savedQuiz);
+              
+              // Add to local state with the returned _id
+              const newQuiz = { 
+                ...quizData, 
+                id: `quiz_${Date.now()}_${Math.random()}`,
+                _id: savedQuiz._id || savedQuiz.id
+              };
+              setQuizzes([...quizzes, newQuiz]);
+              
+              // Also update the module state to include this quiz
+              setModule(prevModule => ({
+                ...prevModule,
+                quizzes: [...(prevModule.quizzes || []), newQuiz]
+              }));
+              
+              console.log('✅ Quiz added to local state:', newQuiz);
+              alert('Quiz created and saved successfully!');
+            } else {
+              const error = await response.json();
+              console.error('Failed to create quiz:', error);
+              alert('Failed to create quiz: ' + (error.message || 'Unknown error'));
+              return;
+            }
+          }
+          
+        } catch (onlineError) {
+          console.warn('⚠️ Online quiz save failed, using offline:', onlineError);
+          
+          // Fall back to offline quiz save
+          const result = await offlineIntegrationService.saveQuizOffline(quizData, originalQuiz, isEditMode);
+          
+          if (result.success) {
+            success = true;
+            console.log('✅ Offline quiz save successful');
+            
+            // Update local state
+            const updatedQuiz = { ...quizData, id: originalQuiz?.id || `quiz_${Date.now()}_${Math.random()}`, _id: result.data.quiz._id || result.data.quiz.id };
+            setQuizzes(prevQuizzes => 
+              prevQuizzes.map(q => 
+                q.id === originalQuiz?.id ? updatedQuiz : q
+              )
+            );
+            
+            // Also update the module state
+            setModule(prevModule => ({
+              ...prevModule,
+              quizzes: (prevModule.quizzes || []).map(q => 
+                q.id === originalQuiz?.id ? updatedQuiz : q
+              )
+            }));
+            
+            console.log('✅ Quiz added to local state (offline):', updatedQuiz);
+            alert('Quiz saved offline! Will sync when online.');
+          } else {
+            throw new Error('Failed to save quiz offline');
+          }
+        }
+        success = true;
+      } else {
+        // Offline quiz save
+        console.log('📴 Offline mode: Saving quiz offline...');
+        const result = await offlineIntegrationService.saveQuizOffline(quizData, originalQuiz, isEditMode);
         
-        if (response.ok) {
-          await response.json(); // Just consume the response
-          console.log('✅ Quiz updated successfully');
+        if (result.success) {
+          success = true;
+          console.log('✅ Offline quiz save successful');
           
           // Update local state
-          const updatedQuiz = { ...quizData, id: originalQuiz.id, _id: originalQuiz._id };
-          setQuizzes(quizzes.map(q => 
-            q.id === originalQuiz.id ? updatedQuiz : q
-          ));
+          const updatedQuiz = { ...quizData, id: originalQuiz?.id || `quiz_${Date.now()}_${Math.random()}`, _id: result.data.quiz._id || result.data.quiz.id };
+          setQuizzes(prevQuizzes => 
+            prevQuizzes.map(q => 
+              q.id === originalQuiz?.id ? updatedQuiz : q
+            )
+          );
           
           // Also update the module state
           setModule(prevModule => ({
             ...prevModule,
             quizzes: (prevModule.quizzes || []).map(q => 
-              q.id === originalQuiz.id ? updatedQuiz : q
+              q.id === originalQuiz?.id ? updatedQuiz : q
             )
           }));
           
-          console.log('✅ Quiz updated in local state:', updatedQuiz);
-          alert('Quiz updated successfully!');
+          console.log('✅ Quiz added to local state (offline):', updatedQuiz);
+          alert('Quiz saved offline! Will sync when online.');
         } else {
-          const error = await response.json();
-          console.error('Failed to update quiz:', error);
-          alert('Failed to update quiz: ' + (error.message || 'Unknown error'));
-          return;
-        }
-        
-      } else {
-        // Create new quiz
-        console.log('🆕 Creating new quiz');
-        const response = await fetch('/api/instructor/quizzes', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(quizToSave),
-        });
-        
-        if (response.ok) {
-          const result = await response.json();
-          const savedQuiz = result.data?.quiz || result;
-          console.log('✅ Quiz created successfully:', savedQuiz);
-          
-          // Add to local state with the returned _id
-          const newQuiz = { 
-            ...quizData, 
-            id: `quiz_${Date.now()}_${Math.random()}`,
-            _id: savedQuiz._id || savedQuiz.id
-          };
-          setQuizzes([...quizzes, newQuiz]);
-          
-          // Also update the module state to include this quiz
-          setModule(prevModule => ({
-            ...prevModule,
-            quizzes: [...(prevModule.quizzes || []), newQuiz]
-          }));
-          
-          console.log('✅ Quiz added to local state:', newQuiz);
-          alert('Quiz created and saved successfully!');
-        } else {
-          const error = await response.json();
-          console.error('Failed to create quiz:', error);
-          alert('Failed to create quiz: ' + (error.message || 'Unknown error'));
-          return;
+          throw new Error('Failed to save quiz offline');
         }
       }
-      
+
+      if (!success) {
+        throw new Error('Failed to save quiz');
+      }
+
     } catch (err) {
       console.error('Error saving quiz:', err);
       alert('Error saving quiz: ' + err.message);

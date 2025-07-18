@@ -103,13 +103,13 @@ const authorizeRoles = (...roles) => {
             });
             return;
         }
-        if (req.user.role === 'admin') {
+        if (req.user?.role === 'admin') {
             return next();
         }
-        if (!roles.includes(req.user.role)) {
+        if (!roles.includes(req.user?.role || '')) {
             res.status(403).json({
                 success: false,
-                message: `Access denied: This endpoint is only accessible to [${roles.join(', ')}]. Your role: ${req.user.role}`
+                message: `Access denied: This endpoint is only accessible to [${roles.join(', ')}]. Your role: ${req.user?.role || 'undefined'}`
             });
             return;
         }
@@ -126,7 +126,7 @@ const authorizeSelfOrAdmin = (req, res, next) => {
         return;
     }
     const userId = req.params['userId'] || req.params['id'];
-    if (req.user.role === 'admin' || req.user._id.toString() === userId) {
+    if (req.user?.role === 'admin' || req.user?._id?.toString() === userId) {
         next();
     }
     else {
@@ -145,7 +145,7 @@ const requireEmailVerification = (req, res, next) => {
         });
         return;
     }
-    if (!req.user.isEmailVerified) {
+    if (!req.user?.isEmailVerified) {
         res.status(403).json({
             success: false,
             message: 'Email verification required'

@@ -7,8 +7,13 @@ declare global {
         email?: string;
         firstName?: string;
         lastName?: string;
+        type?: string;
+        isActive?: boolean;
+        isEmailVerified?: boolean;
         [key: string]: any;
       };
     }
   }
-} 
+}
+
+export {}; 

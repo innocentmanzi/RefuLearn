@@ -3,6 +3,7 @@ import { useLocation, useParams, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 import AssessmentTaker from '../../components/AssessmentTaker';
 import { Quiz, Assignment } from '@mui/icons-material';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem 2.5rem;
@@ -67,31 +68,48 @@ const CourseContentPage = () => {
         console.log('🚀 CourseContentPage: Starting to fetch course data for ID:', id);
         console.log('📊 Location state course:', course);
         const token = localStorage.getItem('token');
+        const isOnline = navigator.onLine;
         console.log('🔑 Token exists:', !!token);
+        console.log('🌐 Network status:', isOnline ? 'online' : 'offline');
 
-        // Fetch course details if not provided in location state
-        if (!course && id) {
-          console.log('🔍 Fetching course details for ID:', id);
-          const courseResponse = await fetch(`/api/courses/${id}`, {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
+        let courseData = course;
+        let modulesData = [];
+        let assessmentsData = [];
+        let progressData = 0;
+        let enrollmentData = false;
+        let startedData = false;
+
+        if (isOnline) {
+          try {
+            // Try online API calls first (preserving existing behavior)
+            console.log('🌐 Online mode: Fetching course data from API...');
+            
+            // Fetch course details if not provided in location state
+            if (!courseData && id) {
+              console.log('🔍 Fetching course details for ID:', id);
+              const courseResponse = await fetch(`/api/courses/${id}`, {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+
+              if (courseResponse.ok) {
+                const courseApiData = await courseResponse.json();
+                console.log('✅ Course data received:', courseApiData.data.course);
+                courseData = courseApiData.data.course;
+                
+                // Store course data for offline use
+                await offlineIntegrationService.storeCourseData(id, courseData);
+              } else {
+                const courseError = await courseResponse.text();
+                console.error('❌ Failed to fetch course details:', {
+                  status: courseResponse.status,
+                  error: courseError
+                });
+                throw new Error(`Failed to load course details: ${courseResponse.status} - ${courseError}`);
+              }
             }
-          });
-
-          if (courseResponse.ok) {
-            const courseData = await courseResponse.json();
-            console.log('✅ Course data received:', courseData.data.course);
-            setCourse(courseData.data.course);
-          } else {
-            const courseError = await courseResponse.text();
-            console.error('❌ Failed to fetch course details:', {
-              status: courseResponse.status,
-              error: courseError
-            });
-            throw new Error(`Failed to load course details: ${courseResponse.status} - ${courseError}`);
-          }
-        }
 
         // Fetch course modules using courseId path parameter instead of query parameter
         console.log('🧩 Fetching modules for course ID:', id);
@@ -195,6 +213,37 @@ const CourseContentPage = () => {
           setStarted(true);
         }
 
+          } catch (onlineError) {
+            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+            // Fall back to offline data if online fails
+            const offlineData = await fetchOfflineData();
+            courseData = offlineData.course || courseData;
+            modulesData = offlineData.modules;
+            assessmentsData = offlineData.assessments;
+            progressData = offlineData.progress;
+            enrollmentData = offlineData.enrollment;
+            startedData = offlineData.started;
+          }
+        } else {
+          // Offline mode: use offline services
+          console.log('📴 Offline mode: Using offline data...');
+          const offlineData = await fetchOfflineData();
+          courseData = offlineData.course || courseData;
+          modulesData = offlineData.modules;
+          assessmentsData = offlineData.assessments;
+          progressData = offlineData.progress;
+          enrollmentData = offlineData.enrollment;
+          startedData = offlineData.started;
+        }
+
+        // Update state with fetched data
+        setCourse(courseData);
+        setModules(modulesData);
+        setAssessments(assessmentsData);
+        setProgress(progressData);
+        setIsEnrolled(enrollmentData);
+        setStarted(startedData);
+
       } catch (err) {
         console.error('❌ Error fetching course data:', err);
         console.error('❌ Error details:', {
@@ -209,6 +258,32 @@ const CourseContentPage = () => {
       }
     };
 
+    // Helper function to fetch offline data
+    const fetchOfflineData = async () => {
+      try {
+        const course = await offlineIntegrationService.getCourseData(id);
+        const modules = await offlineIntegrationService.getModulesData(id) || [];
+        const assessments = await offlineIntegrationService.getAssessmentsData(id) || [];
+        const progress = await offlineIntegrationService.getProgressData(id) || 0;
+        const enrollment = await offlineIntegrationService.getEnrollmentData(id) || false;
+        const started = true; // Allow started state in offline mode
+        
+        console.log('📱 Offline data loaded for course:', id, {
+          course: !!course,
+          modules: modules.length,
+          assessments: assessments.length,
+          progress: progress,
+          enrollment: enrollment,
+          started: started
+        });
+        
+        return { course, modules, assessments, progress, enrollment, started };
+      } catch (error) {
+        console.error('❌ Failed to load offline data:', error);
+        return { course: null, modules: [], assessments: [], progress: 0, enrollment: false, started: true };
+      }
+    };
+
     if (id) {
       fetchCourseData();
     }
@@ -217,19 +292,47 @@ const CourseContentPage = () => {
   const handleModuleComplete = async (moduleId) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/courses/${id}/progress`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          moduleId,
-          completed: true
-        })
-      });
+      const isOnline = navigator.onLine;
+      let updateSuccess = false;
 
-      if (response.ok) {
+      if (isOnline) {
+        try {
+          // Try online update first (preserving existing behavior)
+          console.log('🌐 Online progress update for module:', moduleId);
+          const response = await fetch(`/api/courses/${id}/progress`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              moduleId,
+              completed: true
+            })
+          });
+
+          if (response.ok) {
+            updateSuccess = true;
+            console.log('✅ Online progress update successful');
+          } else {
+            throw new Error('Online progress update failed');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online progress update failed, using offline:', onlineError);
+          // Fall back to offline update
+          await offlineIntegrationService.updateModuleProgress(id, moduleId, true);
+          updateSuccess = true;
+          console.log('✅ Offline progress update successful');
+        }
+      } else {
+        // Offline progress update
+        console.log('📴 Offline progress update for module:', moduleId);
+        await offlineIntegrationService.updateModuleProgress(id, moduleId, true);
+        updateSuccess = true;
+        console.log('✅ Offline progress update successful');
+      }
+
+      if (updateSuccess) {
         // Update local progress
         const completedModules = modules.filter(m => m.completed).length + 1;
         const newProgress = (completedModules / modules.length) * 100;
@@ -239,6 +342,9 @@ const CourseContentPage = () => {
         setModules(prev => prev.map(m => 
           m._id === moduleId ? { ...m, completed: true } : m
         ));
+
+        // Store updated progress for offline use
+        await offlineIntegrationService.storeProgressData(id, newProgress);
       }
     } catch (err) {
       console.error('Error updating progress:', err);

@@ -14,14 +14,20 @@ const pouchdb_find_1 = __importDefault(require("pouchdb-find"));
 const router = express_1.default.Router();
 pouchdb_1.default.plugin(pouchdb_find_1.default);
 const db = new pouchdb_1.default('http://Manzi:Clarisse101@localhost:5984/refulearn');
+const ensureAuth = (req) => {
+    if (!req.user?._id)
+        throw new Error('User authentication required');
+    return { userId: req.user._id.toString(), user: req.user };
+};
 router.get('/tickets', auth_1.authenticateToken, [
     (0, express_validator_1.query)('status').optional().isIn(['open', 'in-progress', 'resolved', 'closed']),
     (0, express_validator_1.query)('priority').optional().isIn(['low', 'medium', 'high', 'urgent']),
     (0, express_validator_1.query)('page').optional().isInt({ min: 1 }),
     (0, express_validator_1.query)('limit').optional().isInt({ min: 1, max: 50 })
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const { status, priority, page = 1, limit = 10 } = req.query;
-    const selector = { type: 'help_ticket', user: req.user._id.toString() };
+    const selector = { type: 'help_ticket', user: userId };
     if (status) {
         selector.status = status;
     }
@@ -67,7 +73,7 @@ router.post('/tickets', auth_1.authenticateToken, upload_1.uploadAny, upload_1.h
         priority,
         assignedTo: assignedTo || undefined,
         attachments,
-        user: req.user._id.toString(),
+        user: ensureAuth(req).userId,
         status: 'open',
         type: 'help_ticket',
         messages: [],
@@ -82,11 +88,12 @@ router.post('/tickets', auth_1.authenticateToken, upload_1.uploadAny, upload_1.h
     });
 }));
 router.get('/tickets/:ticketId', auth_1.authenticateToken, (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId, user } = ensureAuth(req);
     const { ticketId } = req.params;
     try {
         const ticket = await db.get(ticketId);
-        if (ticket.user !== req.user._id.toString() &&
-            !['admin', 'instructor'].includes(req.user.role)) {
+        if (ticket.user !== userId &&
+            !['admin', 'instructor'].includes((user.role || ''))) {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to view this ticket'
@@ -112,6 +119,7 @@ router.put('/tickets/:ticketId', auth_1.authenticateToken, upload_1.uploadAny, u
     (0, express_validator_1.body)('status').optional().isIn(['open', 'in-progress', 'resolved', 'closed']),
     (0, express_validator_1.body)('assignedTo').optional().isIn(['instructor', 'admin', 'employer']).withMessage('Invalid assigned role')
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId, user } = ensureAuth(req);
     const { ticketId } = req.params;
     const updates = req.body;
     const ticket = await db.get(ticketId);
@@ -121,8 +129,8 @@ router.put('/tickets/:ticketId', auth_1.authenticateToken, upload_1.uploadAny, u
             message: 'Help ticket not found'
         });
     }
-    if (ticket.user !== req.user._id.toString() &&
-        !['admin', 'instructor'].includes(req.user.role)) {
+    if (ticket.user !== userId &&
+        !['admin', 'instructor'].includes((user.role || ''))) {
         return res.status(403).json({
             success: false,
             message: 'Not authorized to update this ticket'
@@ -155,6 +163,7 @@ router.post('/tickets/:ticketId/messages', auth_1.authenticateToken, [
     (0, express_validator_1.body)('message').trim().notEmpty().withMessage('Message is required'),
     (0, express_validator_1.body)('isInternal').optional().isBoolean()
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId, user } = ensureAuth(req);
     const { ticketId } = req.params;
     const { message, isInternal = false } = req.body;
     const ticket = await db.get(ticketId);
@@ -164,14 +173,14 @@ router.post('/tickets/:ticketId/messages', auth_1.authenticateToken, [
             message: 'Help ticket not found'
         });
     }
-    if (ticket.user !== req.user._id.toString() &&
-        !['admin', 'instructor'].includes(req.user.role)) {
+    if (ticket.user !== userId &&
+        !['admin', 'instructor'].includes((user.role || ''))) {
         return res.status(403).json({
             success: false,
             message: 'Not authorized to add messages to this ticket'
         });
     }
-    if (isInternal && !['admin', 'instructor'].includes(req.user.role)) {
+    if (isInternal && !['admin', 'instructor'].includes((user.role || ''))) {
         return res.status(403).json({
             success: false,
             message: 'Not authorized to add internal messages'
@@ -181,7 +190,7 @@ router.post('/tickets/:ticketId/messages', auth_1.authenticateToken, [
         ticket.messages = [];
     }
     ticket.messages.push({
-        sender: req.user._id.toString(),
+        sender: userId,
         message,
         isInternal,
         createdAt: new Date()
@@ -202,6 +211,7 @@ router.post('/tickets/:ticketId/messages', auth_1.authenticateToken, [
 router.put('/tickets/:ticketId/assign', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('admin', 'instructor'), [
     (0, express_validator_1.body)('assignedTo').isMongoId().withMessage('Valid user ID is required')
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { user } = ensureAuth(req);
     const { ticketId } = req.params;
     const { assignedTo } = req.body;
     const ticket = await db.get(ticketId);
@@ -212,7 +222,7 @@ router.put('/tickets/:ticketId/assign', auth_1.authenticateToken, (0, auth_1.aut
         });
     }
     const assignedUser = await db.get(assignedTo);
-    if (!assignedUser || !['admin', 'instructor'].includes(req.user.role)) {
+    if (!assignedUser || !['admin', 'instructor'].includes((user.role || ''))) {
         return res.status(400).json({
             success: false,
             message: 'Invalid user for assignment'
@@ -433,13 +443,14 @@ router.delete('/admin/:helpId', auth_1.authenticateToken, (0, auth_1.authorizeRo
     res.json({ success: true, message: 'Help ticket deleted successfully' });
 }));
 router.patch('/tickets/:ticketId', auth_1.authenticateToken, (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId, user } = ensureAuth(req);
     const { ticketId } = req.params;
     const updates = req.body;
     const ticket = await db.get(ticketId);
     if (!ticket) {
         return res.status(404).json({ success: false, message: 'Help ticket not found' });
     }
-    if (ticket.user !== req.user._id.toString() && !['admin', 'instructor'].includes(req.user.role)) {
+    if (ticket.user !== userId && !['admin', 'instructor'].includes((user.role || ''))) {
         return res.status(403).json({ success: false, message: 'Not authorized to update this ticket' });
     }
     Object.assign(ticket, updates);
@@ -450,12 +461,13 @@ router.patch('/tickets/:ticketId', auth_1.authenticateToken, (0, errorHandler_1.
     res.json({ success: true, message: 'Help ticket updated', data: { ticket: updatedTicket } });
 }));
 router.delete('/tickets/:ticketId', auth_1.authenticateToken, (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId, user } = ensureAuth(req);
     const { ticketId } = req.params;
     const ticket = await db.get(ticketId);
     if (!ticket) {
         return res.status(404).json({ success: false, message: 'Help ticket not found' });
     }
-    if (ticket.user !== req.user._id.toString() && !['admin', 'instructor'].includes(req.user.role)) {
+    if (ticket.user !== userId && !['admin', 'instructor'].includes((user.role || ''))) {
         return res.status(403).json({ success: false, message: 'Not authorized to delete this ticket' });
     }
     const latest = await db.get(ticket._id);
@@ -466,13 +478,14 @@ router.delete('/tickets/:ticketId', auth_1.authenticateToken, (0, errorHandler_1
 router.patch('/tickets/:ticketId/update_status', auth_1.authenticateToken, [
     (0, express_validator_1.body)('status').isIn(['open', 'in-progress', 'resolved', 'closed']).withMessage('Invalid status')
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId, user } = ensureAuth(req);
     const { ticketId } = req.params;
     const { status } = req.body;
     const ticket = await db.get(ticketId);
     if (!ticket) {
         return res.status(404).json({ success: false, message: 'Help ticket not found' });
     }
-    if (ticket.user.toString() !== req.user._id.toString() && !['admin', 'instructor'].includes(req.user.role)) {
+    if (ticket.user.toString() !== userId && !['admin', 'instructor'].includes((user.role || ''))) {
         return res.status(403).json({ success: false, message: 'Not authorized to update this ticket' });
     }
     ticket.status = status;
@@ -510,14 +523,15 @@ router.post('/help-tickets', auth_1.authenticateToken, [
     (0, express_validator_1.body)('category').notEmpty(),
     (0, express_validator_1.body)('priority').notEmpty(),
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId, user } = ensureAuth(req);
     const { title, content, assignedTo, category, priority, tags, course } = req.body;
     const ticket = await db.put({
         _id: `help_ticket_${Date.now()}`,
         type: 'help-ticket',
         title,
         content,
-        author: req.user._id,
-        email: req.user.email,
+        author: userId,
+        email: (user.email || ''),
         date: new Date().toISOString(),
         status: 'open',
         priority,
@@ -535,12 +549,13 @@ router.get('/help-tickets/:ticketId', auth_1.authenticateToken, (0, errorHandler
     res.json({ success: true, data: { ticket } });
 }));
 router.patch('/help-tickets/:ticketId', auth_1.authenticateToken, (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId, user } = ensureAuth(req);
     const ticket = await db.get(req.params.ticketId);
     if (!ticket)
         return res.status(404).json({ success: false, message: 'Ticket not found' });
-    if (req.user.role !== 'admin' &&
-        ticket.author !== req.user._id &&
-        ticket.assignedTo !== req.user._id) {
+    if ((user.role || '') !== 'admin' &&
+        ticket.author !== userId &&
+        ticket.assignedTo !== userId) {
         return res.status(403).json({ success: false, message: 'Not authorized' });
     }
     const updates = req.body;
@@ -548,12 +563,13 @@ router.patch('/help-tickets/:ticketId', auth_1.authenticateToken, (0, errorHandl
     res.json({ success: true, message: 'Ticket updated', data: { ticket: updatedTicket } });
 }));
 router.delete('/help-tickets/:ticketId', auth_1.authenticateToken, (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId, user } = ensureAuth(req);
     const ticket = await db.get(req.params.ticketId);
     if (!ticket)
         return res.status(404).json({ success: false, message: 'Ticket not found' });
-    if (req.user.role !== 'admin' &&
-        ticket.author !== req.user._id &&
-        ticket.assignedTo !== req.user._id) {
+    if ((user.role || '') !== 'admin' &&
+        ticket.author !== userId &&
+        ticket.assignedTo !== userId) {
         return res.status(403).json({ success: false, message: 'Not authorized' });
     }
     await db.remove(req.params.ticketId, ticket._rev);

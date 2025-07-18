@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
 
@@ -323,40 +324,126 @@ const Jobs = () => {
       try {
         setLoading(true);
         const token = localStorage.getItem('token');
+        const isOnline = navigator.onLine;
 
-        // Fetch jobs
-        const jobsResponse = await fetch('/api/jobs', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
+        let jobsData = [];
+        let scholarshipsData = [];
+
+        if (isOnline) {
+          try {
+            // Try online API calls first (preserving existing behavior)
+            console.log('🌐 Online mode: Fetching jobs and scholarships from API...');
+            
+            // Fetch jobs
+            const jobsResponse = await fetch('/api/jobs', {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (jobsResponse.ok) {
+              const jobsApiData = await jobsResponse.json();
+              console.log('✅ Jobs API Response:', jobsApiData);
+              // Backend returns: { success: true, data: { jobs: [...], pagination: {...} } }
+              jobsData = jobsApiData.data?.jobs || [];
+              console.log('✅ Jobs data received:', jobsData.length);
+              
+              // Store jobs for offline use
+              try {
+                await offlineIntegrationService.storeJobs(jobsData);
+              } catch (storeError) {
+                console.warn('⚠️ Failed to store jobs offline:', storeError);
+              }
+            } else {
+              console.error('❌ Jobs API failed:', jobsResponse.status);
+            }
+
+            // Fetch scholarships
+            const scholarshipsResponse = await fetch('/api/scholarships', {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (scholarshipsResponse.ok) {
+              const scholarshipsApiData = await scholarshipsResponse.json();
+              console.log('✅ Scholarships API Response:', scholarshipsApiData);
+              // Backend returns: { success: true, data: { scholarships: [...], pagination: {...} } }
+              scholarshipsData = scholarshipsApiData.data?.scholarships || [];
+              console.log('✅ Scholarships data received:', scholarshipsData.length);
+              
+              // Store scholarships for offline use
+              try {
+                await offlineIntegrationService.storeScholarships(scholarshipsData);
+              } catch (storeError) {
+                console.warn('⚠️ Failed to store scholarships offline:', storeError);
+              }
+            } else {
+              console.error('❌ Scholarships API failed:', scholarshipsResponse.status);
+            }
+
+          } catch (onlineError) {
+            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+            // Fall back to offline data if online fails
+            const offlineData = await fetchOfflineData();
+            jobsData = offlineData.jobs;
+            scholarshipsData = offlineData.scholarships;
           }
-        });
-
-        if (jobsResponse.ok) {
-          const jobsData = await jobsResponse.json();
-          setJobs(jobsData.data.jobs || []);
-          setFilteredJobs(jobsData.data.jobs || []);
+        } else {
+          // Offline mode: use offline services
+          console.log('📴 Offline mode: Using offline data...');
+          const offlineData = await fetchOfflineData();
+          jobsData = offlineData.jobs;
+          scholarshipsData = offlineData.scholarships;
         }
 
-        // Fetch scholarships
-        const scholarshipsResponse = await fetch('/api/scholarships', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (scholarshipsResponse.ok) {
-          const scholarshipsData = await scholarshipsResponse.json();
-          setScholarships(scholarshipsData.data.scholarships || []);
-          setFilteredScholarships(scholarshipsData.data.scholarships || []);
-        }
+        // Update state with fetched data
+        setJobs(jobsData);
+        setFilteredJobs(jobsData);
+        setScholarships(scholarshipsData);
+        setFilteredScholarships(scholarshipsData);
 
       } catch (err) {
         console.error('Error fetching data:', err);
         setError('Failed to load opportunities');
       } finally {
         setLoading(false);
+      }
+    };
+
+    // Helper function to fetch offline data
+    const fetchOfflineData = async () => {
+      try {
+        let jobs = [];
+        let scholarships = [];
+        
+        // Try to get jobs with error handling
+        try {
+          jobs = await offlineIntegrationService.getJobs() || [];
+        } catch (jobsError) {
+          console.warn('⚠️ Failed to get offline jobs:', jobsError);
+          jobs = [];
+        }
+        
+        // Try to get scholarships with error handling
+        try {
+          scholarships = await offlineIntegrationService.getScholarships() || [];
+        } catch (scholarshipsError) {
+          console.warn('⚠️ Failed to get offline scholarships:', scholarshipsError);
+          scholarships = [];
+        }
+        
+        console.log('📱 Offline data loaded:', {
+          jobs: jobs.length,
+          scholarships: scholarships.length
+        });
+        
+        return { jobs, scholarships };
+      } catch (error) {
+        console.error('❌ Failed to load offline data:', error);
+        return { jobs: [], scholarships: [] };
       }
     };
 
@@ -407,7 +494,66 @@ const Jobs = () => {
   };
 
   const handleViewMore = (item, type) => {
-    navigate(`/jobs/detail/${type}/${item._id}`, { state: { ...item, type } });
+    if (type === 'job') {
+      navigate(`/jobs/${item._id}`, { state: { ...item, type } });
+    } else if (type === 'scholarship') {
+      navigate(`/scholarships/${item._id}`, { state: { ...item, type } });
+    }
+  };
+
+  // Handle job application offline
+  const handleJobApplication = async (jobId, applicationData) => {
+    try {
+      const isOnline = navigator.onLine;
+      
+      if (isOnline) {
+        try {
+          // Try online application first (preserving existing behavior)
+          console.log('🌐 Online job application for job:', jobId);
+          const token = localStorage.getItem('token');
+          const response = await fetch(`/api/jobs/${jobId}/apply`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(applicationData)
+          });
+
+          if (response.ok) {
+            console.log('✅ Online job application successful');
+            return { success: true, message: 'Application submitted successfully!' };
+          } else {
+            throw new Error('Online application failed');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online application failed, using offline:', onlineError);
+          // Fall back to offline application
+          try {
+            await offlineIntegrationService.storeJobApplication(jobId, applicationData);
+            console.log('✅ Offline job application successful');
+            return { success: true, message: 'Application saved offline and will be submitted when online!' };
+          } catch (offlineError) {
+            console.error('❌ Offline job application also failed:', offlineError);
+            return { success: false, message: 'Failed to submit application offline' };
+          }
+        }
+      } else {
+        // Offline application
+        console.log('📴 Offline job application for job:', jobId);
+        try {
+          await offlineIntegrationService.storeJobApplication(jobId, applicationData);
+          console.log('✅ Offline job application successful');
+          return { success: true, message: 'Application saved offline and will be submitted when online!' };
+        } catch (offlineError) {
+          console.error('❌ Offline job application failed:', offlineError);
+          return { success: false, message: 'Failed to submit application offline' };
+        }
+      }
+    } catch (error) {
+      console.error('❌ Job application failed:', error);
+      return { success: false, message: 'Failed to submit application' };
+    }
   };
 
   if (loading) {

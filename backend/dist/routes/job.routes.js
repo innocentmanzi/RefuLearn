@@ -4,6 +4,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
+const ensureAuth = (req) => {
+    if (!req.user?._id) {
+        throw new Error('User authentication required');
+    }
+    return {
+        userId: req.user._id.toString(),
+        user: req.user
+    };
+};
 const express_validator_1 = require("express-validator");
 const auth_1 = require("../middleware/auth");
 const validation_1 = require("../middleware/validation");
@@ -63,6 +72,14 @@ router.get('/', [
 router.get('/:jobId', (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
         const job = await db.get(req.params['jobId']);
+        console.log('📋 Retrieved job for editing:', {
+            id: job._id,
+            title: job.title,
+            company: job.company,
+            application_link: job.application_link,
+            hasCompany: !!job.company,
+            hasApplicationLink: !!job.application_link
+        });
         res.json({
             success: true,
             data: { job }
@@ -81,7 +98,7 @@ router.post('/:jobId/apply', auth_1.authenticateToken, (0, auth_1.authorizeRoles
     const { jobId } = req.params;
     const { expectedSalary } = req.body;
     const files = req.files;
-    const userId = req.user._id.toString();
+    const { userId } = ensureAuth(req);
     if (!files || files.length < 2) {
         return res.status(400).json({
             success: false,
@@ -151,7 +168,7 @@ router.post('/:jobId/apply', auth_1.authenticateToken, (0, auth_1.authorizeRoles
 }), upload_1.handleUploadError);
 router.delete('/:jobId/apply', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee', 'user', 'employer', 'admin'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { jobId } = req.params;
-    const userId = req.user._id.toString();
+    const { userId } = ensureAuth(req);
     const job = await db.get(jobId);
     if (!job) {
         return res.status(404).json({
@@ -172,7 +189,7 @@ router.delete('/:jobId/apply', auth_1.authenticateToken, (0, auth_1.authorizeRol
     });
 }));
 router.get('/debug/applications', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer', 'admin'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
-    const userId = req.user._id.toString();
+    const { userId } = ensureAuth(req);
     const result = await db.find({ selector: { type: 'job' } });
     const jobs = result.docs;
     const debugInfo = jobs.map((job) => ({
@@ -242,6 +259,7 @@ router.post('/', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer'
     (0, express_validator_1.body)('remote_work').isBoolean().withMessage('remote_work must be a boolean'),
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     console.log('Received job creation request:', JSON.stringify(req.body, null, 2));
+    const { userId } = ensureAuth(req);
     const { title, company, description, location, job_type, required_skills, salary_range, application_deadline, application_link, is_active, remote_work } = req.body;
     const jobData = {
         _id: Date.now().toString(),
@@ -257,7 +275,7 @@ router.post('/', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer'
         application_link: application_link || '',
         is_active: is_active !== undefined ? is_active : true,
         remote_work: remote_work !== undefined ? remote_work : false,
-        employer: req.user._id.toString(),
+        employer: userId,
         createdAt: new Date(),
         updatedAt: new Date()
     };
@@ -283,6 +301,8 @@ router.put('/:jobId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('empl
     (0, express_validator_1.body)('remote_work').optional().isBoolean(),
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { jobId } = req.params;
+    console.log('🔧 Updating job:', jobId);
+    console.log('📋 Update data received:', JSON.stringify(req.body, null, 2));
     const job = await db.get(jobId);
     if (!job) {
         return res.status(404).json({
@@ -290,7 +310,8 @@ router.put('/:jobId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('empl
             message: req.t('job.not_found')
         });
     }
-    if (job.employer !== req.user._id.toString() && req.user.role !== 'admin') {
+    const { userId, user } = ensureAuth(req);
+    if (job.employer !== userId && user.role !== 'admin') {
         return res.status(403).json({
             success: false,
             message: 'Not authorized to update this job'
@@ -301,13 +322,21 @@ router.put('/:jobId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('empl
         'salary_range', 'application_deadline', 'application_link', 'is_active', 'remote_work'
     ];
     allowedFields.forEach(field => {
-        if (typeof req.body[field] !== 'undefined')
+        if (typeof req.body[field] !== 'undefined') {
+            console.log(`🔧 Updating field '${field}': "${job[field]}" → "${req.body[field]}"`);
             job[field] = req.body[field];
+        }
     });
     job.updatedAt = new Date();
     const latest = await db.get(job._id);
     job._rev = latest._rev;
     const updatedJob = await db.put(job);
+    console.log('✅ Job updated successfully:', {
+        id: job._id,
+        title: job.title,
+        company: job.company,
+        application_link: job.application_link
+    });
     res.json({
         success: true,
         message: 'Job updated successfully',
@@ -320,7 +349,8 @@ router.delete('/:jobId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('e
     if (!job) {
         return res.status(404).json({ success: false, message: req.t('job.not_found') });
     }
-    if (req.user.role !== 'admin' && job.employer !== req.user._id.toString()) {
+    const { userId, user } = ensureAuth(req);
+    if (user.role !== 'admin' && job.employer !== userId) {
         return res.status(403).json({ success: false, message: 'Not authorized to delete this job' });
     }
     const latest = await db.get(job._id);
@@ -332,17 +362,34 @@ router.delete('/:jobId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('e
     });
 }));
 router.get('/employer/jobs', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer', 'admin'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    console.log('🔍 Employer jobs endpoint called');
     const { page = 1, limit = 10 } = req.query;
     let selector = { type: 'job' };
-    if (req.user.role !== 'admin') {
-        selector.employer = req.user._id.toString();
+    const { userId, user } = ensureAuth(req);
+    console.log('👤 User:', { id: userId, role: user.role });
+    if (user.role !== 'admin') {
+        selector.employer = userId;
     }
+    console.log('🔍 Selector:', selector);
     const result = await db.find({ selector });
+    console.log('📊 Total jobs found:', result.docs.length);
+    const allJobsResult = await db.find({ selector: { type: 'job' } });
+    console.log('🔍 All jobs in database:', allJobsResult.docs.length);
+    allJobsResult.docs.forEach((job, index) => {
+        console.log(`  Job ${index + 1}:`, {
+            id: job._id,
+            title: job.title,
+            employer: job.employer,
+            employerType: typeof job.employer,
+            matches: job.employer === userId
+        });
+    });
     const jobs = result.docs;
     const total = jobs.length;
     const pageNum = Number(page);
     const limitNum = Number(limit);
     const pagedJobs = jobs.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+    console.log('📋 Returning jobs:', pagedJobs.length);
     res.json({
         success: true,
         data: {
@@ -355,7 +402,47 @@ router.get('/employer/jobs', auth_1.authenticateToken, (0, auth_1.authorizeRoles
         }
     });
 }));
+router.post('/fix-my-jobs', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer', 'admin'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
+    const allJobs = await db.find({ selector: { type: 'job' } });
+    const jobsToFix = allJobs.docs.filter((job) => job.type === 'job' && (!job.employer || job.employer === 'undefined' || job.employer === undefined));
+    if (jobsToFix.length === 0) {
+        return res.json({
+            success: true,
+            message: 'No jobs found that need fixing',
+            data: { results: [] }
+        });
+    }
+    const results = [];
+    for (const jobDoc of jobsToFix) {
+        try {
+            const job = await db.get(jobDoc._id);
+            job.employer = userId;
+            job.updatedAt = new Date();
+            await db.put(job);
+            results.push({
+                jobId: job._id,
+                status: 'updated',
+                title: job.title,
+                assignedTo: userId
+            });
+        }
+        catch (error) {
+            results.push({
+                jobId: jobDoc._id,
+                status: 'error',
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+        }
+    }
+    res.json({
+        success: true,
+        message: `Fixed ${results.filter(r => r.status === 'updated').length} jobs`,
+        data: { results }
+    });
+}));
 router.get('/debug/all-jobs', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer', 'admin'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId, user } = ensureAuth(req);
     const result = await db.find({ selector: { type: 'job' } });
     const jobsInfo = result.docs.map((job) => ({
         _id: job._id,
@@ -363,18 +450,18 @@ router.get('/debug/all-jobs', auth_1.authenticateToken, (0, auth_1.authorizeRole
         employer: job.employer,
         employerType: typeof job.employer,
         hasEmployer: job.hasOwnProperty('employer'),
-        currentUserId: req.user._id,
-        currentUserIdString: req.user._id.toString(),
-        matches: job.employer === req.user._id.toString()
+        currentUserId: userId,
+        currentUserIdString: userId,
+        matches: job.employer === userId
     }));
     res.json({
         success: true,
         data: {
             totalJobs: result.docs.length,
             currentUser: {
-                id: req.user._id,
-                idString: req.user._id.toString(),
-                role: req.user.role
+                id: userId,
+                idString: userId,
+                role: user.role
             },
             jobs: jobsInfo
         }
@@ -457,13 +544,14 @@ router.get('/:jobId/analytics', auth_1.authenticateToken, (0, auth_1.authorizeRo
 }));
 router.post('/admin/fix-employer-field', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('admin', 'employer'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { employerId, jobIds } = req.body;
+    const { userId, user } = ensureAuth(req);
     if (!employerId || !jobIds || !Array.isArray(jobIds)) {
         return res.status(400).json({
             success: false,
             message: 'employerId and jobIds array are required'
         });
     }
-    if (req.user.role === 'employer' && employerId !== req.user._id.toString()) {
+    if (user.role === 'employer' && employerId !== userId) {
         return res.status(403).json({
             success: false,
             message: 'Employers can only assign jobs to themselves'
@@ -498,7 +586,7 @@ router.post('/admin/fix-employer-field', auth_1.authenticateToken, (0, auth_1.au
     });
 }));
 router.post('/fix-my-jobs', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer', 'admin'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
-    const currentUserId = req.user._id.toString();
+    const { userId } = ensureAuth(req);
     const allJobs = await db.find({ selector: { type: 'job' } });
     const jobsToFix = allJobs.docs.filter((job) => job.type === 'job' && (!job.employer || job.employer === 'undefined' || job.employer === undefined));
     if (jobsToFix.length === 0) {
@@ -512,14 +600,14 @@ router.post('/fix-my-jobs', auth_1.authenticateToken, (0, auth_1.authorizeRoles)
     for (const jobDoc of jobsToFix) {
         try {
             const job = await db.get(jobDoc._id);
-            job.employer = currentUserId;
+            job.employer = userId;
             job.updatedAt = new Date();
             await db.put(job);
             results.push({
                 jobId: job._id,
                 status: 'updated',
                 title: job.title,
-                assignedTo: currentUserId
+                assignedTo: userId
             });
         }
         catch (error) {

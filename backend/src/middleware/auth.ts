@@ -3,13 +3,18 @@ import jwt from 'jsonwebtoken';
 import PouchDB from 'pouchdb';
 import { getRedisClient } from '../config/redis';
 
-// Extend Request interface to include user
-declare global {
-  namespace Express {
-    interface Request {
-      user?: any;
-    }
-  }
+// Import the Request type with user property
+interface AuthenticatedRequest extends Request {
+  user?: {
+    _id: string;
+    role?: string;
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    type?: string;
+    isActive?: boolean;
+    [key: string]: any;
+  };
 }
 
 // Initialize PouchDB
@@ -47,7 +52,7 @@ interface UserDoc {
 // In-memory blacklist for access tokens
 export const blacklistedAccessTokens: Set<string> = new Set();
 
-export const authenticateToken = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const authenticateToken = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
@@ -144,7 +149,7 @@ export const authenticateToken = async (req: Request, res: Response, next: NextF
 };
 
 export const authorizeRoles = (...roles: string[]) => {
-  return (req: Request, res: Response, next: NextFunction): void => {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
     if (!req.user) {
       res.status(401).json({ 
         success: false, 
@@ -153,15 +158,15 @@ export const authorizeRoles = (...roles: string[]) => {
       return;
     }
 
-    if (req.user.role === 'admin') {
+    if ((req.user as any)?.role === 'admin') {
       // Admin can access all endpoints
       return next();
     }
 
-    if (!roles.includes(req.user.role)) {
+    if (!roles.includes((req.user as any)?.role || '')) {
       res.status(403).json({ 
         success: false, 
-        message: `Access denied: This endpoint is only accessible to [${roles.join(', ')}]. Your role: ${req.user.role}` 
+        message: `Access denied: This endpoint is only accessible to [${roles.join(', ')}]. Your role: ${(req.user as any)?.role || 'undefined'}` 
       });
       return;
     }
@@ -170,7 +175,7 @@ export const authorizeRoles = (...roles: string[]) => {
   };
 };
 
-export const authorizeSelfOrAdmin = (req: Request, res: Response, next: NextFunction): void => {
+export const authorizeSelfOrAdmin = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
   if (!req.user) {
     res.status(401).json({ 
       success: false, 
@@ -181,7 +186,7 @@ export const authorizeSelfOrAdmin = (req: Request, res: Response, next: NextFunc
 
   const userId = req.params['userId'] || req.params['id'];
   
-  if (req.user.role === 'admin' || req.user._id.toString() === userId) {
+  if ((req.user as any)?.role === 'admin' || (req.user as any)?._id?.toString() === userId) {
     next();
   } else {
     res.status(403).json({ 
@@ -191,7 +196,7 @@ export const authorizeSelfOrAdmin = (req: Request, res: Response, next: NextFunc
   }
 };
 
-export const requireEmailVerification = (req: Request, res: Response, next: NextFunction): void => {
+export const requireEmailVerification = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
   if (!req.user) {
     res.status(401).json({ 
       success: false, 
@@ -200,7 +205,7 @@ export const requireEmailVerification = (req: Request, res: Response, next: Next
     return;
   }
 
-  if (!req.user.isEmailVerified) {
+  if (!(req.user as any)?.isEmailVerified) {
     res.status(403).json({ 
       success: false, 
       message: 'Email verification required' 
@@ -211,7 +216,7 @@ export const requireEmailVerification = (req: Request, res: Response, next: Next
   next();
 };
 
-export const optionalAuth = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const optionalAuth = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.split(' ')[1];

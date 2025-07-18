@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowBack, PlayArrow, Assignment, Quiz, Forum } from '@mui/icons-material';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
@@ -140,23 +141,51 @@ export default function CourseDetail() {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/courses/${courseId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const isOnline = navigator.onLine;
+      
+      let courseData = null;
 
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Course data received:', data.data.course);
-        console.log('Course image path:', data.data.course.course_profile_picture);
-        setCourse(data.data.course);
+      if (isOnline) {
+        try {
+          // Try online API calls first (preserving existing behavior)
+          console.log('🌐 Online mode: Fetching course detail from API...');
+          
+          const response = await fetch(`/api/courses/${courseId}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            courseData = data.data.course;
+            console.log('✅ Course data received:', courseData);
+            console.log('Course image path:', courseData.course_profile_picture);
+            
+            // Store course data for offline use
+            await offlineIntegrationService.storeCourseData(courseId, courseData);
+          } else {
+            throw new Error('Failed to load course');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+          // Fall back to offline data if online fails
+          courseData = await offlineIntegrationService.getCourseData(courseId);
+        }
       } else {
-        setError('Failed to load course');
+        // Offline mode: use offline services
+        console.log('📴 Offline mode: Using offline course detail data...');
+        courseData = await offlineIntegrationService.getCourseData(courseId);
+      }
+
+      if (courseData) {
+        setCourse(courseData);
+      } else {
+        setError('Course not available offline');
       }
     } catch (err) {
-      console.error('Error fetching course:', err);
+      console.error('❌ Error fetching course:', err);
       setError('Failed to load course');
     } finally {
       setLoading(false);
@@ -167,24 +196,65 @@ export default function CourseDetail() {
     try {
       setEnrolling(true);
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/courses/${courseId}/enroll`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const isOnline = navigator.onLine;
+      
+      let success = false;
 
-      if (response.ok) {
-        alert('Successfully enrolled in course!');
-        // Refresh course data to update enrollment status
-        fetchCourse();
+      if (isOnline) {
+        try {
+          // Try online enrollment first (preserving existing behavior)
+          console.log('🌐 Online mode: Enrolling in course...');
+          
+          const response = await fetch(`/api/courses/${courseId}/enroll`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.ok) {
+            success = true;
+            console.log('✅ Online enrollment successful');
+            alert('Successfully enrolled in course!');
+            // Refresh course data to update enrollment status
+            fetchCourse();
+          } else {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Failed to enroll in course');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online enrollment failed, using offline:', onlineError);
+          // Fall back to offline enrollment
+          const result = await offlineIntegrationService.enrollInCourseOffline(courseId);
+          
+          if (result.success) {
+            success = true;
+            console.log('✅ Offline enrollment successful');
+            alert('Successfully enrolled in course offline! Will sync when online.');
+          } else {
+            throw new Error('Failed to enroll in course offline');
+          }
+        }
       } else {
-        const errorData = await response.json();
-        alert(errorData.message || 'Failed to enroll in course');
+        // Offline enrollment
+        console.log('📴 Offline mode: Enrolling in course offline...');
+        const result = await offlineIntegrationService.enrollInCourseOffline(courseId);
+        
+        if (result.success) {
+          success = true;
+          console.log('✅ Offline enrollment successful');
+          alert('Successfully enrolled in course offline! Will sync when online.');
+        } else {
+          throw new Error('Failed to enroll in course offline');
+        }
+      }
+
+      if (!success) {
+        alert('Failed to enroll in course');
       }
     } catch (err) {
-      console.error('Error enrolling in course:', err);
+      console.error('❌ Error enrolling in course:', err);
       alert('Failed to enroll in course');
     } finally {
       setEnrolling(false);

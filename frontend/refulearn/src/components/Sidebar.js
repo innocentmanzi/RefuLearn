@@ -3,6 +3,7 @@ import styled from 'styled-components';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import Logo from './Logo';
 import ProfileDropdown from './ProfileDropdown';
+
 import { useUser } from '../contexts/UserContext';
 import { FaChevronDown } from 'react-icons/fa';
 import { useTranslation } from 'react-i18next';
@@ -80,6 +81,7 @@ const NavLinks = styled.div`
   flex-direction: column;
   gap: 0.5rem;
   padding: 0 1rem;
+  flex: 1;
 `;
 
 const StyledNavLink = styled(NavLink)`
@@ -91,6 +93,7 @@ const StyledNavLink = styled(NavLink)`
   font-weight: 500;
   text-decoration: none;
   transition: background 0.2s, color 0.2s;
+  display: block;
   &.active {
     background: ${({ theme }) => theme.colors.secondary};
     color: #fff;
@@ -208,7 +211,7 @@ const navigationItems = {
   employer: [
     { to: '/employer/dashboard', label: 'Dashboard' },
     { to: '/employer/jobs', label: 'Jobs' },
-            { to: '/employer/scholarships', label: 'Scholarships' },
+    { to: '/employer/scholarships', label: 'Scholarships' },
     { to: '/employer/applicants', label: 'View Applicants' }
   ]
 };
@@ -255,10 +258,10 @@ const Sidebar = ({ role, children, onLogout, headerSpacing }) => {
     setDropdownOpen(false);
     switch (action) {
       case 'profile':
-        location.pathname !== '/profile' && (window.location.href = '/profile');
+        navigate('/profile');
         break;
       case 'settings':
-        location.pathname !== '/account-settings' && (window.location.href = '/account-settings');
+        navigate('/account-settings');
         break;
       case 'logout':
         onLogout();
@@ -281,11 +284,16 @@ const Sidebar = ({ role, children, onLogout, headerSpacing }) => {
           </LogoWrapper>
           <NavLinks>
             {(navigationItems[role] || []).map(link => (
-              <StyledNavLink key={link.to} to={link.to}>
-                {t(link.label)}
-              </StyledNavLink>
+              <div key={link.to}>
+                <StyledNavLink 
+                  to={link.to}
+                >
+                  {t(link.label)}
+                </StyledNavLink>
+              </div>
             ))}
           </NavLinks>
+          
           {/* User Info Section - now at the bottom of TopSection, scrollable */}
           <div ref={userInfoRef} style={{ width: '100%', marginTop: '0.5rem', marginBottom: '1rem', position: 'relative' }}>
             <UserInfoSection

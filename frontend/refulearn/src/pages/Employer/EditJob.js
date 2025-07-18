@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
@@ -118,197 +119,244 @@ const RemoveButton = styled.button`
 `;
 
 const EditJob = () => {
-  const { t } = useTranslation();
+  const { id: jobId } = useParams();
   const navigate = useNavigate();
-  const { jobId } = useParams();
-  const [loading, setLoading] = useState(false);
-  const [fetching, setFetching] = useState(true);
+  const { t } = useTranslation();
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
-  const [jobDetails, setJobDetails] = useState({
+  const [success, setSuccess] = useState('');
+  const [formData, setFormData] = useState({
     title: '',
+    description: '',
     company: '',
     location: '',
-    description: '',
-    requirements: [],
     salary: {
       min: '',
       max: '',
       currency: 'USD'
     },
     employmentType: 'Full Time',
+    requirements: [],
+    benefits: '',
     applicationDeadline: '',
     applicationLink: '',
-    isActive: true
+    contactEmail: '',
+    contactPhone: ''
   });
   const [newRequirement, setNewRequirement] = useState('');
 
   useEffect(() => {
-    fetchJobDetails();
-  }, [jobId]);
-
-  const fetchJobDetails = async () => {
-    setFetching(true);
-    try {
-      console.log('Fetching job details for ID:', jobId);
-      const response = await fetch(`/api/jobs/${jobId}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-        }
-      });
-
-      console.log('Response status:', response.status);
-      const data = await response.json();
-      console.log('Response data:', data);
-      console.log('Job data received:', data.data?.job);
-
-      if (data.success && data.data && data.data.job) {
-        const job = data.data.job;
-        console.log('Job fields check:', {
-          company: job.company,
-          application_link: job.application_link,
-          title: job.title,
-          description: job.description
-        });
-        // Parse salary from salary_range if salary object doesn't exist
-        let salaryData = { min: '', max: '', currency: 'USD' };
+    const fetchJob = async () => {
+      try {
+        setLoading(true);
+        setError('');
         
-        if (job.salary && typeof job.salary === 'object' && job.salary.min && job.salary.max) {
-          // Use existing salary object
-          salaryData = {
-            min: job.salary.min,
-            max: job.salary.max,
-            currency: job.salary.currency || 'USD'
-          };
-        } else if (job.salary_range) {
-          // Parse from salary_range string like "$20 - $30"
-          const salaryMatch = job.salary_range.match(/\$?(\d+)\s*-\s*\$?(\d+)/);
-          if (salaryMatch) {
-            salaryData = {
-              min: salaryMatch[1],
-              max: salaryMatch[2],
-              currency: 'USD'
-            };
+        const token = localStorage.getItem('token');
+        const isOnline = navigator.onLine;
+        
+        let jobData = null;
+
+        if (isOnline) {
+          try {
+            // Try online API calls first (preserving existing behavior)
+            console.log('🌐 Online mode: Fetching job data from API...');
+            
+            const response = await fetch(`/api/jobs/${jobId}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (response.ok) {
+              const jobApiData = await response.json();
+              jobData = jobApiData.data.job;
+              console.log('✅ Job data received');
+              
+              // Store job data for offline use
+              await offlineIntegrationService.storeJobData(jobId, jobData);
+            } else {
+              throw new Error('Failed to fetch job');
+            }
+
+          } catch (onlineError) {
+            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+            
+            // Fall back to offline data if online fails
+            jobData = await offlineIntegrationService.getJobData(jobId);
+            
+            if (!jobData) {
+              throw onlineError;
+            }
           }
+        } else {
+          // Offline mode: use offline services
+          console.log('📴 Offline mode: Using offline job data...');
+          jobData = await offlineIntegrationService.getJobData(jobId);
         }
 
-        setJobDetails({
-          title: job.title || '',
-          company: job.company || '',
-          location: job.location || '',
-          description: job.description || '',
-          requirements: job.required_skills || job.requirements || [],
-          salary: salaryData,
-          employmentType: job.employmentType || job.job_type || 'Full Time',
-          applicationDeadline: job.application_deadline ? new Date(job.application_deadline).toISOString().split('T')[0] : '',
-          applicationLink: job.application_link || '',
-          isActive: job.is_active !== undefined ? job.is_active : true
-        });
-        setError(''); // Clear any previous errors
-      } else {
-        setError(data.message || 'Failed to fetch job details');
+        if (jobData) {
+          setFormData({
+            title: jobData.title || '',
+            description: jobData.description || '',
+            company: jobData.company || '',
+            location: jobData.location || '',
+            salary: {
+              min: jobData.salary?.min || '',
+              max: jobData.salary?.max || '',
+              currency: jobData.salary?.currency || 'USD'
+            },
+            employmentType: jobData.employmentType || 'Full Time',
+            requirements: Array.isArray(jobData.requirements) ? jobData.requirements : [],
+            benefits: jobData.benefits || '',
+            applicationDeadline: jobData.applicationDeadline || '',
+            applicationLink: jobData.application_link || '',
+            contactEmail: jobData.contactEmail || '',
+            contactPhone: jobData.contactPhone || ''
+          });
+        }
+
+      } catch (err) {
+        console.error('❌ Error fetching job:', err);
+        setError(err.message || 'Failed to load job');
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      console.error('Fetch job error:', err);
-      setError('Network error. Please try again.');
-    } finally {
-      setFetching(false);
+    };
+
+    if (jobId) {
+      fetchJob();
     }
-  };
+  }, [jobId]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     if (name === 'salaryMin' || name === 'salaryMax') {
-      setJobDetails({
-        ...jobDetails,
+      setFormData({
+        ...formData,
         salary: {
-          ...jobDetails.salary,
+          ...formData.salary,
           [name.replace('salary', '').toLowerCase()]: value
         }
       });
     } else {
-      setJobDetails({ ...jobDetails, [name]: value });
+      setFormData({ ...formData, [name]: value });
     }
   };
 
   const addRequirement = () => {
-    if (newRequirement.trim() && !jobDetails.requirements.includes(newRequirement.trim())) {
-      setJobDetails({
-        ...jobDetails,
-        requirements: [...jobDetails.requirements, newRequirement.trim()]
+    if (newRequirement.trim() && !formData.requirements.includes(newRequirement.trim())) {
+      setFormData({
+        ...formData,
+        requirements: [...formData.requirements, newRequirement.trim()]
       });
       setNewRequirement('');
     }
   };
 
   const removeRequirement = (index) => {
-    setJobDetails({
-      ...jobDetails,
-      requirements: jobDetails.requirements.filter((_, i) => i !== index)
+    setFormData({
+      ...formData,
+      requirements: formData.requirements.filter((_, i) => i !== index)
     });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    setError('');
-    setSuccessMessage('');
-
-    // Ensure date is in proper format
-    const deadline = jobDetails.applicationDeadline ? new Date(jobDetails.applicationDeadline).toISOString() : null;
     
-    const jobToSend = {
-      title: jobDetails.title.trim(),
-      company: jobDetails.company.trim(),
-      description: jobDetails.description.trim(),
-      location: jobDetails.location.trim(),
-      job_type: jobDetails.employmentType,
-      required_skills: Array.isArray(jobDetails.requirements) ? jobDetails.requirements : [],
-      salary_range: (jobDetails.salary.min && jobDetails.salary.max) 
-        ? `$${jobDetails.salary.min.toString().trim()} - $${jobDetails.salary.max.toString().trim()}` 
-        : 'Competitive',
-      application_deadline: deadline,
-      application_link: jobDetails.applicationLink || '',
-      is_active: Boolean(jobDetails.isActive),
-      remote_work: Boolean(false)
-    };
-
     try {
-      console.log('Updating job with data:', jobToSend);
-      const response = await fetch(`/api/jobs/${jobId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-        },
-        body: JSON.stringify(jobToSend)
-      });
+      setLoading(true);
+      setError('');
+      setSuccess('');
+      
+      const token = localStorage.getItem('token');
+      const isOnline = navigator.onLine;
+      let success = false;
 
-      const data = await response.json();
+      if (isOnline) {
+        try {
+          // Try online job update first (preserving existing behavior)
+          console.log('🌐 Online mode: Updating job...');
+          
+          const response = await fetch(`/api/jobs/${jobId}`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(formData)
+          });
 
-      if (data.success) {
-        setSuccessMessage('Job updated successfully!');
-        setTimeout(() => {
-          navigate('/employer/jobs');
-        }, 2000);
+          if (response.ok) {
+            success = true;
+            console.log('✅ Online job update successful');
+            
+            setSuccess('Job updated successfully!');
+            
+            // Store updated job for offline use
+            await offlineIntegrationService.storeJobData(jobId, formData);
+            
+            // Navigate back after delay
+            setTimeout(() => {
+              navigate('/employer/jobs');
+            }, 1500);
+          } else {
+            throw new Error('Failed to update job');
+          }
+
+        } catch (onlineError) {
+          console.warn('⚠️ Online update failed, using offline:', onlineError);
+          
+          // Fall back to offline job update
+          const result = await offlineIntegrationService.updateJobOffline(jobId, formData);
+          
+          if (result.success) {
+            success = true;
+            console.log('✅ Offline job update successful');
+            
+            setSuccess('Job updated offline! Changes will sync when online.');
+            
+            // Navigate back after delay
+            setTimeout(() => {
+              navigate('/employer/jobs');
+            }, 1500);
+          } else {
+            throw new Error('Failed to update job offline');
+          }
+        }
       } else {
-        // Handle validation errors
-        if (data.errors && Array.isArray(data.errors)) {
-          const errorMessages = data.errors.map(err => `${err.field}: ${err.message}`).join(', ');
-          setError(`Validation failed: ${errorMessages}`);
+        // Offline job update
+        console.log('📴 Offline mode: Updating job offline...');
+        const result = await offlineIntegrationService.updateJobOffline(jobId, formData);
+        
+        if (result.success) {
+          success = true;
+          console.log('✅ Offline job update successful');
+          
+          setSuccess('Job updated offline! Changes will sync when online.');
+          
+          // Navigate back after delay
+          setTimeout(() => {
+            navigate('/employer/jobs');
+          }, 1500);
         } else {
-          setError(data.message || 'Failed to update job');
+          throw new Error('Failed to update job offline');
         }
       }
+
+      if (!success) {
+        throw new Error('Failed to update job');
+      }
+
     } catch (err) {
-      console.error('Job update error:', err);
-      setError('Network error. Please try again.');
+      console.error('❌ Error updating job:', err);
+      setError(err.message || 'Failed to update job');
     } finally {
       setLoading(false);
     }
   };
 
-  if (fetching) {
+  if (loading) {
     return (
       <Container>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1.5rem', gap: '1rem' }}>
@@ -363,7 +411,7 @@ const EditJob = () => {
       </div>
       
       {error && <ErrorMessage>{error}</ErrorMessage>}
-      {successMessage && <SuccessMessage>{successMessage}</SuccessMessage>}
+      {success && <SuccessMessage>{success}</SuccessMessage>}
       
       <form onSubmit={handleSubmit}>
         <FormGrid>
@@ -372,7 +420,7 @@ const EditJob = () => {
             <Input
               type="text"
               name="title"
-              value={jobDetails.title}
+              value={formData.title}
               onChange={handleInputChange}
               placeholder="Job Title"
               required
@@ -383,7 +431,7 @@ const EditJob = () => {
             <Input
               type="text"
               name="company"
-              value={jobDetails.company}
+              value={formData.company}
               onChange={handleInputChange}
               placeholder="Company Name"
               required
@@ -394,7 +442,7 @@ const EditJob = () => {
             <Input
               type="text"
               name="location"
-              value={jobDetails.location}
+              value={formData.location}
               onChange={handleInputChange}
               placeholder="Location"
               required
@@ -405,7 +453,7 @@ const EditJob = () => {
             <Input
               type="number"
               name="salaryMin"
-              value={jobDetails.salary.min}
+              value={formData.salary.min}
               onChange={handleInputChange}
               placeholder="Minimum Salary"
             />
@@ -415,7 +463,7 @@ const EditJob = () => {
             <Input
               type="number"
               name="salaryMax"
-              value={jobDetails.salary.max}
+              value={formData.salary.max}
               onChange={handleInputChange}
               placeholder="Maximum Salary"
             />
@@ -424,10 +472,10 @@ const EditJob = () => {
             <Label>Currency</Label>
             <Select
               name="currency"
-              value={jobDetails.salary.currency}
-              onChange={(e) => setJobDetails({
-                ...jobDetails,
-                salary: { ...jobDetails.salary, currency: e.target.value }
+              value={formData.salary.currency}
+              onChange={(e) => setFormData({
+                ...formData,
+                salary: { ...formData.salary, currency: e.target.value }
               })}
             >
               <option value="USD">USD</option>
@@ -441,7 +489,7 @@ const EditJob = () => {
             <Label>Job Type</Label>
             <Select
               name="employmentType"
-              value={jobDetails.employmentType}
+              value={formData.employmentType}
               onChange={handleInputChange}
             >
               <option value="Full Time">Full Time</option>
@@ -455,7 +503,7 @@ const EditJob = () => {
             <Input
               type="date"
               name="applicationDeadline"
-              value={jobDetails.applicationDeadline}
+              value={formData.applicationDeadline}
               onChange={handleInputChange}
               required
             />
@@ -465,7 +513,7 @@ const EditJob = () => {
             <Input
               type="url"
               name="applicationLink"
-              value={jobDetails.applicationLink}
+              value={formData.applicationLink}
               onChange={handleInputChange}
               placeholder="https://company.com/apply or email@company.com"
             />
@@ -476,7 +524,7 @@ const EditJob = () => {
           <Label>Job Description</Label>
           <TextArea
             name="description"
-            value={jobDetails.description}
+            value={formData.description}
             onChange={handleInputChange}
             placeholder="Job Description"
             required
@@ -497,7 +545,7 @@ const EditJob = () => {
               <Button type="button" onClick={addRequirement}>Add</Button>
             </div>
             <div>
-              {jobDetails.requirements.map((req, index) => (
+              {formData.requirements.map((req, index) => (
                 <RequirementTag key={index}>
                   {req}
                   <RemoveButton onClick={() => removeRequirement(index)}>×</RemoveButton>

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 import { ArrowBack, ArrowForward, Description, VideoLibrary, Link, Assignment, Quiz, Forum, CheckCircle, RadioButtonUnchecked, Send, Person, ThumbUp, Reply, MoreVert } from '@mui/icons-material';
 import QuizTaker from './QuizTaker';
+import offlineIntegrationService from '../services/offlineIntegrationService';
 
 // Add CSS animation for spinner
 const SpinnerContainer = styled.div`
@@ -1876,442 +1877,206 @@ function ModuleContentInner() {
     
   }, [courseId, moduleId]);
 
+  // Update currentContent when contentItems or currentIndex changes
+  useEffect(() => {
+    if (contentItems.length > 0 && currentIndex >= 0 && currentIndex < contentItems.length) {
+      setCurrentContent(contentItems[currentIndex]);
+      console.log('🔄 Updated current content:', {
+        index: currentIndex,
+        type: contentItems[currentIndex].type,
+        title: contentItems[currentIndex].title
+      });
+    }
+  }, [contentItems, currentIndex]);
+
+  // Handle content navigation (for quiz completion screen)
+  const handleContentNavigation = (targetIndex) => {
+    if (targetIndex >= 0 && targetIndex < contentItems.length) {
+      setCurrentIndex(targetIndex);
+      setCurrentContent(contentItems[targetIndex]);
+      console.log('🔄 Navigated to content item:', targetIndex, contentItems[targetIndex].type, contentItems[targetIndex].title);
+    }
+  };
+
   // Manual completion only - no auto-completion
 
   const fetchCourseAndModule = async () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
+      const isOnline = navigator.onLine;
       
-      const response = await fetch(`/api/courses/${courseId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      let courseData = null;
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.data && data.data.course) {
-          const courseData = data.data.course;
-          setCourse(courseData);
+      if (isOnline) {
+        try {
+          // Try online API calls first (preserving existing behavior)
+          console.log('�� Online mode: Fetching course and module data from API...');
           
-          const foundModule = courseData.modules.find(m => m._id === moduleId);
-          if (foundModule) {
-            setModule(foundModule);
-            
-            // Build content items array
-            const items = [];
-            
-            // Add description first (like in StudentCourseOverview)
-            if (foundModule.description) {
-              items.push({
-                type: 'description',
-                title: 'Module Description',
-                data: foundModule.description,
-                icon: Description
-              });
+          const response = await fetch(`/api/courses/${courseId}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
             }
-            
-            if (foundModule.content) {
-              items.push({
-                type: 'content',
-                title: 'Content',
-                data: foundModule.content,
-                icon: Description
-              });
-            }
-            
-            if (foundModule.videoUrl) {
-              items.push({
-                type: 'video',
-                title: foundModule.videoTitle || 'Video Lecture',
-                data: { url: foundModule.videoUrl, title: foundModule.videoTitle },
-                icon: VideoLibrary
-              });
-            }
-            
-            if (foundModule.resources) {
-              foundModule.resources.forEach((resource, idx) => {
-                items.push({
-                  type: 'resource',
-                  title: resource.title || `Resource ${idx + 1}`,
-                  data: resource,
-                  icon: Link
-                });
-              });
-            }
-            
-            // Count assessments and quizzes for proper numbering
-            let assessmentCount = 0;
-            let quizCount = 0;
-            
-            if (foundModule.assessments) {
-              foundModule.assessments.forEach((assessment, idx) => {
-                assessmentCount++;
-                items.push({
-                  type: 'assessment',
-                  title: assessment.title || `Assessment ${assessmentCount}`,
-                  data: assessment,
-                  icon: Assignment
-                });
-              });
-            }
-            
-            if (foundModule.quizzes) {
-              console.log('✅ Found quizzes:', foundModule.quizzes.length);
-              console.log('🧠 Quiz details:', foundModule.quizzes.map(q => ({
-                id: q._id,
-                title: q.title,
-                hasQuestions: !!q.questions && q.questions.length > 0,
-                questionCount: q.questions?.length || 0,
-                type: q.type
-              })));
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.data && data.data.course) {
+              courseData = data.data.course;
+              console.log('✅ Course and module data received');
               
-              foundModule.quizzes.forEach((quiz, idx) => {
-                quizCount++;
-                console.log('📄 Processing quiz:', {
-                  index: idx,
-                  quizNumber: quizCount,
-                  title: quiz.title,
-                  id: quiz._id,
-                  hasQuestions: !!quiz.questions && quiz.questions.length > 0,
-                  questionCount: quiz.questions?.length || 0,
-                  dueDate: quiz.dueDate,
-                  hasDueDate: !!quiz.dueDate,
-                  allFields: Object.keys(quiz)
-                });
-                
-                items.push({
-                  type: 'quiz',
-                  title: `Quiz ${quizCount}${quiz.title ? `: ${quiz.title}` : ''}`,
-                  data: quiz,
-                  icon: Quiz
-                });
-              });
+              // Store course data for offline use
+              await offlineIntegrationService.storeCourseData(courseId, courseData);
             } else {
-              console.log('❌ No quizzes found in module');
-            }
-            
-            if (foundModule.discussions) {
-              console.log('✅ Found discussions:', foundModule.discussions.length);
-              console.log('📝 Discussion details:', foundModule.discussions.map(d => ({
-                id: d._id,
-                title: d.title,
-                hasContent: !!d.content,
-                type: d.type
-              })));
-              
-              foundModule.discussions.forEach((discussion, idx) => {
-                console.log('📄 Processing discussion:', {
-                  index: idx,
-                  title: discussion.title,
-                  id: discussion._id,
-                  hasContent: !!discussion.content
-                });
-                
-                items.push({
-                  type: 'discussion',
-                  title: discussion.title || `Discussion ${idx + 1}`,
-                  data: discussion,
-                  icon: Forum
-                });
-              });
-            } else {
-              console.log('❌ No discussions found in module');
-            }
-            
-            // Log final content summary
-            console.log('📋 Final content items summary:', {
-              totalItems: items.length,
-              breakdown: {
-                description: items.filter(i => i.type === 'description').length,
-                content: items.filter(i => i.type === 'content').length,
-                video: items.filter(i => i.type === 'video').length,
-                resource: items.filter(i => i.type === 'resource').length,
-                assessment: items.filter(i => i.type === 'assessment').length,
-                quiz: items.filter(i => i.type === 'quiz').length,
-                discussion: items.filter(i => i.type === 'discussion').length
-              },
-              itemTitles: items.map(i => `${i.type}: ${i.title}`)
-            });
-            
-            setContentItems(items);
-            
-            // Determine which content to show based on URL
-            let initialIndex = 0;
-            const currentPath = window.location.pathname;
-            
-            console.log('🔍 URL Analysis:', {
-              currentPath,
-              quizId,
-              discussionId,
-              itemsCount: items.length,
-              items: items.map((item, idx) => ({
-                index: idx,
-                type: item.type,
-                title: item.title,
-                dataId: item.data._id || item.data.id || 'no-id'
-              }))
-            });
-            
-            // More robust URL matching with fallback
-            let foundMatch = false;
-            
-            if (currentPath.includes('/description')) {
-              const descIndex = items.findIndex(item => item.type === 'description');
-              if (descIndex >= 0) {
-                initialIndex = descIndex;
-                foundMatch = true;
-              }
-            } else if (currentPath.includes('/video')) {
-              const videoIndex = items.findIndex(item => item.type === 'video');
-              if (videoIndex >= 0) {
-                initialIndex = videoIndex;
-                foundMatch = true;
-              }
-            } else if (currentPath.includes('/content')) {
-              const contentIndex = items.findIndex(item => item.type === 'content');
-              if (contentIndex >= 0) {
-                initialIndex = contentIndex;
-                foundMatch = true;
-              }
-            } else if (currentPath.includes('/resource/')) {
-              const resourceIndex = parseInt(resourceId);
-              if (!isNaN(resourceIndex)) {
-                const resourceItems = items.filter(item => item.type === 'resource');
-                if (resourceItems.length > resourceIndex) {
-                  initialIndex = items.findIndex(item => 
-                    item.type === 'resource' && 
-                    items.slice(0, items.indexOf(item) + 1).filter(i => i.type === 'resource').length === resourceIndex + 1
-                  );
-                  if (initialIndex >= 0) foundMatch = true;
-                }
-              }
-            } else if (currentPath.includes('/assessment/')) {
-              // Enhanced assessment ID matching with multiple fallbacks
-              if (assessmentId) {
-                console.log('🎯 Looking for assessment with ID:', assessmentId);
-                console.log('🔍 Available assessments:', items.filter(item => item.type === 'assessment').map(item => ({
-                  title: item.title,
-                  dataId: item.data._id,
-                  dataIdAlt: item.data.id
-                })));
-                
-                const assessmentIndex = items.findIndex(item => {
-                  if (item.type !== 'assessment') return false;
-                  
-                  // Try multiple ID matching strategies
-                  const matches = 
-                    item.data._id === assessmentId ||
-                    item.data.id === assessmentId ||
-                    item.data.assessmentId === assessmentId ||
-                    // Try without prefix if present
-                    (assessmentId.startsWith('assessment_') && item.data._id === assessmentId.substring(11)) ||
-                    (item.data._id && item.data._id.startsWith('assessment_') && item.data._id.substring(11) === assessmentId);
-                  
-                  console.log('🔍 Checking assessment:', {
-                    itemType: item.type,
-                    itemTitle: item.title,
-                    itemDataId: item.data._id || item.data.id,
-                    searchingFor: assessmentId,
-                    matches
-                  });
-                  
-                  return matches;
-                });
-                
-                if (assessmentIndex >= 0) {
-                  initialIndex = assessmentIndex;
-                  foundMatch = true;
-                  console.log('✅ Found assessment at index:', assessmentIndex);
-                } else {
-                  console.error('❌ Assessment not found with ID:', assessmentId);
-                  console.log('Available assessment IDs:', items.filter(item => item.type === 'assessment').map(item => item.data._id || item.data.id));
-                }
-              }
-            } else if (currentPath.includes('/quiz/')) {
-              // Enhanced quiz ID matching with multiple fallbacks
-              if (quizId) {
-                console.log('🎯 Looking for quiz with ID:', quizId);
-                console.log('🔍 Available quizzes:', items.filter(item => item.type === 'quiz').map(item => ({
-                  title: item.title,
-                  dataId: item.data._id,
-                  dataIdAlt: item.data.id
-                })));
-                
-                const quizIndex = items.findIndex(item => {
-                  if (item.type !== 'quiz') return false;
-                  
-                  // Try multiple ID matching strategies
-                  const matches = 
-                    item.data._id === quizId ||
-                    item.data.id === quizId ||
-                    item.data.quizId === quizId ||
-                    // Try without prefix if present
-                    (quizId.startsWith('quiz_') && item.data._id === quizId.substring(5)) ||
-                    (item.data._id && item.data._id.startsWith('quiz_') && item.data._id.substring(5) === quizId);
-                  
-                  console.log('🔍 Checking quiz:', {
-                    itemType: item.type,
-                    itemTitle: item.title,
-                    itemDataId: item.data._id || item.data.id,
-                    searchingFor: quizId,
-                    matches
-                  });
-                  
-                  return matches;
-                });
-                
-                if (quizIndex >= 0) {
-                  initialIndex = quizIndex;
-                  foundMatch = true;
-                  console.log('✅ Found quiz at index:', quizIndex);
-                } else {
-                  console.error('❌ Quiz not found with ID:', quizId);
-                  console.log('Available quiz IDs:', items.filter(item => item.type === 'quiz').map(item => item.data._id || item.data.id));
-                }
-              }
-            } else if (currentPath.includes('/discussion/')) {
-              // Enhanced discussion ID matching with multiple fallbacks
-              if (discussionId) {
-                console.log('🎯 Looking for discussion with ID:', discussionId);
-                console.log('🔍 Available discussions:', items.filter(item => item.type === 'discussion').map(item => ({
-                  title: item.title,
-                  dataId: item.data._id,
-                  dataIdAlt: item.data.id
-                })));
-                
-                const discussionIndex = items.findIndex(item => {
-                  if (item.type !== 'discussion') return false;
-                  
-                  // Try multiple ID matching strategies
-                  const matches = 
-                    item.data._id === discussionId ||
-                    item.data.id === discussionId ||
-                    item.data.discussionId === discussionId ||
-                    // Try without prefix if present
-                    (discussionId.startsWith('discussion_') && item.data._id === discussionId.substring(11)) ||
-                    (item.data._id && item.data._id.startsWith('discussion_') && item.data._id.substring(11) === discussionId);
-                  
-                  console.log('🔍 Checking discussion:', {
-                    itemType: item.type,
-                    itemTitle: item.title,
-                    itemDataId: item.data._id || item.data.id,
-                    searchingFor: discussionId,
-                    matches
-                  });
-                  
-                  return matches;
-                });
-                
-                if (discussionIndex >= 0) {
-                  initialIndex = discussionIndex;
-                  foundMatch = true;
-                  console.log('✅ Found discussion at index:', discussionIndex);
-                } else {
-                  console.error('❌ Discussion not found with ID:', discussionId);
-                  console.log('Available discussion IDs:', items.filter(item => item.type === 'discussion').map(item => item.data._id || item.data.id));
-                }
-              }
-            }
-            
-            // If no match found, default to first item (always safe)
-            if (!foundMatch || initialIndex < 0 || initialIndex >= items.length) {
-              console.log('⚠️ No matching content found or invalid index, defaulting to first item');
-              initialIndex = 0;
-            }
-            
-            // Ensure we have a valid index
-            if (initialIndex >= items.length) {
-              initialIndex = 0;
-            }
-            
-            console.log('🎯 Content matching result:', {
-              initialIndex,
-              foundMatch,
-              foundItem: items[initialIndex] || null,
-              totalItems: items.length
-            });
-            
-            // Always set content if we have items
-            if (items.length > 0 && items[initialIndex]) {
-              setCurrentContent(items[initialIndex]);
-              setCurrentIndex(initialIndex);
-              console.log('✅ Set current content:', {
-                type: items[initialIndex].type,
-                title: items[initialIndex].title,
-                index: initialIndex
-              });
-              
-              // Add comprehensive debugging
-              console.log('🔍 COMPLETE CONTENT DEBUG:', {
-                moduleData: {
-                  id: foundModule._id,
-                  title: foundModule.title,
-                  hasDescription: !!foundModule.description,
-                  hasContent: !!foundModule.content,
-                  hasVideoUrl: !!foundModule.videoUrl,
-                  hasResources: !!foundModule.resources && foundModule.resources.length > 0,
-                  hasAssessments: !!foundModule.assessments && foundModule.assessments.length > 0,
-                  hasQuizzes: !!foundModule.quizzes && foundModule.quizzes.length > 0,
-                  hasDiscussions: !!foundModule.discussions && foundModule.discussions.length > 0,
-                  moduleKeys: Object.keys(foundModule),
-                  allModuleData: foundModule
-                },
-                contentItems: items.map((item, idx) => ({
-                  index: idx,
-                  type: item.type,
-                  title: item.title,
-                  hasData: !!item.data,
-                  dataType: typeof item.data,
-                  dataKeys: item.data && typeof item.data === 'object' ? Object.keys(item.data) : [],
-                  dataPreview: item.data ? (typeof item.data === 'string' ? item.data.substring(0, 100) + '...' : item.data) : null
-                })),
-                currentContent: {
-                  type: items[initialIndex].type,
-                  title: items[initialIndex].title,
-                  hasData: !!items[initialIndex].data,
-                  dataType: typeof items[initialIndex].data,
-                  dataKeys: items[initialIndex].data && typeof items[initialIndex].data === 'object' ? Object.keys(items[initialIndex].data) : [],
-                  actualData: items[initialIndex].data
-                },
-                urlInfo: {
-                  pathname: window.location.pathname,
-                  courseId,
-                  moduleId,
-                  quizId,
-                  discussionId,
-                  assessmentId,
-                  resourceId
-                }
-              });
-            } else {
-              console.log('❌ No content items available or invalid index');
-              console.log('🔍 ERROR DEBUG:', {
-                itemsLength: items.length,
-                initialIndex,
-                foundModule: foundModule ? {
-                  id: foundModule._id,
-                  title: foundModule.title,
-                  keys: Object.keys(foundModule),
-                  fullData: foundModule
-                } : null
-              });
-              setError('No content available for this module');
+              throw new Error('Invalid course data received');
             }
           } else {
-            setError('Module not found');
+            throw new Error('Failed to fetch course data');
           }
-        } else {
-          setError('Course not found');
+
+        } catch (onlineError) {
+          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+          
+          // Fall back to offline data if online fails
+          courseData = await offlineIntegrationService.getCourseData(courseId);
+          
+          if (!courseData) {
+            throw onlineError;
+          }
         }
       } else {
-        setError('Failed to load course');
+        // Offline mode: use offline services
+        console.log('📴 Offline mode: Using offline course and module data...');
+        courseData = await offlineIntegrationService.getCourseData(courseId);
       }
-    } catch (err) {
-      console.error('Error fetching course:', err);
-      setError('Network error');
+
+      if (courseData) {
+        setCourse(courseData);
+        
+        const foundModule = courseData.modules.find(m => m._id === moduleId);
+        if (foundModule) {
+          setModule(foundModule);
+          
+          // Build content items array
+          const items = [];
+          
+          // Add description first (like in StudentCourseOverview)
+          if (foundModule.description) {
+            items.push({
+              type: 'description',
+              title: 'Module Description',
+              data: foundModule.description,
+              icon: Description
+            });
+          }
+          
+          if (foundModule.content) {
+            items.push({
+              type: 'content',
+              title: 'Content',
+              data: foundModule.content,
+              icon: Description
+            });
+          }
+          
+          if (foundModule.videoUrl) {
+            items.push({
+              type: 'video',
+              title: foundModule.videoTitle || 'Video Lecture',
+              data: { url: foundModule.videoUrl, title: foundModule.videoTitle },
+              icon: VideoLibrary
+            });
+          }
+          
+          if (foundModule.resources) {
+            foundModule.resources.forEach((resource, idx) => {
+              items.push({
+                type: 'resource',
+                title: resource.title || `Resource ${idx + 1}`,
+                data: resource,
+                icon: Link
+              });
+            });
+          }
+          
+          // Count assessments and quizzes for proper numbering
+          let assessmentCount = 0;
+          let quizCount = 0;
+          
+          if (foundModule.assessments) {
+            foundModule.assessments.forEach((assessment, idx) => {
+              assessmentCount++;
+              items.push({
+                type: 'assessment',
+                title: assessment.title || `Assessment ${assessmentCount}`,
+                data: assessment,
+                icon: Assignment
+              });
+            });
+          }
+          
+          if (foundModule.quizzes) {
+            console.log('✅ Found quizzes:', foundModule.quizzes.length);
+            console.log('🧠 Quiz details:', foundModule.quizzes.map(q => ({
+              id: q._id,
+              title: q.title,
+              hasQuestions: !!q.questions && q.questions.length > 0,
+              questionCount: q.questions?.length || 0,
+              type: q.type
+            })));
+            
+            foundModule.quizzes.forEach((quiz, idx) => {
+              quizCount++;
+              console.log('📄 Processing quiz:', {
+                index: idx,
+                quizNumber: quizCount,
+                title: quiz.title,
+                id: quiz._id,
+                hasQuestions: !!quiz.questions && quiz.questions.length > 0,
+                questionCount: quiz.questions?.length || 0,
+                dueDate: quiz.dueDate,
+                hasDueDate: !!quiz.dueDate,
+                allFields: Object.keys(quiz)
+              });
+              
+              items.push({
+                type: 'quiz',
+                title: quiz.title || `Quiz ${quizCount}`,
+                data: quiz,
+                icon: Quiz
+              });
+            });
+          }
+          
+          if (foundModule.discussions) {
+            foundModule.discussions.forEach((discussion, idx) => {
+              items.push({
+                type: 'discussion',
+                title: discussion.title || `Discussion ${idx + 1}`,
+                data: discussion,
+                icon: Forum
+              });
+            });
+          }
+          
+          setContentItems(items);
+          setCurrentIndex(0);
+          
+          // Set the first item as current content
+          if (items.length > 0) {
+            setCurrentContent(items[0]);
+            console.log('✅ Set initial content:', items[0].type, items[0].title);
+          }
+        } else {
+          setError('Module not found in course');
+        }
+      } else {
+        setError('Course not found');
+      }
+    } catch (error) {
+      console.error('❌ Error fetching course and module:', error);
+      setError(error.message || 'Failed to load course content');
     } finally {
       setLoading(false);
     }
@@ -2990,6 +2755,115 @@ function ModuleContentInner() {
         
         // Calculate quiz number by counting quizzes before current one
         const quizNumber = contentItems.slice(0, currentIndex + 1).filter(item => item.type === 'quiz').length;
+        
+        // Check if quiz is already completed
+        const currentItemId = `quiz-${currentIndex}`;
+        const isQuizCompleted = completedItems.has(currentItemId);
+        
+        console.log('🎯 QUIZ COMPLETION CHECK:', {
+          quizTitle: currentContent.data.title,
+          currentItemId: currentItemId,
+          isQuizCompleted: isQuizCompleted,
+          userRole: userRole,
+          completedItemsArray: Array.from(completedItems),
+          willShowCompletionScreen: isQuizCompleted && userRole === 'refugee'
+        });
+        
+        // If quiz is completed, show completion message instead of quiz interface
+        if (isQuizCompleted && userRole === 'refugee') {
+          return (
+            <ContentBody>
+              <div style={{ 
+                padding: '3rem 2rem', 
+                textAlign: 'center', 
+                background: 'linear-gradient(135deg, #e8f5e8 0%, #f0f9f0 100%)', 
+                border: '2px solid #4caf50', 
+                borderRadius: '12px',
+                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+              }}>
+                <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>🎉</div>
+                <h2 style={{ 
+                  color: '#2e7d32', 
+                  marginBottom: '1rem',
+                  fontSize: '1.5rem'
+                }}>
+                  Quiz Already Completed!
+                </h2>
+                <p style={{ 
+                  color: '#388e3c', 
+                  fontSize: '1.1rem',
+                  marginBottom: '2rem',
+                  lineHeight: '1.6'
+                }}>
+                  You have successfully completed "<strong>{currentContent.data.title}</strong>". 
+                  Great job! Your progress has been saved.
+                </p>
+                
+                <div style={{
+                  background: 'white',
+                  padding: '1.5rem',
+                  borderRadius: '8px',
+                  marginBottom: '2rem',
+                  boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                }}>
+                  <h3 style={{ color: '#2e7d32', marginBottom: '1rem' }}>Quiz Information:</h3>
+                  <div style={{ textAlign: 'left', color: '#555' }}>
+                    <p><strong>📚 Title:</strong> {currentContent.data.title}</p>
+                    <p><strong>📝 Questions:</strong> {currentContent.data.questions?.length || 0}</p>
+                    <p><strong>⏱️ Duration:</strong> {currentContent.data.duration || 30} minutes</p>
+                    <p><strong>✅ Status:</strong> <span style={{ color: '#4caf50', fontWeight: 'bold' }}>Completed</span></p>
+                  </div>
+                </div>
+                
+                <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={() => {
+                      // Navigate to next content item if available
+                      if (currentIndex < contentItems.length - 1) {
+                        handleContentNavigation(currentIndex + 1);
+                      }
+                    }}
+                    disabled={currentIndex >= contentItems.length - 1}
+                    style={{
+                      padding: '0.75rem 1.5rem',
+                      background: currentIndex >= contentItems.length - 1 ? '#ccc' : '#2196f3',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: currentIndex >= contentItems.length - 1 ? 'not-allowed' : 'pointer',
+                      fontSize: '1rem',
+                      fontWeight: '600'
+                    }}
+                  >
+                    {currentIndex >= contentItems.length - 1 ? 'Last Item' : 'Continue to Next →'}
+                  </button>
+                  
+                  <button
+                    onClick={() => {
+                      // Navigate back to course overview
+                      const returnUrl = localStorage.getItem('courseOverviewReturnUrl') || `/courses/${courseId}/overview`;
+                      navigate(returnUrl);
+                    }}
+                    style={{
+                      padding: '0.75rem 1.5rem',
+                      background: '#6c757d',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '1rem',
+                      fontWeight: '600'
+                    }}
+                  >
+                    ← Back to Course
+                  </button>
+                </div>
+              </div>
+            </ContentBody>
+          );
+        }
+        
+        // If not completed or user is instructor, show the quiz interface
         return (
           <QuizTaker 
             quiz={{

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import styled from 'styled-components';
 import { ArrowBack, Edit, Visibility } from '@mui/icons-material';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
@@ -73,53 +74,69 @@ const InstructorQuizPreview = () => {
   const [previewMode, setPreviewMode] = useState('instructor'); // 'instructor' or 'student'
 
   useEffect(() => {
-    fetchQuizData();
-    // Clear any pre-selected answers when component loads
-    setAnswers({});
-  }, [courseId, moduleId, quizId]);
-
-  const fetchQuizData = async () => {
-    try {
-      setLoading(true);
-      const token = localStorage.getItem('token');
-
-      // Fetch course data to get quiz information
-      const courseResponse = await fetch(`/api/courses/${courseId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (courseResponse.ok) {
-        const courseData = await courseResponse.json();
-        setCourse(courseData.data.course);
+    const fetchQuiz = async () => {
+      try {
+        setLoading(true);
+        setError('');
         
-        // Find the specific module
-        const foundModule = courseData.data.course.modules?.find(m => m._id === moduleId);
-        if (foundModule) {
-          setModule(foundModule);
-          
-          // Find the specific quiz
-          const foundQuiz = foundModule.quizzes?.[parseInt(quizId)];
-          if (foundQuiz) {
-            setQuiz(foundQuiz);
-          } else {
-            setError('Quiz not found');
+        const token = localStorage.getItem('token');
+        const isOnline = navigator.onLine;
+        
+        let quizData = null;
+
+        if (isOnline) {
+          try {
+            // Try online API calls first (preserving existing behavior)
+            console.log('🌐 Online mode: Fetching quiz data from API...');
+            
+            const response = await fetch(`/api/instructor/quizzes/${quizId}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (response.ok) {
+              const quizApiData = await response.json();
+              quizData = quizApiData.data.quiz;
+              console.log('✅ Quiz data received for preview');
+              
+              // Store quiz data for offline use
+              await offlineIntegrationService.storeQuizData(quizId, quizData);
+            } else {
+              throw new Error('Failed to fetch quiz data');
+            }
+
+          } catch (onlineError) {
+            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+            
+            // Fall back to offline data if online fails
+            quizData = await offlineIntegrationService.getQuizData(quizId);
+            
+            if (!quizData) {
+              throw onlineError;
+            }
           }
         } else {
-          setError('Module not found');
+          // Offline mode: use offline services
+          console.log('📴 Offline mode: Using offline quiz data...');
+          quizData = await offlineIntegrationService.getQuizData(quizId);
         }
-      } else {
-        setError('Failed to load course data');
+
+        setQuiz(quizData);
+
+      } catch (err) {
+        console.error('❌ Error fetching quiz:', err);
+        setError(err.message || 'Failed to load quiz');
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      console.error('Error fetching quiz data:', err);
-      setError('Failed to load quiz');
-    } finally {
-      setLoading(false);
+    };
+
+    if (quizId) {
+      fetchQuiz();
     }
-  };
+  }, [quizId]);
 
   const handleAnswerChange = (qIdx, answer) => {
     setAnswers({ ...answers, [qIdx]: answer });

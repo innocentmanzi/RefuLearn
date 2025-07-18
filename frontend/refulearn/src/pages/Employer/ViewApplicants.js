@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router-dom';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 1rem;
@@ -558,39 +559,99 @@ const ViewApplicants = () => {
 
   const fetchJobsAndScholarships = async () => {
     setLoadingItems(true);
-    try {
-      // Fetch jobs from correct endpoint
-      const jobsRes = await fetch('/api/employer/jobs/employer', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` }
-      });
-      const jobsData = await jobsRes.json();
-      if (jobsData.success) {
-        setJobs(jobsData.data.jobs || []);
-        console.log('Jobs fetched:', jobsData.data.jobs);
-      } else {
-        console.error('Failed to fetch jobs:', jobsData.message);
-        setError(`Failed to fetch jobs: ${jobsData.message}`);
-      }
+    setError('');
+    
+    const isOnline = navigator.onLine;
+    let jobsData = [];
+    let scholarshipsData = [];
 
-      // Fetch scholarships from correct endpoint  
-      const scholarshipsRes = await fetch('/api/scholarships/employer/scholarships', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` }
-      });
-      const scholarshipsData = await scholarshipsRes.json();
-      if (scholarshipsData.success) {
-        setScholarships(scholarshipsData.data.scholarships || []);
-        console.log('Scholarships fetched:', scholarshipsData.data.scholarships);
-      } else {
-        console.error('Failed to fetch scholarships:', scholarshipsData.message);
-        setError(`Failed to fetch scholarships: ${scholarshipsData.message}`);
+    if (isOnline) {
+      try {
+        console.log('🌐 Online mode: Fetching jobs and scholarships from API...');
+        
+        // Fetch jobs from correct endpoint
+        const jobsRes = await fetch('/api/jobs/employer/jobs', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` }
+        });
+        const jobsResponse = await jobsRes.json();
+        if (jobsResponse.success) {
+          jobsData = (jobsResponse.data && jobsResponse.data.jobs) ? jobsResponse.data.jobs : [];
+          console.log('Jobs fetched:', jobsData);
+        } else if (jobsResponse.offline) {
+          // Handle offline response from service worker
+          console.log('📴 Service worker returned offline response for jobs, using empty array');
+          jobsData = [];
+        } else {
+          throw new Error(`Failed to fetch jobs: ${jobsResponse.message}`);
+        }
+
+        // Fetch scholarships from correct endpoint  
+        const scholarshipsRes = await fetch('/api/scholarships/employer/scholarships', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` }
+        });
+        const scholarshipsResponse = await scholarshipsRes.json();
+        if (scholarshipsResponse.success) {
+          scholarshipsData = (scholarshipsResponse.data && scholarshipsResponse.data.scholarships) ? scholarshipsResponse.data.scholarships : [];
+          console.log('Scholarships fetched:', scholarshipsData);
+        } else if (scholarshipsResponse.offline) {
+          // Handle offline response from service worker
+          console.log('📴 Service worker returned offline response for scholarships, using empty array');
+          scholarshipsData = [];
+        } else {
+          throw new Error(`Failed to fetch scholarships: ${scholarshipsResponse.message}`);
+        }
+        
+        // Store data for offline use
+        await offlineIntegrationService.storeEmployerJobs(jobsData);
+        await offlineIntegrationService.storeEmployerScholarships(scholarshipsData);
+        console.log('✅ Jobs and scholarships stored for offline use');
+      } catch (onlineError) {
+        console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+        
+        // Fall back to offline data if online fails
+        try {
+          jobsData = await offlineIntegrationService.getEmployerJobs() || [];
+          scholarshipsData = await offlineIntegrationService.getEmployerScholarships() || [];
+        } catch (offlineError) {
+          console.warn('⚠️ Offline service also failed, using empty arrays:', offlineError);
+          jobsData = [];
+          scholarshipsData = [];
+        }
+        
+        // Don't show error for expected offline scenarios
+        if (!onlineError.message || !onlineError.message.includes('offline')) {
+          setError('Using offline data');
+        }
       }
+    } else {
+      // Offline mode: use offline services
+      console.log('📴 Offline mode: Using offline jobs and scholarships data...');
+      try {
+        jobsData = await offlineIntegrationService.getEmployerJobs() || [];
+        scholarshipsData = await offlineIntegrationService.getEmployerScholarships() || [];
+      } catch (offlineError) {
+        console.warn('⚠️ Offline service failed, using empty arrays:', offlineError);
+        jobsData = [];
+        scholarshipsData = [];
+      }
+    }
+
+    try {
+      // Ensure data is always arrays before setting state
+      const safeJobsData = Array.isArray(jobsData) ? jobsData : [];
+      const safeScholarshipsData = Array.isArray(scholarshipsData) ? scholarshipsData : [];
       
+      setJobs(safeJobsData);
+      setScholarships(safeScholarshipsData);
+      setLastUpdated(new Date());
     } catch (err) {
       console.error('Network error:', err);
       setError('Failed to load jobs and scholarships: ' + err.message);
+      // Set empty arrays as fallback
+      setJobs([]);
+      setScholarships([]);
     } finally {
       setLoadingItems(false);
-      setLastUpdated(new Date());
     }
   };
 
@@ -599,100 +660,136 @@ const ViewApplicants = () => {
     
     setLoading(true);
     setError('');
+    
+    const isOnline = navigator.onLine;
+    let applicantsData = [];
+
+    if (isOnline) {
+      try {
+        console.log('🌐 Online mode: Fetching applicants from API...');
+        
+        let url = '';
+        if (selectedType === 'jobs') {
+          url = `/api/jobs/${selectedItem._id}/applications`;
+        } else {
+          url = `/api/scholarships/${selectedItem._id}/applications`;
+        }
+        
+        if (statusFilter) url += `?status=${statusFilter}`;
+        
+        const response = await fetch(url, {
+          headers: { 
+            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.success) {
+          applicantsData = (data.data && data.data.applications) ? data.data.applications : [];
+          
+          // Store applicants data for offline use
+          await offlineIntegrationService.storeEmployerApplicants(applicantsData);
+          console.log('✅ Applicants stored for offline use');
+        } else if (data.offline) {
+          // Handle offline response from service worker
+          console.log('📴 Service worker returned offline response for applicants, using empty array');
+          applicantsData = [];
+        } else {
+          throw new Error(data.message || 'Failed to fetch applicants');
+        }
+      } catch (onlineError) {
+        console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+        
+        // Fall back to offline data if online fails
+        try {
+          applicantsData = await offlineIntegrationService.getEmployerApplicants() || [];
+        } catch (offlineError) {
+          console.warn('⚠️ Offline service also failed, using empty array:', offlineError);
+          applicantsData = [];
+        }
+        
+        // Don't show error for expected offline scenarios
+        if (applicantsData.length === 0 && onlineError.message && !onlineError.message.includes('offline')) {
+          setError(onlineError.message || 'Failed to fetch applicants');
+        }
+      }
+    } else {
+      // Offline mode: use offline services
+      console.log('📴 Offline mode: Using offline applicants data...');
+      try {
+        applicantsData = await offlineIntegrationService.getEmployerApplicants() || [];
+      } catch (offlineError) {
+        console.warn('⚠️ Offline service failed, using empty array:', offlineError);
+        applicantsData = [];
+      }
+    }
+
     try {
-      let url = '';
-      if (selectedType === 'jobs') {
-        url = `/api/employer/jobs/${selectedItem._id}/applications`;
-      } else {
-        url = `/api/employer/scholarships/${selectedItem._id}/applications`;
-      }
-      
-      if (statusFilter) url += `?status=${statusFilter}`;
-      
-      console.log('Fetching applicants from:', url);
-      console.log('Selected item:', selectedItem);
-      console.log('Auth token exists:', !!localStorage.getItem('token'));
-      
-      const response = await fetch(url, {
-        headers: { 
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      console.log('Response status:', response.status);
-      console.log('Response headers:', response.headers);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      console.log('Applicants response:', data);
-      
-      if (data.success) {
-        const applications = data.data.applications || [];
-        setApplicants(applications);
-        console.log('Applicants fetched:', applications);
-        if (applications.length === 0) {
-          console.log('No applications found for this item');
-        }
-      } else {
-        console.error('Failed to fetch applicants:', data.message);
-        // Clear applicants on error
-        setApplicants([]);
-        setError(data.message || 'Failed to fetch applicants');
-      }
+      // Ensure applicantsData is always an array
+      const safeApplicantsData = Array.isArray(applicantsData) ? applicantsData : [];
+      setApplicants(safeApplicantsData);
     } catch (err) {
-      console.error('Network error fetching applicants:', err);
-      setError('Network error. Please try again.');
+      console.error('Error setting applicants:', err);
+      setApplicants([]); // Set empty array as fallback
     } finally {
       setLoading(false);
     }
   };
 
-  const updateApplicationStatus = async (applicationId, newStatus) => {
-    try {
-      let url = '';
-      if (selectedType === 'jobs') {
-        url = `/api/employer/jobs/${selectedItem._id}/applications/${applicationId}`;
-      } else {
-        url = `/api/employer/scholarships/${selectedItem._id}/applications/${applicationId}`;
-      }
-      
-      console.log('Updating application status:', { url, applicationId, newStatus });
-      
-      const response = await fetch(url, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-        },
-        body: JSON.stringify({ status: newStatus })
-      });
-
-      const data = await response.json();
-      console.log('Status update response:', data);
-
-      if (data.success) {
-        setApplicants(applicants.map(app => 
-          app._id === applicationId ? { ...app, status: newStatus } : app
-        ));
-        setSuccessMessage(`Application status updated to ${newStatus}`);
-        setTimeout(() => setSuccessMessage(''), 3000);
+  const handleStatusChange = async (applicationId, newStatus) => {
+    const isOnline = navigator.onLine;
+    
+    if (isOnline) {
+      try {
+        console.log('🌐 Online mode: Updating applicant status...');
         
-        // Update the selected applicant if it's the one being updated
-        if (selectedApplicant && selectedApplicant._id === applicationId) {
-          setSelectedApplicant({ ...selectedApplicant, status: newStatus });
+        const response = await fetch(`/api/employer/applications/${applicationId}/status`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+          },
+          body: JSON.stringify({ status: newStatus })
+        });
+
+        if (response.ok) {
+          setSuccessMessage('Status updated successfully');
+          fetchApplicants();
+        } else {
+          throw new Error('Failed to update status');
         }
-      } else {
-        console.error('Failed to update status:', data.message);
-        setError(data.message || 'Failed to update application status');
+      } catch (onlineError) {
+        console.warn('⚠️ Online status update failed, queuing for offline sync:', onlineError);
+        
+        // Queue action for offline sync
+        await offlineIntegrationService.queueEmployerApplicantAction({
+          action: 'update_status',
+          applicationId: applicationId,
+          status: newStatus
+        });
+        
+        setSuccessMessage('Status update queued for sync when online');
       }
-    } catch (err) {
-      console.error('Network error updating status:', err);
-      setError('Network error. Please try again.');
+    } else {
+      // Offline mode: queue action for sync
+      console.log('📴 Offline mode: Queuing status update for sync...');
+      
+      await offlineIntegrationService.queueEmployerApplicantAction({
+        action: 'update_status',
+        applicationId: applicationId,
+        status: newStatus
+      });
+      
+      setSuccessMessage('Status update queued for sync when online');
     }
+    
+    setTimeout(() => setSuccessMessage(''), 3000);
   };
 
   const filteredApplicants = applicants.filter(applicant => {
@@ -868,7 +965,7 @@ const ViewApplicants = () => {
                    <h4>Update Application Status:</h4>
                    <StatusSelect
                      value={selectedApplicant.status}
-                     onChange={(e) => updateApplicationStatus(selectedApplicant._id, e.target.value)}
+                     onChange={(e) => handleStatusChange(selectedApplicant._id, e.target.value)}
                    >
                      {selectedType === 'jobs' ? (
                        <>

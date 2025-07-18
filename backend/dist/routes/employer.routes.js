@@ -13,6 +13,11 @@ const pouchdb_find_1 = __importDefault(require("pouchdb-find"));
 const router = express_1.default.Router();
 pouchdb_1.default.plugin(pouchdb_find_1.default);
 const db = new pouchdb_1.default('http://Manzi:Clarisse101@localhost:5984/refulearn');
+const ensureAuth = (req) => {
+    if (!req.user?._id)
+        throw new Error('User authentication required');
+    return { userId: req.user._id.toString(), user: req.user };
+};
 router.get('/', [
     (0, express_validator_1.query)('industry').optional().trim(),
     (0, express_validator_1.query)('location').optional().trim(),
@@ -53,22 +58,23 @@ router.get('/', [
     });
 }));
 router.get('/dashboard', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer', 'admin'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
-    console.log('🔍 Dashboard API called by employer:', req.user._id);
+    const { userId } = ensureAuth(req);
+    console.log('🔍 Dashboard API called by employer:', userId);
     const { period = '30' } = req.query;
     const daysAgo = new Date();
     daysAgo.setDate(daysAgo.getDate() - Number(period));
-    const totalJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString() } });
+    const totalJobsResult = await db.find({ selector: { type: 'job', employer: userId } });
     const totalJobs = totalJobsResult.docs.length;
-    console.log(`📊 Found ${totalJobs} total jobs for employer ${req.user._id}`);
-    const activeJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString(), isActive: true } });
+    console.log(`📊 Found ${totalJobs} total jobs for employer ${userId}`);
+    const activeJobsResult = await db.find({ selector: { type: 'job', employer: userId, isActive: true } });
     const activeJobs = activeJobsResult.docs.length;
     console.log(`📊 Found ${activeJobs} active jobs`);
-    const closedJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString(), isActive: false } });
+    const closedJobsResult = await db.find({ selector: { type: 'job', employer: userId, isActive: false } });
     const closedJobs = closedJobsResult.docs.length;
     console.log(`📊 Found ${closedJobs} closed jobs`);
-    const recentJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString(), createdAt: { $gte: daysAgo } } });
+    const recentJobsResult = await db.find({ selector: { type: 'job', employer: userId, createdAt: { $gte: daysAgo } } });
     const recentJobs = recentJobsResult.docs.length;
-    const allJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString() } });
+    const allJobsResult = await db.find({ selector: { type: 'job', employer: userId } });
     console.log('🔍 Job applications breakdown:');
     allJobsResult.docs.forEach((job) => {
         const appCount = job.applications?.length || 0;
@@ -89,12 +95,12 @@ router.get('/dashboard', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('e
         return sum + (job.applications?.filter((app) => app.status === 'hired').length || 0);
     }, 0);
     console.log(`📊 Found ${hiredApplications} hired applications`);
-    const totalScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: req.user._id.toString() } });
+    const totalScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: userId } });
     const totalScholarships = totalScholarshipsResult.docs.length;
-    const activeScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: req.user._id.toString(), isActive: true } });
+    const activeScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: userId, isActive: true } });
     const activeScholarships = activeScholarshipsResult.docs.length;
     const totalScholarshipApplications = totalScholarshipsResult.docs.reduce((sum, scholarship) => sum + (scholarship.applications?.length || 0), 0);
-    const recentJobsListResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString() } });
+    const recentJobsListResult = await db.find({ selector: { type: 'job', employer: userId } });
     const recentJobsList = recentJobsListResult.docs
         .sort((a, b) => {
         const aDate = a.createdAt ? new Date(a.createdAt).getTime() : 0;
@@ -216,7 +222,7 @@ router.get('/dashboard', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('e
         acc[app.status] = (acc[app.status] || 0) + 1;
         return acc;
     }, {});
-    const recentScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: req.user._id.toString() } });
+    const recentScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: userId } });
     const recentScholarships = recentScholarshipsResult.docs
         .sort((a, b) => {
         const aDate = a.createdAt ? new Date(a.createdAt).getTime() : 0;
@@ -336,8 +342,9 @@ router.post('/', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer'
     (0, express_validator_1.body)('description').trim().notEmpty().withMessage('Description is required'),
     (0, express_validator_1.body)('website').optional().isURL().withMessage('Invalid website URL')
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const existingResult = await db.find({
-        selector: { type: 'employer', user: req.user._id.toString() }
+        selector: { type: 'employer', user: userId }
     });
     if (existingResult.docs.length > 0) {
         return res.status(400).json({
@@ -347,7 +354,7 @@ router.post('/', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer'
     }
     const employerData = {
         ...req.body,
-        user: req.user._id.toString(),
+        user: userId,
         type: 'employer',
         isVerified: false,
         jobs: [],
@@ -370,9 +377,10 @@ router.put('/profile', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('emp
     (0, express_validator_1.body)('description').optional().trim().notEmpty(),
     (0, express_validator_1.body)('website').optional().isURL()
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const updates = req.body;
     const result = await db.find({
-        selector: { type: 'employer', user: req.user._id.toString() }
+        selector: { type: 'employer', user: userId }
     });
     const employer = result.docs[0];
     if (!employer) {
@@ -397,8 +405,9 @@ router.get('/jobs/employer', auth_1.authenticateToken, (0, auth_1.authorizeRoles
     (0, express_validator_1.query)('page').optional().isInt({ min: 1 }),
     (0, express_validator_1.query)('limit').optional().isInt({ min: 1, max: 50 })
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const { status, page = 1, limit = 10 } = req.query;
-    const selector = { type: 'job', employer: req.user._id.toString() };
+    const selector = { type: 'job', employer: userId };
     if (status) {
         selector.status = status;
     }
@@ -425,8 +434,9 @@ router.get('/scholarships/employer', auth_1.authenticateToken, (0, auth_1.author
     (0, express_validator_1.query)('page').optional().isInt({ min: 1 }),
     (0, express_validator_1.query)('limit').optional().isInt({ min: 1, max: 50 })
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const { status, page = 1, limit = 10 } = req.query;
-    const selector = { type: 'scholarship', employer: req.user._id.toString() };
+    const selector = { type: 'scholarship', employer: userId };
     if (status) {
         selector.status = status;
     }
@@ -453,10 +463,11 @@ router.get('/jobs/:jobId/applications', auth_1.authenticateToken, (0, auth_1.aut
     (0, express_validator_1.query)('page').optional().isInt({ min: 1 }),
     (0, express_validator_1.query)('limit').optional().isInt({ min: 1, max: 50 })
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const { jobId } = req.params;
     const { status, page = 1, limit = 10 } = req.query;
     console.log('DEBUG: Fetching job applications for jobId:', jobId);
-    console.log('DEBUG: User ID:', req.user._id);
+    console.log('DEBUG: User ID:', userId);
     console.log('DEBUG: Query params:', { status, page, limit });
     let job;
     try {
@@ -476,7 +487,7 @@ router.get('/jobs/:jobId/applications', auth_1.authenticateToken, (0, auth_1.aut
             debug: typeof err === 'object' && err !== null && 'message' in err ? err.message : String(err)
         });
     }
-    if (job.employer.toString() !== req.user._id.toString()) {
+    if (job.employer.toString() !== userId) {
         return res.status(403).json({
             success: false,
             message: 'Not authorized to view applications for this job'
@@ -532,6 +543,7 @@ router.put('/jobs/:jobId/applications/:applicationId', auth_1.authenticateToken,
     (0, express_validator_1.body)('status').isIn(['pending', 'reviewed', 'shortlisted', 'rejected', 'hired']).withMessage('Invalid status'),
     (0, express_validator_1.body)('notes').optional().trim()
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const { jobId, applicationId } = req.params;
     const { status, notes } = req.body;
     const job = await db.get(jobId);
@@ -541,7 +553,7 @@ router.put('/jobs/:jobId/applications/:applicationId', auth_1.authenticateToken,
             message: 'Job not found'
         });
     }
-    if (job.employer.toString() !== req.user._id.toString()) {
+    if (job.employer.toString() !== userId) {
         return res.status(403).json({
             success: false,
             message: 'Not authorized to update applications for this job'
@@ -571,6 +583,7 @@ router.get('/scholarships/:scholarshipId/applications', auth_1.authenticateToken
     (0, express_validator_1.query)('page').optional().isInt({ min: 1 }),
     (0, express_validator_1.query)('limit').optional().isInt({ min: 1, max: 50 })
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const { scholarshipId } = req.params;
     const { status, page = 1, limit = 10 } = req.query;
     const scholarship = await db.get(scholarshipId);
@@ -580,7 +593,7 @@ router.get('/scholarships/:scholarshipId/applications', auth_1.authenticateToken
             message: 'Scholarship not found'
         });
     }
-    if (scholarship.employer.toString() !== req.user._id.toString()) {
+    if (scholarship.employer.toString() !== userId) {
         return res.status(403).json({
             success: false,
             message: 'Not authorized to view applications for this scholarship'
@@ -630,6 +643,7 @@ router.put('/scholarships/:scholarshipId/applications/:applicationId', auth_1.au
     (0, express_validator_1.body)('status').isIn(['pending', 'accepted', 'rejected', 'shortlisted', 'reviewed', 'hired', 'closed']).withMessage('Invalid status'),
     (0, express_validator_1.body)('feedback').optional().trim()
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const { scholarshipId, applicationId } = req.params;
     const { status, feedback } = req.body;
     const scholarship = await db.get(scholarshipId);
@@ -639,7 +653,7 @@ router.put('/scholarships/:scholarshipId/applications/:applicationId', auth_1.au
             message: 'Scholarship not found'
         });
     }
-    if (scholarship.employer.toString() !== req.user._id.toString()) {
+    if (scholarship.employer.toString() !== userId) {
         return res.status(403).json({
             success: false,
             message: 'Not authorized to update applications for this scholarship'
@@ -665,16 +679,17 @@ router.put('/scholarships/:scholarshipId/applications/:applicationId', auth_1.au
     });
 }));
 router.get('/analytics', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const { period = '30' } = req.query;
     const daysAgo = new Date();
     daysAgo.setDate(daysAgo.getDate() - Number(period));
-    const totalJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString() } });
+    const totalJobsResult = await db.find({ selector: { type: 'job', employer: userId } });
     const totalJobs = totalJobsResult.docs.length;
-    const activeJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString(), isActive: true } });
+    const activeJobsResult = await db.find({ selector: { type: 'job', employer: userId, isActive: true } });
     const activeJobs = activeJobsResult.docs.length;
-    const newJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString(), createdAt: { $gte: daysAgo } } });
+    const newJobsResult = await db.find({ selector: { type: 'job', employer: userId, createdAt: { $gte: daysAgo } } });
     const newJobs = newJobsResult.docs.length;
-    const jobs = await db.find({ selector: { type: 'job', employer: req.user._id.toString() } });
+    const jobs = await db.find({ selector: { type: 'job', employer: userId } });
     const totalApplications = jobs.docs.reduce((sum, job) => sum + (job.applications?.length || 0), 0);
     const applicationStatusCounts = jobs.docs.reduce((acc, job) => {
         job.applications?.forEach((app) => {
@@ -682,13 +697,13 @@ router.get('/analytics', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('e
         });
         return acc;
     }, {});
-    const totalScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: req.user._id.toString() } });
+    const totalScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: userId } });
     const totalScholarships = totalScholarshipsResult.docs.length;
-    const activeScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: req.user._id.toString(), isActive: true } });
+    const activeScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: userId, isActive: true } });
     const activeScholarships = activeScholarshipsResult.docs.length;
-    const newScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: req.user._id.toString(), createdAt: { $gte: daysAgo } } });
+    const newScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: userId, createdAt: { $gte: daysAgo } } });
     const newScholarships = newScholarshipsResult.docs.length;
-    const scholarships = await db.find({ selector: { type: 'scholarship', employer: req.user._id.toString() } });
+    const scholarships = await db.find({ selector: { type: 'scholarship', employer: userId } });
     const totalScholarshipApplications = scholarships.docs.reduce((sum, scholarship) => sum + (scholarship.applications?.length || 0), 0);
     const scholarshipApplicationStatusCounts = scholarships.docs.reduce((acc, scholarship) => {
         scholarship.applications?.forEach((app) => {
@@ -696,12 +711,12 @@ router.get('/analytics', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('e
         });
         return acc;
     }, {});
-    const recentJobsResult = await db.find({ selector: { type: 'job', employer: req.user._id.toString() } });
+    const recentJobsResult = await db.find({ selector: { type: 'job', employer: userId } });
     const recentJobs = recentJobsResult.docs
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         .slice(0, 5)
         .map((job) => ({ title: job.title, isActive: job.isActive, createdAt: job.createdAt }));
-    const recentScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: req.user._id.toString() } });
+    const recentScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: userId } });
     const recentScholarships = recentScholarshipsResult.docs
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         .slice(0, 5)
@@ -735,7 +750,8 @@ router.get('/analytics', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('e
     });
 }));
 router.get('/profile', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
-    const user = await db.get(req.user._id);
+    const { userId } = ensureAuth(req);
+    const user = await db.get(userId);
     res.json({
         success: true,
         data: { user }
@@ -760,11 +776,12 @@ router.post('/jobs', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('emplo
     }),
     (0, express_validator_1.body)('isActive').isBoolean().withMessage('isActive must be a boolean')
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const jobData = {
         _id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
         ...req.body,
         type: 'job',
-        employer: req.user._id.toString(),
+        employer: userId,
         applications: [],
         createdAt: new Date(),
         updatedAt: new Date()
@@ -795,6 +812,7 @@ router.put('/jobs/:jobId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)(
     }),
     (0, express_validator_1.body)('isActive').optional().isBoolean()
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const { jobId } = req.params;
     const updates = req.body;
     const job = await db.get(jobId);
@@ -804,7 +822,7 @@ router.put('/jobs/:jobId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)(
             message: 'Job not found'
         });
     }
-    if (job.employer.toString() !== req.user._id.toString()) {
+    if (job.employer.toString() !== userId) {
         return res.status(403).json({
             success: false,
             message: 'Not authorized to update this job'
@@ -822,6 +840,7 @@ router.put('/jobs/:jobId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)(
     });
 }));
 router.delete('/jobs/:jobId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const { jobId } = req.params;
     const job = await db.get(jobId);
     if (!job) {
@@ -830,7 +849,7 @@ router.delete('/jobs/:jobId', auth_1.authenticateToken, (0, auth_1.authorizeRole
             message: 'Job not found'
         });
     }
-    if (job.employer.toString() !== req.user._id.toString()) {
+    if (job.employer.toString() !== userId) {
         return res.status(403).json({
             success: false,
             message: 'Not authorized to delete this job'
@@ -850,10 +869,11 @@ router.post('/scholarships', auth_1.authenticateToken, (0, auth_1.authorizeRoles
     (0, express_validator_1.body)('requirements').optional().trim(),
     (0, express_validator_1.body)('isActive').isBoolean().withMessage('isActive must be a boolean')
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const scholarshipData = {
         ...req.body,
         type: 'scholarship',
-        employer: req.user._id.toString(),
+        employer: userId,
         applications: [],
         createdAt: new Date(),
         updatedAt: new Date()
@@ -873,6 +893,7 @@ router.put('/scholarships/:scholarshipId', auth_1.authenticateToken, (0, auth_1.
     (0, express_validator_1.body)('requirements').optional().trim(),
     (0, express_validator_1.body)('isActive').optional().isBoolean()
 ], (0, validation_1.validate)([]), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const { scholarshipId } = req.params;
     const updates = req.body;
     const scholarship = await db.get(scholarshipId);
@@ -882,7 +903,7 @@ router.put('/scholarships/:scholarshipId', auth_1.authenticateToken, (0, auth_1.
             message: 'Scholarship not found'
         });
     }
-    if (scholarship.employer.toString() !== req.user._id.toString()) {
+    if (scholarship.employer.toString() !== userId) {
         return res.status(403).json({
             success: false,
             message: 'Not authorized to update this scholarship'
@@ -900,6 +921,7 @@ router.put('/scholarships/:scholarshipId', auth_1.authenticateToken, (0, auth_1.
     });
 }));
 router.delete('/scholarships/:scholarshipId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('employer'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { userId } = ensureAuth(req);
     const { scholarshipId } = req.params;
     const scholarship = await db.get(scholarshipId);
     if (!scholarship) {
@@ -908,7 +930,7 @@ router.delete('/scholarships/:scholarshipId', auth_1.authenticateToken, (0, auth
             message: 'Scholarship not found'
         });
     }
-    if (scholarship.employer.toString() !== req.user._id.toString()) {
+    if (scholarship.employer.toString() !== userId) {
         return res.status(403).json({
             success: false,
             message: 'Not authorized to delete this scholarship'

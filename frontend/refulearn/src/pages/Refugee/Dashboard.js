@@ -6,22 +6,25 @@ import { useUser } from '../../contexts/UserContext';
 
 const DashboardGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 1.5rem;
-  margin-top: 2rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 3rem;
+  margin: 2rem 0;
   width: 100%;
   box-sizing: border-box;
+  padding: 0 1rem;
+  
   @media (max-width: 900px) {
     grid-template-columns: 1fr;
-    gap: 1.2rem;
-    margin-top: 1.2rem;
-    max-width: 420px;
-    margin-left: auto;
-    margin-right: auto;
+    gap: 2.5rem;
+    margin: 1.5rem auto;
+    max-width: 500px;
+    padding: 0 1.5rem;
   }
   @media (max-width: 600px) {
-    gap: 1rem;
-    margin-top: 1rem;
+    gap: 2rem;
+    margin: 1rem auto;
+    padding: 0 1rem;
+    max-width: 100%;
   }
 `;
 
@@ -44,55 +47,37 @@ const Card = styled.div`
   }
   
   @media (max-width: 900px) {
-    max-width: 420px;
-    margin-left: auto;
-    margin-right: auto;
+    padding: 1.25rem;
+  }
+  
+  @media (max-width: 600px) {
+    padding: 1rem;
   }
 `;
 
 const Title = styled.h1`
-  color: ${({ theme }) => theme.colors.primary};
+  color: #007BFF;
+  font-size: 2rem;
   margin-bottom: 0.5rem;
-  
-  @keyframes blink {
-    0%, 50% { opacity: 1; }
-    51%, 100% { opacity: 0; }
-  }
 `;
 
 const SubTitle = styled.h2`
   color: #007BFF;
   font-size: 1.2rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 1rem;
   font-weight: 600;
 `;
 
-const ProgressBar = styled.div`
-  width: 100%;
-  height: 8px;
-  background: rgba(0, 123, 255, 0.1);
-  border-radius: 4px;
-  margin: 1rem 0;
-`;
-
-const Progress = styled.div`
-  width: ${props => props.$value}%;
-  height: 100%;
-  background: #007BFF;
-  border-radius: 4px;
-  transition: width 0.3s ease;
-`;
-
 const Stat = styled.div`
-  font-size: 2rem;
+  font-size: 2.5rem;
   font-weight: bold;
-  margin: 0.5rem 0;
   color: #333;
+  margin-bottom: 0.5rem;
 `;
 
 const StatLabel = styled.div`
-  font-size: 0.9rem;
   color: #6c757d;
+  font-size: 1rem;
   margin-bottom: 0.5rem;
 `;
 
@@ -124,35 +109,18 @@ const OverviewText = styled.span`
   font-size: 1.1rem;
 `;
 
-const CourseList = styled.div`
-  margin-top: 1rem;
-`;
-
-const CourseItem = styled.div`
-  padding: 0.8rem;
-  border-bottom: 1px solid #eee;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  
-  &:last-child {
-    border-bottom: none;
-  }
-`;
-
-// New styled components for Available Courses section
 const CourseCard = styled.div`
   background: white;
   border-radius: 12px;
   padding: 1.5rem;
   box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   transition: transform 0.2s, box-shadow 0.2s;
-  width: 100%;
+  width: calc(100% - 2rem);
   max-width: 100%;
   overflow-wrap: break-word;
   color: #333;
   border: 1px solid #e9ecef;
-  margin-top: 2rem;
+  margin: 2rem 1rem;
   
   &:hover {
     transform: translateY(-2px);
@@ -160,9 +128,15 @@ const CourseCard = styled.div`
   }
   
   @media (max-width: 900px) {
-    max-width: 420px;
-    margin-left: auto;
-    margin-right: auto;
+    width: calc(100% - 3rem);
+    margin: 1.5rem 1.5rem;
+    padding: 1.25rem;
+  }
+  
+  @media (max-width: 600px) {
+    width: calc(100% - 2rem);
+    margin: 1rem 1rem;
+    padding: 1rem;
   }
 `;
 
@@ -171,6 +145,10 @@ const CourseCardTitle = styled.h2`
   font-size: 1.2rem;
   margin-bottom: 1rem;
   font-weight: 600;
+`;
+
+const CourseList = styled.div`
+  margin-top: 1rem;
 `;
 
 const CourseItemStyled = styled.div`
@@ -194,34 +172,39 @@ const CourseItemStyled = styled.div`
   }
 `;
 
-const AvailableCourses = ({ courses, onCourseClick, t }) => (
-  <CourseCard>
-    <CourseCardTitle>Available Courses</CourseCardTitle>
-    <CourseList>
-      {courses.map(course => (
-        <CourseItemStyled key={course._id} onClick={() => onCourseClick(course)}>
-          <div>
-            <div style={{ fontWeight: 'bold', color: '#333', fontSize: '1rem' }}>{course.title}</div>
-            <div style={{ fontSize: '0.9rem', color: '#6c757d', marginTop: '0.25rem' }}>
-              {course.category} • {course.level || 'Beginner'} • {course.duration || 'Self-paced'}
+const AvailableCourses = ({ courses, onCourseClick, t }) => {
+  // Filter to show only published courses
+  const publishedCourses = courses.filter(course => course.isPublished === true || course.isPublished === 'true');
+  
+  return (
+    <CourseCard>
+      <CourseCardTitle>Available Courses ({publishedCourses.length})</CourseCardTitle>
+      <CourseList>
+        {publishedCourses.map(course => (
+          <CourseItemStyled key={course._id} onClick={() => onCourseClick(course)}>
+            <div>
+              <div style={{ fontWeight: 'bold', color: '#333', fontSize: '1rem' }}>{course.title}</div>
+              <div style={{ fontSize: '0.9rem', color: '#6c757d', marginTop: '0.25rem' }}>
+                {course.category} • {course.level || 'Beginner'} • {course.duration || 'Self-paced'}
+              </div>
             </div>
-          </div>
-          <div style={{ 
-            fontSize: '0.8rem', 
-            color: course.isPublished ? '#28a745' : '#007BFF',
-            fontWeight: '600',
-            padding: '0.25rem 0.75rem',
-            borderRadius: '12px',
-            background: course.isPublished ? '#d4edda' : '#e3f2fd',
-            border: `1px solid ${course.isPublished ? '#c3e6cb' : '#bbdefb'}`
-          }}>
-            {course.isPublished ? 'Available' : 'Coming Soon'}
-          </div>
-        </CourseItemStyled>
-      ))}
-    </CourseList>
-  </CourseCard>
-);
+            <div style={{ 
+              fontSize: '0.8rem', 
+              color: '#28a745',
+              fontWeight: '600',
+              padding: '0.25rem 0.75rem',
+              borderRadius: '12px',
+              background: '#d4edda',
+              border: '1px solid #c3e6cb'
+            }}>
+              Available
+            </div>
+          </CourseItemStyled>
+        ))}
+      </CourseList>
+    </CourseCard>
+  );
+};
 
 const RefugeeDashboard = () => {
   const navigate = useNavigate();
@@ -244,210 +227,262 @@ const RefugeeDashboard = () => {
   const [courses, setCourses] = useState([]);
   const [stats, setStats] = useState({
     completedCourses: 0,
-    totalCourses: 0,
+    enrolledCourses: 0,
+    availableCourses: 0,
     certificates: 0,
     assessmentsCompleted: 0,
     learningPathProgress: 0,
     peerLearningSessions: 0,
-    jobApplications: 0
+    jobApplications: 0,
+    scholarships: 0
   });
   const [jobs, setJobs] = useState([]);
   const [scholarships, setScholarships] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [isDataFetching, setIsDataFetching] = useState(false);
 
   const fetchDashboardData = async () => {
+    // Prevent multiple concurrent API calls
+    if (isDataFetching) {
+      console.log('⏸️ Data already fetching, skipping...');
+      return;
+    }
+    
+    setIsDataFetching(true);
     try {
       setLoading(true);
+      console.log('🚀 Starting fetchDashboardData');
+      
       const token = localStorage.getItem('token');
-      // Fetch user profile
-      const profileResponse = await fetch('/api/users/profile', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      if (profileResponse.ok) {
-        const profileData = await profileResponse.json();
-        setUserName(profileData.data.user.firstName || 'User');
-      } else {
-        const text = await profileResponse.text();
-        console.error('Profile fetch failed:', text);
-        throw new Error('Profile fetch failed: ' + text);
-      }
-      // Fetch all released courses instead of just enrolled courses
-      const coursesResponse = await fetch('/api/courses', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      console.log('🔑 Token available:', !!token);
+      console.log('🔑 Token preview:', token ? token.substring(0, 20) + '...' : 'null');
       
-      console.log('Courses API response status:', coursesResponse.status);
-      
-      if (coursesResponse.ok) {
-        const coursesData = await coursesResponse.json();
-        console.log('Courses API response:', coursesData);
-        
-        if (coursesData.success) {
-          setCourses(coursesData.data.courses || []);
-          console.log('✅ Courses set:', coursesData.data.courses?.length || 0, 'courses');
-          
-          // Log debug information if available
-          if (coursesData.data.debug) {
-            console.log('📋 Debug info:', coursesData.data.debug);
-          }
-        } else {
-          console.error('❌ Courses API returned success=false:', coursesData);
-          setCourses([]); // Set empty array instead of throwing error
-          setError(`Courses API error: ${coursesData.message || 'Unknown error'}`);
-        }
-      } else {
-        const errorText = await coursesResponse.text();
-        console.error('❌ Courses API HTTP error:', coursesResponse.status, errorText);
-        
-        try {
-          const errorData = JSON.parse(errorText);
-          console.log('📋 Error details:', errorData);
-          setError(`Courses fetch failed: ${errorData.message || 'Server error'}`);
-        } catch (parseError) {
-          setError(`Courses fetch failed: HTTP ${coursesResponse.status}`);
-        }
-        
-        setCourses([]); // Set empty array instead of throwing error
-      }
-      // Fetch user stats
-      const userId = user?._id || user?.id;
-      console.log('Using user ID for stats:', userId);
-      
-      if (!userId) {
-        console.error('No user ID available for stats fetch');
-        setError('User authentication error: No user ID available');
-        return;
+      if (!token) {
+        console.log('❌ No token found, but continuing to fetch data anyway...');
       }
       
-      const statsResponse = await fetch(`/api/courses/user/${userId}/stats`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      // Initialize data arrays
+      let coursesData = [];
+      let statsData = {};
+      let jobsData = [];
+      let scholarshipsData = [];
+      let certificatesData = [];
       
-      console.log('Stats API response status:', statsResponse.status);
-      
-      if (statsResponse.ok) {
-        const statsData = await statsResponse.json();
-        console.log('Stats API response:', statsData);
-        
-        if (statsData.success) {
-          setStats({
-            completedCourses: statsData.data.completedCourses || 0,
-            totalCourses: statsData.data.totalCourses || 0,
-            certificates: statsData.data.certificates || 0,
-            assessmentsCompleted: statsData.data.assessmentsCompleted || 0,
-            learningPathProgress: statsData.data.learningPathProgress || 0,
-            peerLearningSessions: statsData.data.peerLearningSessions || 0,
-            jobApplications: statsData.data.jobApplications || 0
-          });
-        } else {
-          console.error('❌ Stats API returned success=false:', statsData);
-          // Don't throw error for stats, just log it and use default values
-          console.warn('Using default stats values due to API error');
-        }
-      } else {
-        const errorText = await statsResponse.text();
-        console.error('❌ Stats API HTTP error:', statsResponse.status, errorText);
-        
-        try {
-          const errorData = JSON.parse(errorText);
-          console.log('📋 Stats error details:', errorData);
-          
-          // If it's a user not found error, it might be a new user - don't show error
-          if (errorData.message && errorData.message.includes('User not found')) {
-            console.warn('User not found in database, using default stats (might be a new user)');
-          } else {
-            console.warn('Stats fetch failed, using default values:', errorData.message);
-          }
-        } catch (parseError) {
-          console.warn('Stats fetch failed, using default values');
-        }
-        
-        // Don't throw error for stats - just continue with default values
-      }
-      // Fetch certificates count
-      const certificatesResponse = await fetch('/api/certificates/user', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      if (certificatesResponse.ok) {
-        const certificatesData = await certificatesResponse.json();
-        setStats(prev => ({
-          ...prev,
-          certificates: certificatesData.data.certificates?.length || 0
-        }));
-      } else {
-        const text = await certificatesResponse.text();
-        console.error('Certificates fetch failed:', text);
-        throw new Error('Certificates fetch failed: ' + text);
-      }
-
-      // Fetch recent active jobs (limit to 3 for dashboard)
+      // Fetch courses
       try {
-        const jobsResponse = await fetch('/api/jobs?limit=3', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
+        console.log('📚 Fetching courses...');
+        const headers = {
+          'Content-Type': 'application/json'
+        };
+        
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        } else {
+          console.log('⚠️ Fetching courses without authentication token');
+        }
+        
+        const coursesResponse = await fetch('/api/courses', { headers });
+        
+        console.log('📊 Courses response status:', coursesResponse.status);
+        
+        if (coursesResponse.status === 429) {
+          console.log('⏸️ Rate limited, waiting 2 seconds before retry...');
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const retryResponse = await fetch('/api/courses', { headers });
+          if (retryResponse.ok) {
+            const coursesApiData = await retryResponse.json();
+            if (coursesApiData.success && coursesApiData.data && coursesApiData.data.courses) {
+              coursesData = coursesApiData.data.courses;
+              console.log('✅ Found courses after retry:', coursesData.length);
+            }
           }
-        });
+        } else if (coursesResponse.ok) {
+          const coursesApiData = await coursesResponse.json();
+          console.log('✅ Courses API response:', coursesApiData);
+          
+          if (coursesApiData.success && coursesApiData.data && coursesApiData.data.courses) {
+            coursesData = coursesApiData.data.courses;
+            console.log('✅ Found courses:', coursesData.length);
+            coursesData.forEach(course => {
+              console.log(`📖 Course: "${course.title}" - Published: ${course.isPublished}`);
+            });
+          }
+        } else {
+          console.error('❌ Courses API failed with status:', coursesResponse.status);
+        }
+      } catch (error) {
+        console.error('❌ Courses fetch failed:', error);
+      }
+      
+      // Fetch jobs
+      try {
+        console.log('💼 Fetching jobs...');
+        const jobsHeaders = {
+          'Content-Type': 'application/json'
+        };
+        
+        if (token) {
+          jobsHeaders['Authorization'] = `Bearer ${token}`;
+        }
+        
+        const jobsResponse = await fetch('/api/jobs', { headers: jobsHeaders });
+        
         if (jobsResponse.ok) {
-          const jobsData = await jobsResponse.json();
-          setJobs(jobsData.data.jobs || []);
-          console.log('✅ Jobs fetched for dashboard:', jobsData.data.jobs?.length || 0, 'jobs');
-        } else {
-          console.error('❌ Jobs fetch failed:', jobsResponse.status);
+          const jobsApiData = await jobsResponse.json();
+          console.log('✅ Jobs API response:', jobsApiData);
+          
+          if (jobsApiData.success && jobsApiData.data && jobsApiData.data.jobs) {
+            jobsData = jobsApiData.data.jobs;
+            console.log('✅ Found jobs:', jobsData.length);
+          }
         }
-      } catch (err) {
-        console.error('Jobs fetch error:', err);
-        // Don't throw error - just continue without jobs
+      } catch (error) {
+        console.error('❌ Jobs fetch failed:', error);
+      }
+      
+      // Fetch scholarships
+      try {
+        console.log('🎓 Fetching scholarships...');
+        const scholarshipsHeaders = {
+          'Content-Type': 'application/json'
+        };
+        
+        if (token) {
+          scholarshipsHeaders['Authorization'] = `Bearer ${token}`;
+        }
+        
+        const scholarshipsResponse = await fetch('/api/scholarships', { headers: scholarshipsHeaders });
+        
+        if (scholarshipsResponse.ok) {
+          const scholarshipsApiData = await scholarshipsResponse.json();
+          console.log('✅ Scholarships API response:', scholarshipsApiData);
+          
+          if (scholarshipsApiData.success && scholarshipsApiData.data && scholarshipsApiData.data.scholarships) {
+            scholarshipsData = scholarshipsApiData.data.scholarships;
+            console.log('✅ Found scholarships:', scholarshipsData.length);
+          }
+        }
+      } catch (error) {
+        console.error('❌ Scholarships fetch failed:', error);
+      }
+      
+      // Fetch peer learning sessions
+      let peerLearningData = [];
+      try {
+        console.log('👥 Fetching peer learning sessions...');
+        const peerHeaders = {
+          'Content-Type': 'application/json'
+        };
+        
+        if (token) {
+          peerHeaders['Authorization'] = `Bearer ${token}`;
+        }
+        
+        const peerLearningResponse = await fetch('/api/peer-learning/groups', { headers: peerHeaders });
+        
+        if (peerLearningResponse.ok) {
+          const peerLearningApiData = await peerLearningResponse.json();
+          console.log('✅ Peer Learning API response:', peerLearningApiData);
+          
+          if (peerLearningApiData.success && peerLearningApiData.data && peerLearningApiData.data.groups) {
+            peerLearningData = peerLearningApiData.data.groups;
+            console.log('✅ Found peer learning sessions:', peerLearningData.length);
+          }
+        }
+      } catch (error) {
+        console.error('❌ Peer learning fetch failed:', error);
+      }
+      
+      // Fetch certificates
+      try {
+        console.log('📜 Fetching certificates...');
+        const certificatesHeaders = {
+          'Content-Type': 'application/json'
+        };
+        
+        if (token) {
+          certificatesHeaders['Authorization'] = `Bearer ${token}`;
+        }
+        
+        const certificatesResponse = await fetch('/api/certificates/user', { headers: certificatesHeaders });
+        
+        if (certificatesResponse.ok) {
+          const certificatesApiData = await certificatesResponse.json();
+          console.log('✅ Certificates API response:', certificatesApiData);
+          console.log('🔍 Raw API data structure:', JSON.stringify(certificatesApiData, null, 2));
+          
+          if (certificatesApiData.success && certificatesApiData.data && certificatesApiData.data.certificates) {
+            certificatesData = certificatesApiData.data.certificates;
+            console.log('✅ Found certificates:', certificatesData.length);
+            console.log('📜 Certificate details:', certificatesData);
+          } else {
+            console.warn('⚠️ Invalid certificates API response structure');
+            console.log('📊 Response structure check:');
+            console.log('  - success:', certificatesApiData.success);
+            console.log('  - data exists:', !!certificatesApiData.data);
+            console.log('  - certificates exists:', !!(certificatesApiData.data && certificatesApiData.data.certificates));
+          }
+        } else {
+          console.error('❌ Certificates API failed with status:', certificatesResponse.status);
+          const errorText = await certificatesResponse.text();
+          console.error('❌ Error response:', errorText);
+        }
+      } catch (error) {
+        console.error('❌ Certificates fetch failed:', error);
       }
 
-      // Fetch recent active scholarships (limit to 3 for dashboard)
-      try {
-        const scholarshipsResponse = await fetch('/api/scholarships?limit=3', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        if (scholarshipsResponse.ok) {
-          const scholarshipsData = await scholarshipsResponse.json();
-          setScholarships(scholarshipsData.data.scholarships || []);
-          console.log('✅ Scholarships fetched for dashboard:', scholarshipsData.data.scholarships?.length || 0, 'scholarships');
-        } else {
-          console.error('❌ Scholarships fetch failed:', scholarshipsResponse.status);
-        }
-      } catch (err) {
-        console.error('Scholarships fetch error:', err);
-        // Don't throw error - just continue without scholarships
-      }
+      // Update state immediately
+      setCourses(coursesData);
+      setJobs(jobsData);
+      setScholarships(scholarshipsData);
+      
+      // Update stats with real counts
+      const publishedCoursesCount = coursesData.filter(course => 
+        course.isPublished === true || course.isPublished === 'true'
+      ).length;
+      
+      console.log('📊 Final counts:');
+      console.log('  - Published courses:', publishedCoursesCount);
+      console.log('  - Jobs:', jobsData.length);
+      console.log('  - Scholarships:', scholarshipsData.length);
+      console.log('  - Certificates:', certificatesData.length);
+      console.log('  - Peer Learning Sessions:', peerLearningData.length);
+      console.log('  - Dashboard will show all these counts now!');
+      console.log('🎯 CERTIFICATE COUNT THAT WILL BE DISPLAYED:', certificatesData.length);
+      
+      setStats(prev => ({
+        ...prev,
+        availableCourses: publishedCoursesCount,
+        jobApplications: jobsData.length,
+        certificates: certificatesData.length,
+        peerLearningSessions: peerLearningData.length,
+        scholarships: scholarshipsData.length,
+        completedCourses: 0,
+        enrolledCourses: 0,
+        assessmentsCompleted: 0,
+        learningPathProgress: 0
+      }));
+
     } catch (err) {
-      console.error('Error fetching dashboard data:', err);
-      setError(err.message || 'Failed to load dashboard data');
+      console.error('❌ Dashboard fetch error:', err);
     } finally {
       setLoading(false);
+      setIsDataFetching(false);
     }
   };
 
   useEffect(() => {
-    if (user) {
+    console.log('🔄 Dashboard useEffect triggered');
+    
+    // Add a small delay to prevent too many requests
+    const timer = setTimeout(() => {
+      console.log('✅ Fetching dashboard data after delay...');
       fetchDashboardData();
-    } else {
-      console.log('No user context available, dashboard will not load data');
-      setLoading(false);
-    }
-  }, [user]);
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   const welcomeMessage = isFirstLogin 
     ? t('dashboard.welcome', { userName })
@@ -496,6 +531,7 @@ const RefugeeDashboard = () => {
     return (
       <div style={{ textAlign: 'center', padding: '2rem' }}>
         <div>Loading dashboard...</div>
+        {isDataFetching && <div style={{ marginTop: '1rem', color: '#666' }}>Fetching data from server...</div>}
       </div>
     );
   }
@@ -503,21 +539,13 @@ const RefugeeDashboard = () => {
   if (error) {
     return (
       <div style={{ textAlign: 'center', padding: '2rem', color: 'red' }}>
-        <div>{error}</div>
-        <button onClick={() => {
-          setError('');
-          setLoading(true);
-          if (user) {
-            fetchDashboardData();
-          }
-        }}>Retry</button>
-        <button onClick={() => window.location.reload()} style={{ marginLeft: '1rem' }}>Reload Page</button>
+        <div>Error: {error}</div>
       </div>
     );
   }
-
+  
   return (
-    <div style={{ background: '#fff', minHeight: '100vh', padding: 0, margin: 0 }}>
+    <div style={{ background: '#fff', minHeight: '100vh', padding: '1.5rem 1rem', margin: 0 }}>
       {/* Animated Welcome Message */}
       <div style={{ marginBottom: '1.5rem', textAlign: 'left' }}>
         <Title style={{ color: '#007BFF', fontSize: '2rem', marginBottom: '0.5rem' }}>{welcomeText}<span style={{ opacity: isTyping ? 1 : 0 }}>|</span></Title>
@@ -529,18 +557,10 @@ const RefugeeDashboard = () => {
         ))}
       </ul>
       <DashboardGrid>
-        <ProgressCard onClick={() => navigate('/learning-path')}>
-          <SubTitle>Learning Path Progress</SubTitle>
-          <Stat> {stats.learningPathProgress}% </Stat>
-          <ProgressBar>
-            <Progress $value={stats.learningPathProgress} />
-          </ProgressBar>
-          <StatLabel>Continue your learning journey</StatLabel>
-        </ProgressCard>
         <ProgressCard onClick={() => navigate('/courses')}>
-          <SubTitle>Course Progress</SubTitle>
-          <Stat>{stats.completedCourses}/{stats.totalCourses}</Stat>
-          <StatLabel>Courses Completed</StatLabel>
+          <SubTitle>Available Courses</SubTitle>
+          <Stat>{stats.availableCourses}</Stat>
+          <StatLabel>Courses Available</StatLabel>
           <QuickAction>Browse Courses</QuickAction>
         </ProgressCard>
         <ProgressCard onClick={() => navigate('/certificates')}>
@@ -558,8 +578,14 @@ const RefugeeDashboard = () => {
         <ProgressCard onClick={() => navigate('/jobs')}>
           <SubTitle>Job Applications</SubTitle>
           <Stat>{stats.jobApplications}</Stat>
-          <StatLabel>Applications Submitted</StatLabel>
+          <StatLabel>Applications Released</StatLabel>
           <QuickAction>Browse Jobs</QuickAction>
+        </ProgressCard>
+        <ProgressCard onClick={() => navigate('/jobs')}>
+          <SubTitle>Scholarships</SubTitle>
+          <Stat>{stats.scholarships}</Stat>
+          <StatLabel>Scholarships Available</StatLabel>
+          <QuickAction>Browse Scholarships</QuickAction>
         </ProgressCard>
       </DashboardGrid>
       <AvailableCourses courses={courses} onCourseClick={handleCourseClick} t={t} />
@@ -574,10 +600,37 @@ const RefugeeDashboard = () => {
                 <div>
                   <div style={{ fontWeight: 'bold', color: '#333', fontSize: '1rem' }}>{job.title}</div>
                   <div style={{ fontSize: '0.9rem', color: '#6c757d', marginTop: '0.25rem' }}>
-                    {job.company} • {job.location} • {job.job_type}
-                    {job.application_deadline && (
-                      <span> • Deadline: {new Date(job.application_deadline).toLocaleDateString()}</span>
-                    )}
+                    {job.company} • {job.location} • {job.type}
+                  </div>
+                </div>
+                <div style={{ 
+                  fontSize: '0.8rem', 
+                  color: '#007BFF',
+                  fontWeight: '600',
+                  padding: '0.25rem 0.75rem',
+                  borderRadius: '12px',
+                  background: '#e3f2fd',
+                  border: '1px solid #bbdefb'
+                }}>
+                  Apply Now
+                </div>
+              </CourseItemStyled>
+            ))}
+          </CourseList>
+        </CourseCard>
+      )}
+
+      {/* Recent Scholarships */}
+      {scholarships.length > 0 && (
+        <CourseCard>
+          <CourseCardTitle>Recent Scholarship Opportunities</CourseCardTitle>
+          <CourseList>
+            {scholarships.map(scholarship => (
+              <CourseItemStyled key={scholarship._id} onClick={() => navigate('/scholarships')}>
+                <div>
+                  <div style={{ fontWeight: 'bold', color: '#333', fontSize: '1rem' }}>{scholarship.title}</div>
+                  <div style={{ fontSize: '0.9rem', color: '#6c757d', marginTop: '0.25rem' }}>
+                    {scholarship.provider} • Deadline: {new Date(scholarship.deadline).toLocaleDateString()}
                   </div>
                 </div>
                 <div style={{ 
@@ -589,50 +642,11 @@ const RefugeeDashboard = () => {
                   background: '#d4edda',
                   border: '1px solid #c3e6cb'
                 }}>
-                  Apply Now
+                  Apply
                 </div>
               </CourseItemStyled>
             ))}
           </CourseList>
-          <QuickAction onClick={() => navigate('/jobs')}>
-            View All Jobs
-          </QuickAction>
-        </CourseCard>
-      )}
-
-      {/* Recent Scholarship Opportunities */}
-      {scholarships.length > 0 && (
-        <CourseCard>
-          <CourseCardTitle>Recent Scholarship Opportunities</CourseCardTitle>
-          <CourseList>
-            {scholarships.map(scholarship => (
-              <CourseItemStyled key={scholarship._id} onClick={() => navigate('/jobs')}>
-                <div>
-                  <div style={{ fontWeight: 'bold', color: '#333', fontSize: '1rem' }}>{scholarship.title}</div>
-                  <div style={{ fontSize: '0.9rem', color: '#6c757d', marginTop: '0.25rem' }}>
-                    {scholarship.provider} • {scholarship.location}
-                    {scholarship.deadline && (
-                      <span> • Deadline: {new Date(scholarship.deadline).toLocaleDateString()}</span>
-                    )}
-                  </div>
-                </div>
-                <div style={{ 
-                  fontSize: '0.8rem', 
-                  color: '#6f42c1',
-                  fontWeight: '600',
-                  padding: '0.25rem 0.75rem',
-                  borderRadius: '12px',
-                  background: '#e8d5ff',
-                  border: '1px solid #d1b3ff'
-                }}>
-                  Apply Now
-                </div>
-              </CourseItemStyled>
-            ))}
-          </CourseList>
-          <QuickAction onClick={() => navigate('/jobs')}>
-            View All Scholarships
-          </QuickAction>
         </CourseCard>
       )}
     </div>

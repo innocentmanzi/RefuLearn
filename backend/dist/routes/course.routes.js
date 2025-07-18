@@ -10,6 +10,15 @@ const upload_1 = __importDefault(require("../middleware/upload"));
 const validation_1 = require("../middleware/validation");
 const errorHandler_1 = require("../middleware/errorHandler");
 const couchdb_1 = require("../config/couchdb");
+const ensureAuth = (req) => {
+    if (!req.user?._id) {
+        throw new Error('User authentication required');
+    }
+    return {
+        userId: req.user._id.toString(),
+        user: req.user
+    };
+};
 let couchConnection = null;
 const initializeDatabase = async () => {
     try {
@@ -114,14 +123,34 @@ router.use((req, res, next) => {
     next();
 });
 const ensureDb = async () => {
-    if (!couchConnection) {
-        console.log('⚠️ Database not available, reinitializing...');
-        const connectionSuccess = await initializeDatabase();
-        if (!connectionSuccess || !couchConnection) {
-            throw new Error('Database connection failed');
+    try {
+        if (!couchConnection) {
+            console.log('⚠️ Database not available, initializing...');
+            couchConnection = await (0, couchdb_1.connectCouchDB)();
+            if (!couchConnection) {
+                throw new Error('Failed to establish database connection');
+            }
+            console.log('✅ Database connection established');
+        }
+        const database = couchConnection.getDatabase();
+        if (!database) {
+            console.log('❌ Database object is null, reinitializing...');
+            couchConnection = await (0, couchdb_1.connectCouchDB)();
+            return couchConnection.getDatabase();
+        }
+        return database;
+    }
+    catch (error) {
+        console.error('❌ Database connection error:', error);
+        try {
+            couchConnection = await (0, couchdb_1.connectCouchDB)();
+            return couchConnection.getDatabase();
+        }
+        catch (retryError) {
+            console.error('❌ Database retry failed:', retryError);
+            throw new Error('Database connection failed after retry');
         }
     }
-    return couchConnection.getDatabase();
 };
 router.get('/', auth_1.authenticateToken, (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
@@ -138,7 +167,13 @@ router.get('/', auth_1.authenticateToken, (0, errorHandler_1.asyncHandler)(async
         courses.forEach((course, index) => {
             console.log(`  ${index + 1}. "${course.title}" - Category: "${course.category}" - Published: ${course.isPublished} - Active: ${course.is_active}`);
         });
-        courses = courses.filter((course) => course.isPublished === true || course.isPublished === 'true');
+        console.log('🔍 Before filtering - total courses:', courses.length);
+        console.log('🔍 Sample course isPublished values:', courses.slice(0, 3).map(c => ({ title: c.title, isPublished: c.isPublished, type: typeof c.isPublished })));
+        courses = courses.filter((course) => {
+            const isPublished = course.isPublished === true || course.isPublished === 'true';
+            console.log(`📋 Course "${course.title}": isPublished = ${course.isPublished} (${typeof course.isPublished}) -> included: ${isPublished}`);
+            return isPublished;
+        });
         console.log('📚 Published courses found:', courses.length);
         if (category) {
             const categoryFilter = category.toLowerCase();
@@ -183,7 +218,7 @@ router.get('/', auth_1.authenticateToken, (0, errorHandler_1.asyncHandler)(async
         });
     }
     catch (error) {
-        console.error('Error in courses endpoint:', error);
+        console.error('❌ Error in courses endpoint:', error);
         res.status(500).json({
             success: false,
             message: 'Failed to fetch courses from database',
@@ -340,7 +375,13 @@ router.get('/recommended', (0, errorHandler_1.asyncHandler)(async (req, res) => 
 }));
 router.post('/:courseId/enroll', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor', 'admin', 'refugee'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { courseId } = req.params;
-    const userId = req.user._id.toString();
+    const userId = req.user?._id?.toString();
+    if (!userId) {
+        return res.status(401).json({
+            success: false,
+            message: 'User authentication required'
+        });
+    }
     const database = await ensureDb();
     let course = await database.get(courseId);
     if (!course) {
@@ -372,7 +413,13 @@ router.post('/:courseId/enroll', auth_1.authenticateToken, (0, auth_1.authorizeR
 }));
 router.delete('/:courseId/enroll', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor', 'admin', 'user'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { courseId } = req.params;
-    const userId = req.user._id.toString();
+    const userId = req.user?._id?.toString();
+    if (!userId) {
+        return res.status(401).json({
+            success: false,
+            message: 'User authentication required'
+        });
+    }
     const database = await ensureDb();
     let course = await database.get(courseId);
     if (!course) {
@@ -406,7 +453,13 @@ router.put('/:courseId/progress', auth_1.authenticateToken, (0, auth_1.authorize
 ], validation_1.handleValidationErrors, (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { courseId } = req.params;
     const { moduleId, completed, score, contentType, itemIndex, completionKey } = req.body;
-    const userId = req.user._id.toString();
+    const userId = req.user?._id?.toString();
+    if (!userId) {
+        return res.status(401).json({
+            success: false,
+            message: 'User authentication required'
+        });
+    }
     console.log('📝 Progress update request:', {
         courseId,
         moduleId,
@@ -583,7 +636,7 @@ router.put('/:courseId/progress', auth_1.authenticateToken, (0, auth_1.authorize
 }));
 router.get('/:courseId/progress', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor', 'admin', 'user', 'refugee'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { courseId } = req.params;
-    const userId = req.user._id.toString();
+    const { userId } = ensureAuth(req);
     console.log('📊 Fetching progress for:', { courseId, userId });
     const database = await ensureDb();
     let course = await database.get(courseId);
@@ -669,7 +722,7 @@ router.get('/:courseId/progress', auth_1.authenticateToken, (0, auth_1.authorize
     });
 }));
 router.get('/enrolled/courses/:courseId?', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('admin', 'instructor', 'employer', 'refugee'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
-    const userId = req.user._id.toString();
+    const { userId } = ensureAuth(req);
     const database = await ensureDb();
     const user = await database.get(userId);
     if (!user) {
@@ -707,7 +760,7 @@ router.get('/enrolled/courses/:courseId?', auth_1.authenticateToken, (0, auth_1.
 }));
 router.get('/learning-path', auth_1.authenticateToken, (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
-        const userId = req.user._id.toString();
+        const { userId } = ensureAuth(req);
         const database = await ensureDb();
         console.log('🔍 Learning path endpoint called for user:', userId);
         const result = await database.list({ include_docs: true });
@@ -737,7 +790,7 @@ router.get('/learning-path', auth_1.authenticateToken, (0, errorHandler_1.asyncH
 }));
 router.get('/recommendations', auth_1.authenticateToken, (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
-        const userId = req.user._id.toString();
+        const { userId } = ensureAuth(req);
         const database = await ensureDb();
         console.log('🔍 Recommendations endpoint called for user:', userId);
         const result = await database.list({ include_docs: true });
@@ -831,8 +884,8 @@ router.post('/', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructo
             category: category,
             level: level || 'Beginner',
             difficult_level: level || 'Beginner',
-            instructor: req.user._id.toString(),
-            instructor_id: req.user._id.toString(),
+            instructor: ensureAuth(req).userId,
+            instructor_id: ensureAuth(req).userId,
             course_profile_picture: normalizedPath,
             isPublished: false,
             is_active: true,
@@ -926,7 +979,8 @@ router.put('/:courseId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('i
     if (!course) {
         return res.status(404).json({ success: false, message: 'Course not found' });
     }
-    if (req.user.role !== 'admin' && course.instructor !== req.user._id.toString()) {
+    const { userId, user } = ensureAuth(req);
+    if (user.role !== 'admin' && course.instructor !== userId) {
         return res.status(403).json({ success: false, message: 'Not authorized to update this course' });
     }
     allowedFields.forEach(field => {
@@ -1022,8 +1076,9 @@ router.delete('/:courseId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)
             return res.status(404).json({ success: false, message: 'Course not found' });
         }
         console.log('✅ Course found:', course.title);
-        if (req.user.role !== 'admin' && course.instructor !== req.user._id.toString()) {
-            console.log('❌ Authorization failed - user:', req.user._id, 'instructor:', course.instructor);
+        const { userId, user } = ensureAuth(req);
+        if (user.role !== 'admin' && course.instructor !== userId) {
+            console.log('❌ Authorization failed - user:', userId, 'instructor:', course.instructor);
             return res.status(403).json({ success: false, message: 'Not authorized to delete this course' });
         }
         try {
@@ -1110,7 +1165,8 @@ router.get('/:courseId/analytics', auth_1.authenticateToken, (0, auth_1.authoriz
             message: 'Course not found'
         });
     }
-    if (course.instructor !== req.user._id.toString()) {
+    const { userId } = ensureAuth(req);
+    if (course.instructor !== userId) {
         return res.status(403).json({
             success: false,
             message: 'Not authorized to view analytics for this course'
@@ -1292,9 +1348,10 @@ router.delete('/discussions/:discussionId', auth_1.authenticateToken, (0, auth_1
     if (!discussion) {
         return res.status(404).json({ success: false, message: 'Discussion not found' });
     }
-    if (discussion.author !== req.user._id &&
-        req.user.role !== 'admin' &&
-        req.user.role !== 'instructor') {
+    const { userId, user } = ensureAuth(req);
+    if (discussion.author !== userId &&
+        user.role !== 'admin' &&
+        user.role !== 'instructor') {
         return res.status(403).json({ success: false, message: 'Not authorized' });
     }
     await database.destroy(req.params.discussionId, discussion._rev);
@@ -1308,17 +1365,84 @@ router.post('/discussions/:discussionId/replies', auth_1.authenticateToken, (0, 
     if (!discussion) {
         return res.status(404).json({ success: false, message: 'Discussion not found' });
     }
+    const { userId } = ensureAuth(req);
     if (!discussion.replies)
         discussion.replies = [];
     const reply = {
-        user: req.user._id,
+        _id: `reply_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        user: userId,
         content: req.body.content,
+        likes: 0,
+        likedBy: [],
         createdAt: new Date()
     };
     discussion.replies.push(reply);
     discussion.updatedAt = new Date();
     const updatedDiscussion = await database.insert(discussion);
     res.status(201).json({ success: true, message: 'Reply added', data: { discussion: updatedDiscussion } });
+}));
+router.post('/courses/discussions/:discussionId/replies/:replyId/like', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor', 'admin', 'user', 'refugee'), [
+    (0, express_validator_1.body)('action').optional().isIn(['like', 'unlike']).withMessage('Action must be like or unlike')
+], validation_1.handleValidationErrors, (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { discussionId, replyId } = req.params;
+    const { action } = req.body;
+    try {
+        const { userId } = ensureAuth(req);
+        const database = await ensureDb();
+        const discussion = await database.get(discussionId);
+        if (!discussion || discussion.type !== 'discussion') {
+            return res.status(404).json({
+                success: false,
+                message: 'Discussion not found'
+            });
+        }
+        if (!discussion.replies) {
+            discussion.replies = [];
+        }
+        const replyIndex = discussion.replies.findIndex((reply) => reply._id === replyId);
+        if (replyIndex === -1) {
+            return res.status(404).json({
+                success: false,
+                message: 'Reply not found'
+            });
+        }
+        const reply = discussion.replies[replyIndex];
+        if (!reply.likes)
+            reply.likes = 0;
+        if (!reply.likedBy)
+            reply.likedBy = [];
+        const hasLiked = reply.likedBy.includes(userId);
+        const shouldLike = action === 'like' ? true : action === 'unlike' ? false : !hasLiked;
+        if (shouldLike && !hasLiked) {
+            reply.likes += 1;
+            reply.likedBy.push(userId);
+        }
+        else if (!shouldLike && hasLiked) {
+            reply.likes = Math.max(0, reply.likes - 1);
+            reply.likedBy = reply.likedBy.filter((id) => id !== userId);
+        }
+        discussion.replies[replyIndex] = reply;
+        discussion.updatedAt = new Date();
+        const updatedDiscussion = await database.insert(discussion);
+        console.log('✅ REPLY LIKE UPDATED - Reply ID:', replyId);
+        console.log('✅ REPLY LIKE UPDATED - Likes:', reply.likes, 'Action:', shouldLike ? 'liked' : 'unliked');
+        res.json({
+            success: true,
+            message: shouldLike ? 'Reply liked successfully' : 'Reply unliked successfully',
+            data: {
+                reply,
+                likes: reply.likes,
+                hasLiked: reply.likedBy.includes(userId)
+            }
+        });
+    }
+    catch (err) {
+        console.error('Error updating reply like:', err instanceof Error ? err.message : 'Unknown error');
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update like'
+        });
+    }
 }));
 router.patch('/discussions/:discussionId/replies/:replyId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor', 'admin', 'user', 'refugee'), [
     (0, express_validator_1.body)('content').trim().notEmpty().withMessage('Content is required')
@@ -1328,13 +1452,14 @@ router.patch('/discussions/:discussionId/replies/:replyId', auth_1.authenticateT
     if (!discussion) {
         return res.status(404).json({ success: false, message: 'Discussion not found' });
     }
+    const { userId } = ensureAuth(req);
     if (!discussion.replies)
         discussion.replies = [];
     const reply = discussion.replies.find((r) => r._id === req.params.replyId);
     if (!reply) {
         return res.status(404).json({ success: false, message: 'Reply not found' });
     }
-    if (reply.user !== req.user._id) {
+    if (reply.user !== userId) {
         return res.status(403).json({ success: false, message: 'Not authorized' });
     }
     reply.content = req.body.content;
@@ -1349,13 +1474,14 @@ router.delete('/discussions/:discussionId/replies/:replyId', auth_1.authenticate
     if (!discussion) {
         return res.status(404).json({ success: false, message: 'Discussion not found' });
     }
+    const { userId } = ensureAuth(req);
     if (!discussion.replies)
         discussion.replies = [];
     const reply = discussion.replies.find((r) => r._id === req.params.replyId);
     if (!reply) {
         return res.status(404).json({ success: false, message: 'Reply not found' });
     }
-    if (reply.user !== req.user._id) {
+    if (reply.user !== userId) {
         return res.status(403).json({ success: false, message: 'Not authorized' });
     }
     discussion.replies = discussion.replies.filter((r) => r._id !== req.params.replyId);
@@ -1391,7 +1517,8 @@ router.post('/enrollments', auth_1.authenticateToken, (0, auth_1.authorizeRoles)
     (0, express_validator_1.body)('user').optional()
 ], validation_1.handleValidationErrors, (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const database = await ensureDb();
-    const userId = req.body.user || req.user._id.toString();
+    const { userId: authenticatedUserId } = ensureAuth(req);
+    const userId = req.body.user || authenticatedUserId;
     const { course } = req.body;
     let existing = await database.get(course);
     if (existing.enrolledStudents && existing.enrolledStudents.includes(userId)) {
@@ -1413,7 +1540,8 @@ router.get('/enrollments/:enrollmentId', auth_1.authenticateToken, (0, auth_1.au
     if (!enrollment) {
         return res.status(404).json({ success: false, message: 'Enrollment not found' });
     }
-    if (req.user.role !== 'admin' && req.user.role !== 'instructor' && enrollment.user !== req.user._id) {
+    const { userId, user } = ensureAuth(req);
+    if (user.role !== 'admin' && user.role !== 'instructor' && enrollment.user !== userId) {
         return res.status(403).json({ success: false, message: 'Not authorized' });
     }
     res.json({ success: true, data: { enrollment } });
@@ -1427,7 +1555,8 @@ router.patch('/enrollments/:enrollmentId', auth_1.authenticateToken, (0, auth_1.
     if (!enrollment) {
         return res.status(404).json({ success: false, message: 'Enrollment not found' });
     }
-    if (req.user.role !== 'admin' && req.user.role !== 'instructor' && enrollment.user !== req.user._id) {
+    const { userId, user } = ensureAuth(req);
+    if (user.role !== 'admin' && user.role !== 'instructor' && enrollment.user !== userId) {
         return res.status(403).json({ success: false, message: 'Not authorized' });
     }
     const updates = req.body;
@@ -1440,7 +1569,8 @@ router.delete('/enrollments/:enrollmentId', auth_1.authenticateToken, (0, auth_1
     if (!enrollment) {
         return res.status(404).json({ success: false, message: 'Enrollment not found' });
     }
-    if (req.user.role !== 'admin' && req.user.role !== 'instructor' && enrollment.user !== req.user._id) {
+    const { userId, user } = ensureAuth(req);
+    if (user.role !== 'admin' && user.role !== 'instructor' && enrollment.user !== userId) {
         return res.status(403).json({ success: false, message: 'Not authorized' });
     }
     if (!enrollment._rev) {
@@ -1458,6 +1588,7 @@ router.post('/assessments', auth_1.authenticateToken, (0, auth_1.authorizeRoles)
 ], validation_1.handleValidationErrors, (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const database = await ensureDb();
     const { title, description, moduleId, courseId, timeLimit, questions } = req.body;
+    const { userId } = ensureAuth(req);
     const totalPoints = questions.reduce((sum, q) => sum + (q.points || 0), 0);
     const assessmentId = `assessment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const assessment = {
@@ -1467,7 +1598,7 @@ router.post('/assessments', auth_1.authenticateToken, (0, auth_1.authorizeRoles)
         description: description || '',
         moduleId,
         courseId,
-        instructor: req.user._id.toString(),
+        instructor: userId,
         timeLimit,
         totalPoints,
         questions: questions.map((q, index) => ({
@@ -1504,9 +1635,10 @@ router.put('/assessments/:assessmentId', auth_1.authenticateToken, (0, auth_1.au
     const database = await ensureDb();
     const { assessmentId } = req.params;
     const { title, description, timeLimit, questions } = req.body;
+    const { userId, user } = ensureAuth(req);
     try {
         const existingAssessment = await database.get(assessmentId);
-        if (existingAssessment.instructor !== req.user._id.toString() && req.user.role !== 'admin') {
+        if (existingAssessment.instructor !== userId && user.role !== 'admin') {
             return res.status(403).json({ success: false, message: 'Not authorized to update this assessment' });
         }
         const totalPoints = questions.reduce((sum, q) => sum + (q.points || 0), 0);
@@ -1537,9 +1669,10 @@ router.put('/assessments/:assessmentId', auth_1.authenticateToken, (0, auth_1.au
 router.delete('/assessments/:assessmentId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor', 'admin'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const database = await ensureDb();
     const { assessmentId } = req.params;
+    const { userId, user } = ensureAuth(req);
     try {
         const existingAssessment = await database.get(assessmentId);
-        if (existingAssessment.instructor !== req.user._id.toString() && req.user.role !== 'admin') {
+        if (existingAssessment.instructor !== userId && user.role !== 'admin') {
             return res.status(403).json({ success: false, message: 'Not authorized to delete this assessment' });
         }
         await database.destroy(existingAssessment._id, existingAssessment._rev);
@@ -1557,7 +1690,7 @@ router.post('/assessments/:assessmentId/submit', auth_1.authenticateToken, (0, a
     const database = await ensureDb();
     const { assessmentId } = req.params;
     const { answers, timeSpent } = req.body;
-    const userId = req.user._id.toString();
+    const { userId } = ensureAuth(req);
     try {
         const assessment = await database.get(assessmentId);
         let score = 0;
@@ -1620,17 +1753,14 @@ router.post('/assessments/:assessmentId/submit', auth_1.authenticateToken, (0, a
 }));
 router.get('/assessments/:assessmentId/attempts', auth_1.authenticateToken, (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { assessmentId } = req.params;
-    const userId = req.user._id.toString();
+    const { userId } = ensureAuth(req);
     try {
         const database = await ensureDb();
-        const result = await database.find({
-            selector: {
-                type: 'user_assessment_attempt',
-                userId,
-                assessmentId
-            }
-        });
-        res.json({ success: true, data: { attempts: result.docs } });
+        const result = await database.list({ include_docs: true });
+        const attempts = result.rows
+            .map((row) => row.doc)
+            .filter((doc) => doc && doc.type === 'user_assessment_attempt' && doc.userId === userId && doc.assessmentId === assessmentId);
+        res.json({ success: true, data: { attempts } });
     }
     catch (err) {
         console.error('Error fetching attempts:', err instanceof Error ? err.message : 'Unknown error');
@@ -1641,19 +1771,247 @@ router.get('/:courseId/assessments', auth_1.authenticateToken, (0, auth_1.author
     const { courseId } = req.params;
     try {
         const database = await ensureDb();
-        const result = await database.find({
-            selector: {
-                type: 'assessment',
-                courseId,
-                isActive: true
-            },
-            sort: [{ createdAt: 'asc' }]
-        });
-        res.json({ success: true, data: { assessments: result.docs } });
+        const result = await database.list({ include_docs: true });
+        const assessments = result.rows
+            .map((row) => row.doc)
+            .filter((doc) => doc && doc.type === 'assessment' && doc.courseId === courseId && doc.isActive === true)
+            .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+        res.json({ success: true, data: { assessments } });
     }
     catch (err) {
         console.error('Error fetching course assessments:', err instanceof Error ? err.message : 'Unknown error');
         res.status(500).json({ success: false, message: 'Failed to fetch assessments' });
+    }
+}));
+router.get('/:courseId/assessments/:assessmentId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor', 'admin', 'user', 'refugee'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { courseId, assessmentId } = req.params;
+    try {
+        const database = await ensureDb();
+        const assessment = await database.get(assessmentId);
+        console.log('🔍 ASSESSMENT DEBUG - Raw assessment from DB:', JSON.stringify(assessment, null, 2));
+        if (!assessment || assessment.type !== 'assessment') {
+            return res.status(404).json({
+                success: false,
+                message: 'Assessment not found'
+            });
+        }
+        if (assessment.courseId !== courseId) {
+            return res.status(404).json({
+                success: false,
+                message: 'Assessment not found in this course'
+            });
+        }
+        console.log('🔍 ASSESSMENT DEBUG - Raw assessment data:', JSON.stringify(assessment, null, 2));
+        console.log('🔍 ASSESSMENT DEBUG - Questions count:', assessment.questions?.length || 0);
+        console.log('🔍 ASSESSMENT DEBUG - Duration:', assessment.duration || assessment.timeLimit || 'No duration set');
+        res.json({
+            success: true,
+            data: { assessment }
+        });
+    }
+    catch (err) {
+        console.error('Error fetching course assessment:', err instanceof Error ? err.message : 'Unknown error');
+        if (err.status === 404) {
+            res.status(404).json({ success: false, message: 'Assessment not found' });
+        }
+        else {
+            res.status(500).json({ success: false, message: 'Failed to fetch assessment' });
+        }
+    }
+}));
+router.get('/:courseId/discussions/:discussionId', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor', 'admin', 'user', 'refugee'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { courseId, discussionId } = req.params;
+    try {
+        const database = await ensureDb();
+        const discussion = await database.get(discussionId);
+        console.log('🔍 DISCUSSION DEBUG - Raw discussion from DB:', JSON.stringify(discussion, null, 2));
+        if (!discussion || discussion.type !== 'discussion') {
+            return res.status(404).json({
+                success: false,
+                message: 'Discussion not found'
+            });
+        }
+        if (discussion.courseId !== courseId && discussion.course !== courseId) {
+            return res.status(404).json({
+                success: false,
+                message: 'Discussion not found in this course'
+            });
+        }
+        console.log('🔍 DISCUSSION DEBUG - Discussion title:', discussion.title);
+        console.log('🔍 DISCUSSION DEBUG - Replies count:', discussion.replies?.length || 0);
+        res.json({
+            success: true,
+            data: { discussion }
+        });
+    }
+    catch (err) {
+        console.error('Error fetching course discussion:', err instanceof Error ? err.message : 'Unknown error');
+        if (err.status === 404) {
+            res.status(404).json({ success: false, message: 'Discussion not found' });
+        }
+        else {
+            res.status(500).json({ success: false, message: 'Failed to fetch discussion' });
+        }
+    }
+}));
+router.get('/:courseId/discussions/:discussionId/replies', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor', 'admin', 'user', 'refugee'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { courseId, discussionId } = req.params;
+    try {
+        const database = await ensureDb();
+        const discussion = await database.get(discussionId);
+        if (!discussion || discussion.type !== 'discussion') {
+            return res.status(404).json({
+                success: false,
+                message: 'Discussion not found'
+            });
+        }
+        if (discussion.courseId !== courseId && discussion.course !== courseId) {
+            return res.status(404).json({
+                success: false,
+                message: 'Discussion not found in this course'
+            });
+        }
+        const replies = discussion.replies || [];
+        console.log('🔍 DISCUSSION REPLIES DEBUG - Replies count:', replies.length);
+        res.json({
+            success: true,
+            data: { replies }
+        });
+    }
+    catch (err) {
+        console.error('Error fetching discussion replies:', err instanceof Error ? err.message : 'Unknown error');
+        if (err.status === 404) {
+            res.status(404).json({ success: false, message: 'Discussion not found' });
+        }
+        else {
+            res.status(500).json({ success: false, message: 'Failed to fetch discussion replies' });
+        }
+    }
+}));
+router.post('/:courseId/discussions/:discussionId/replies', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor', 'admin', 'user', 'refugee'), [
+    (0, express_validator_1.body)('content').trim().notEmpty().withMessage('Reply content is required'),
+    (0, express_validator_1.body)('author').optional().trim()
+], validation_1.handleValidationErrors, (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { courseId, discussionId } = req.params;
+    const { content, author } = req.body;
+    try {
+        const { userId, user } = ensureAuth(req);
+        const database = await ensureDb();
+        const discussion = await database.get(discussionId);
+        if (!discussion || discussion.type !== 'discussion') {
+            return res.status(404).json({
+                success: false,
+                message: 'Discussion not found'
+            });
+        }
+        if (discussion.courseId !== courseId && discussion.course !== courseId) {
+            return res.status(404).json({
+                success: false,
+                message: 'Discussion not found in this course'
+            });
+        }
+        const newReply = {
+            _id: `reply_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            user: userId,
+            author: author || user.name || user.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Anonymous',
+            content: content.trim(),
+            likes: 0,
+            likedBy: [],
+            createdAt: new Date(),
+            updatedAt: new Date()
+        };
+        if (!discussion.replies) {
+            discussion.replies = [];
+        }
+        discussion.replies.push(newReply);
+        discussion.updatedAt = new Date();
+        const updatedDiscussion = await database.insert(discussion);
+        console.log('✅ DISCUSSION REPLY ADDED - Reply ID:', newReply._id);
+        console.log('✅ DISCUSSION REPLY ADDED - Total replies now:', discussion.replies.length);
+        res.status(201).json({
+            success: true,
+            message: 'Reply added successfully',
+            data: {
+                reply: newReply,
+                discussion: updatedDiscussion
+            }
+        });
+    }
+    catch (err) {
+        console.error('Error adding discussion reply:', err instanceof Error ? err.message : 'Unknown error');
+        res.status(500).json({
+            success: false,
+            message: 'Failed to add reply'
+        });
+    }
+}));
+router.post('/:courseId/discussions/:discussionId/replies/:replyId/like', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor', 'admin', 'user', 'refugee'), [
+    (0, express_validator_1.body)('action').optional().isIn(['like', 'unlike']).withMessage('Action must be like or unlike')
+], validation_1.handleValidationErrors, (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { courseId, discussionId, replyId } = req.params;
+    const { action } = req.body;
+    try {
+        const { userId } = ensureAuth(req);
+        const database = await ensureDb();
+        const discussion = await database.get(discussionId);
+        if (!discussion || discussion.type !== 'discussion') {
+            return res.status(404).json({
+                success: false,
+                message: 'Discussion not found'
+            });
+        }
+        if (discussion.courseId !== courseId && discussion.course !== courseId) {
+            return res.status(404).json({
+                success: false,
+                message: 'Discussion not found in this course'
+            });
+        }
+        if (!discussion.replies) {
+            discussion.replies = [];
+        }
+        const replyIndex = discussion.replies.findIndex((reply) => reply._id === replyId);
+        if (replyIndex === -1) {
+            return res.status(404).json({
+                success: false,
+                message: 'Reply not found'
+            });
+        }
+        const reply = discussion.replies[replyIndex];
+        if (!reply.likes)
+            reply.likes = 0;
+        if (!reply.likedBy)
+            reply.likedBy = [];
+        const hasLiked = reply.likedBy.includes(userId);
+        const shouldLike = action === 'like' ? true : action === 'unlike' ? false : !hasLiked;
+        if (shouldLike && !hasLiked) {
+            reply.likes += 1;
+            reply.likedBy.push(userId);
+        }
+        else if (!shouldLike && hasLiked) {
+            reply.likes = Math.max(0, reply.likes - 1);
+            reply.likedBy = reply.likedBy.filter((id) => id !== userId);
+        }
+        discussion.replies[replyIndex] = reply;
+        discussion.updatedAt = new Date();
+        const updatedDiscussion = await database.insert(discussion);
+        console.log('✅ REPLY LIKE UPDATED - Reply ID:', replyId);
+        console.log('✅ REPLY LIKE UPDATED - Likes:', reply.likes, 'Action:', shouldLike ? 'liked' : 'unliked');
+        res.json({
+            success: true,
+            message: shouldLike ? 'Reply liked successfully' : 'Reply unliked successfully',
+            data: {
+                reply,
+                likes: reply.likes,
+                hasLiked: reply.likedBy.includes(userId)
+            }
+        });
+    }
+    catch (err) {
+        console.error('Error updating reply like:', err instanceof Error ? err.message : 'Unknown error');
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update like'
+        });
     }
 }));
 router.get('/modules', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('instructor', 'admin', 'user', 'refugee'), (0, errorHandler_1.asyncHandler)(async (req, res) => {
@@ -1803,7 +2161,7 @@ router.post('/modules/comprehensive', auth_1.authenticateToken, (0, auth_1.autho
                 if (!course.modules.includes(moduleResult.id)) {
                     course.modules.push(moduleResult.id);
                     course.updatedAt = new Date();
-                    await database.put(course);
+                    await database.insert(course);
                     console.log('✅ Module added to course modules array');
                 }
             }
@@ -1827,7 +2185,7 @@ router.post('/modules/comprehensive', auth_1.authenticateToken, (0, auth_1.autho
                             moduleId: moduleId,
                             module: moduleId,
                             course: courseId,
-                            user: req.user._id.toString(),
+                            user: ensureAuth(req).userId,
                             replies: [],
                             createdAt: new Date(),
                             updatedAt: new Date()
@@ -1927,7 +2285,7 @@ router.post('/modules', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('in
             if (!course.modules.includes(result.id)) {
                 course.modules.push(result.id);
                 course.updatedAt = new Date();
-                await database.put(course);
+                await database.insert(course);
                 console.log('✅ Module added to course modules array (basic endpoint)');
             }
         }
@@ -2180,7 +2538,8 @@ router.get('/user-progress/:userProgressId', auth_1.authenticateToken, (0, auth_
     if (!userProgress) {
         return res.status(404).json({ success: false, message: 'User progress not found' });
     }
-    if (req.user.role !== 'admin' && req.user.role !== 'instructor' && userProgress.user !== req.user._id) {
+    const { userId, user } = ensureAuth(req);
+    if (user.role !== 'admin' && user.role !== 'instructor' && userProgress.user !== userId) {
         return res.status(403).json({ success: false, message: 'Not authorized' });
     }
     res.json({ success: true, data: { userProgress } });
@@ -2191,7 +2550,8 @@ router.delete('/user-progress/:userProgressId', auth_1.authenticateToken, (0, au
     if (!userProgress) {
         return res.status(404).json({ success: false, message: 'User progress not found' });
     }
-    if (req.user.role !== 'admin' && req.user.role !== 'instructor' && userProgress.user !== req.user._id) {
+    const { userId, user } = ensureAuth(req);
+    if (user.role !== 'admin' && user.role !== 'instructor' && userProgress.user !== userId) {
         return res.status(403).json({ success: false, message: 'Not authorized' });
     }
     await database.destroy(req.params.userProgressId, userProgress._rev);
@@ -2199,14 +2559,15 @@ router.delete('/user-progress/:userProgressId', auth_1.authenticateToken, (0, au
 }));
 router.get('/user/:userId/stats', auth_1.authenticateToken, (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const { userId } = req.params;
-    console.log('📊 Stats endpoint called for user:', userId, 'by user:', req.user?._id);
+    const { userId: requestingUserId, user } = ensureAuth(req);
+    console.log('📊 Stats endpoint called for user:', userId, 'by user:', requestingUserId);
     console.log('🔍 Request user object:', {
-        _id: req.user?._id,
-        role: req.user?.role,
-        email: req.user?.email
+        _id: requestingUserId,
+        role: user.role,
+        email: user.email
     });
-    if (req.user?._id.toString() !== userId && req.user?.role !== 'admin') {
-        console.log('❌ Authorization failed - user requesting:', req.user?._id, 'for userId:', userId);
+    if (requestingUserId !== userId && user.role !== 'admin') {
+        console.log('❌ Authorization failed - user requesting:', requestingUserId, 'for userId:', userId);
         return res.status(403).json({ success: false, message: 'Not authorized' });
     }
     try {
@@ -2429,7 +2790,7 @@ router.get('/:courseId', auth_1.authenticateToken, (0, errorHandler_1.asyncHandl
 router.post('/submissions', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee', 'user', 'instructor'), upload_1.default.any(), (0, errorHandler_1.asyncHandler)(async (req, res) => {
     try {
         const { assessmentId, courseId, moduleId, submissionType, submissionText, submissionLink } = req.body;
-        const userId = req.user?.id || req.user?._id;
+        const { userId } = ensureAuth(req);
         const files = req.files;
         console.log('🔍 User object from auth middleware:', req.user);
         console.log('📝 Assignment submission received:', {
@@ -2449,14 +2810,11 @@ router.post('/submissions', auth_1.authenticateToken, (0, auth_1.authorizeRoles)
             });
         }
         const database = await ensureDb();
-        const existingSubmissions = await database.find({
-            selector: {
-                type: 'assignment_submission',
-                userId,
-                assessmentId
-            }
-        });
-        if (existingSubmissions.docs.length > 0) {
+        const result = await database.list({ include_docs: true });
+        const existingSubmissions = result.rows
+            .map((row) => row.doc)
+            .filter((doc) => doc && doc.type === 'assignment_submission' && doc.userId === userId && doc.assessmentId === assessmentId);
+        if (existingSubmissions.length > 0) {
             return res.status(409).json({
                 success: false,
                 message: 'Assignment has already been submitted'
@@ -2575,7 +2933,7 @@ router.put('/submissions/:submissionId/grade', auth_1.authenticateToken, (0, aut
             gradedAt: new Date(),
             status: 'graded'
         };
-        await database.put(updatedSubmission);
+        await database.insert(updatedSubmission);
         res.json({
             success: true,
             message: 'Submission graded successfully',
@@ -2605,14 +2963,13 @@ router.get('/:courseId/submissions', auth_1.authenticateToken, (0, auth_1.author
         console.log('📋 GET submissions endpoint called');
         const { courseId } = req.params;
         const { assessmentId } = req.query;
-        const userId = req.user?.id || req.user?._id;
-        const userRole = req.user?.role;
+        const { userId: requestingUserId, user: requestingUser } = ensureAuth(req);
         console.log('📋 Submissions GET request:', {
             courseId,
             assessmentId,
-            userId,
-            userRole,
-            userObject: req.user
+            userId: requestingUserId,
+            userRole: requestingUser.role,
+            userObject: requestingUser
         });
         console.log('📋 About to get database...');
         const database = await ensureDb();
@@ -2621,20 +2978,32 @@ router.get('/:courseId/submissions', auth_1.authenticateToken, (0, auth_1.author
             type: 'assignment_submission',
             courseId
         };
-        if (userRole === 'refugee' || userRole === 'user') {
-            selector.userId = userId;
+        if (requestingUser.role === 'refugee' || requestingUser.role === 'user') {
+            selector.userId = requestingUserId;
         }
         if (assessmentId) {
             selector.assessmentId = assessmentId;
         }
         console.log('📋 Database selector:', selector);
-        const submissions = await database.find({
-            selector
+        const result = await database.list({ include_docs: true });
+        let submissions = result.rows
+            .map((row) => row.doc)
+            .filter((doc) => {
+            if (!doc || doc.type !== 'assignment_submission' || doc.courseId !== courseId) {
+                return false;
+            }
+            if ((requestingUser.role === 'refugee' || requestingUser.role === 'user') && doc.userId !== requestingUserId) {
+                return false;
+            }
+            if (assessmentId && doc.assessmentId !== assessmentId) {
+                return false;
+            }
+            return true;
         });
-        console.log('📋 Raw submissions found:', submissions.docs.length);
-        console.log('📋 Raw submissions data:', submissions.docs);
+        console.log('📋 Raw submissions found:', submissions.length);
+        console.log('📋 Raw submissions data:', submissions);
         console.log('📋 Starting enrichment process...');
-        const enrichedSubmissions = submissions.docs.map((submission) => {
+        const enrichedSubmissions = submissions.map((submission) => {
             return {
                 ...submission,
                 studentName: `User ${submission.userId}`,
@@ -2669,5 +3038,162 @@ router.all('*', (req, res) => {
     console.log('🔍 CATCH-ALL ROUTE HIT:', req.method, req.originalUrl);
     res.status(404).json({ message: 'Route not found in course routes', path: req.originalUrl });
 });
+router.post('/:courseId/quiz/:quizId/submit', auth_1.authenticateToken, (0, auth_1.authorizeRoles)('refugee', 'user'), [
+    (0, express_validator_1.body)('answers').isObject().withMessage('Answers must be an object'),
+    (0, express_validator_1.body)('timeSpent').optional().isInt({ min: 0 }).withMessage('Time spent must be non-negative')
+], validation_1.handleValidationErrors, (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { courseId, quizId } = req.params;
+    const { answers, timeSpent } = req.body;
+    const { userId } = ensureAuth(req);
+    console.log('📤 Quiz submission via course route:', { courseId, quizId, userId });
+    const database = await ensureDb();
+    const course = await database.get(courseId);
+    if (!course) {
+        return res.status(404).json({
+            success: false,
+            message: 'Course not found'
+        });
+    }
+    if (!course.enrolledStudents?.includes(userId)) {
+        return res.status(403).json({
+            success: false,
+            message: 'You must be enrolled in this course to submit quizzes'
+        });
+    }
+    const quiz = await database.get(quizId);
+    if (!quiz) {
+        return res.status(404).json({
+            success: false,
+            message: 'Quiz not found'
+        });
+    }
+    const result = await database.list({ include_docs: true });
+    const existingSessions = result.rows
+        .map((row) => row.doc)
+        .filter((doc) => doc && doc.type === 'quiz_session' && doc.userId === userId && doc.quizId === quizId && doc.status === 'completed')
+        .slice(0, 1);
+    if (existingSessions.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'You have already completed this quiz'
+        });
+    }
+    let correctAnswers = 0;
+    if (quiz.questions) {
+        quiz.questions.forEach((question, index) => {
+            const userAnswer = answers[index];
+            const correctAnswer = question.correctAnswer;
+            if (question.type === 'multiple-choice' || question.type === 'multiple_choice') {
+                if (userAnswer === correctAnswer) {
+                    correctAnswers++;
+                }
+            }
+            else if (question.type === 'true-false' || question.type === 'true_false') {
+                const normalizedUserAnswer = userAnswer === true || userAnswer === 'true' || userAnswer === 1 || userAnswer === '1';
+                const normalizedCorrectAnswer = correctAnswer === true || correctAnswer === 'true' || correctAnswer === 1 || correctAnswer === '1';
+                if (normalizedUserAnswer === normalizedCorrectAnswer) {
+                    correctAnswers++;
+                }
+            }
+            else if (question.type === 'short-answer' || question.type === 'short_answer') {
+                if (userAnswer && userAnswer.toString().trim().length > 0) {
+                    if (correctAnswer && typeof correctAnswer === 'string') {
+                        const userAnswerLower = userAnswer.toString().toLowerCase().trim();
+                        const correctAnswerLower = correctAnswer.toLowerCase().trim();
+                        if (userAnswerLower === correctAnswerLower || userAnswerLower.includes(correctAnswerLower)) {
+                            correctAnswers++;
+                        }
+                    }
+                    else {
+                        correctAnswers++;
+                    }
+                }
+            }
+        });
+    }
+    const score = quiz.questions ? Math.round((correctAnswers / quiz.questions.length) * 100) : 0;
+    const now = new Date();
+    const sessionDoc = {
+        _id: `quiz_session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        type: 'quiz_session',
+        userId,
+        quizId,
+        courseId,
+        moduleId: quiz.moduleId,
+        startTime: now,
+        durationMinutes: quiz.duration || 30,
+        endTime: now,
+        status: 'completed',
+        answers,
+        timeSpent: timeSpent || 0,
+        score,
+        submittedAt: now,
+        isExpired: false,
+        createdAt: now,
+        updatedAt: now
+    };
+    await database.insert(sessionDoc);
+    try {
+        const moduleDoc = await database.get(quiz.moduleId);
+        if (moduleDoc && moduleDoc.quizzes) {
+            const quizIndex = moduleDoc.quizzes.findIndex((q) => q._id === quizId);
+            if (quizIndex !== -1) {
+                let itemIndex = 0;
+                if (moduleDoc.description)
+                    itemIndex++;
+                if (moduleDoc.content)
+                    itemIndex++;
+                if (moduleDoc.videoUrl)
+                    itemIndex++;
+                if (moduleDoc.resources)
+                    itemIndex += moduleDoc.resources.length;
+                if (moduleDoc.assessments)
+                    itemIndex += moduleDoc.assessments.length;
+                itemIndex += quizIndex;
+                const completionKey = `quiz-${itemIndex}`;
+                if (!course.studentProgress) {
+                    course.studentProgress = [];
+                }
+                let moduleProgress = course.studentProgress.find((p) => p.student === userId && p.moduleId === quiz.moduleId);
+                if (!moduleProgress) {
+                    moduleProgress = {
+                        student: userId,
+                        moduleId: quiz.moduleId,
+                        completed: false,
+                        score: 0,
+                        completedAt: null,
+                        completedItems: []
+                    };
+                    course.studentProgress.push(moduleProgress);
+                }
+                if (!moduleProgress.completedItems) {
+                    moduleProgress.completedItems = [];
+                }
+                if (!moduleProgress.completedItems.includes(completionKey)) {
+                    moduleProgress.completedItems.push(completionKey);
+                    course.updatedAt = new Date();
+                    const latestCourse = await database.get(course._id);
+                    course._rev = latestCourse._rev;
+                    await database.insert(course);
+                    console.log('✅ Course progress updated via course quiz submission');
+                }
+            }
+        }
+    }
+    catch (progressError) {
+        console.error('⚠️ Failed to update course progress:', progressError.message);
+    }
+    res.json({
+        success: true,
+        message: 'Quiz submitted successfully',
+        data: {
+            sessionId: sessionDoc._id,
+            score,
+            timeSpent: timeSpent || 0,
+            submittedAt: now,
+            answers
+        }
+    });
+}));
 exports.default = router;
 //# sourceMappingURL=course.routes.js.map

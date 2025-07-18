@@ -4,7 +4,7 @@ import { validationResult, ValidationChain } from 'express-validator';
 export const validate = (validations: ValidationChain[]) => {
   return async (req: Request, res: Response, next: NextFunction) => {
     // Run all validations
-    await Promise.all(validations.map((validation: any) => validation.run(req)));
+    await Promise.all(validations.map((validation: ValidationChain) => validation.run(req)));
 
     const errors = validationResult(req);
     if (errors.isEmpty()) {
@@ -12,9 +12,9 @@ export const validate = (validations: ValidationChain[]) => {
     }
 
     const extractedErrors = errors.array().map((err: any) => ({
-      field: err.type === 'field' ? err.path : err.type,
+      field: err.path || err.param || 'unknown',
       message: err.msg,
-      value: err.value
+      type: err.type
     }));
 
     res.status(400).json({
@@ -29,9 +29,9 @@ export const handleValidationErrors = (req: Request, res: Response, next: NextFu
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     const extractedErrors = errors.array().map((err: any) => ({
-      field: err.type === 'field' ? err.path : err.type,
+      field: err.path || err.param || 'unknown',
       message: err.msg,
-      value: err.value
+      type: err.type
     }));
 
     return res.status(400).json({

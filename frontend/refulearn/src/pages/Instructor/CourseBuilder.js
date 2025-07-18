@@ -5,6 +5,7 @@ import { ArrowBack, Add, Delete, Edit, DragIndicator } from '@mui/icons-material
 import Modal from '@mui/material/Modal';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const BLUE = '#007bff';
 const BLACK = '#000';
@@ -305,38 +306,97 @@ export default function CourseBuilder() {
   const fetchCategoriesAndLevels = async () => {
     try {
       const token = localStorage.getItem('token');
+      const isOnline = navigator.onLine;
       
-      // Fetch categories
-      const categoriesResponse = await fetch('/api/courses/categories', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+      let categoriesData = [];
+      let levelsData = [];
+
+      if (isOnline) {
+        try {
+          // Try online API calls first (preserving existing behavior)
+          console.log('🌐 Online mode: Fetching categories and levels from API...');
+          
+          // Fetch categories
+          const categoriesResponse = await fetch('/api/courses/categories', {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          if (categoriesResponse.ok) {
+            const categoriesApiData = await categoriesResponse.json();
+            if (categoriesApiData.success && categoriesApiData.data && categoriesApiData.data.categories) {
+              categoriesData = categoriesApiData.data.categories;
+              console.log('✅ Categories data received:', categoriesData.length);
+              
+              // Store categories for offline use
+              await offlineIntegrationService.storeCategories(categoriesData);
+            }
+          } else {
+            throw new Error('Failed to fetch categories');
+          }
+          
+          // Fetch levels
+          const levelsResponse = await fetch('/api/courses/levels', {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          if (levelsResponse.ok) {
+            const levelsApiData = await levelsResponse.json();
+            if (levelsApiData.success && levelsApiData.data && levelsApiData.data.levels) {
+              levelsData = levelsApiData.data.levels;
+              console.log('✅ Levels data received:', levelsData.length);
+              
+              // Store levels for offline use
+              await offlineIntegrationService.storeLevels(levelsData);
+            }
+          } else {
+            throw new Error('Failed to fetch levels');
+          }
+
+        } catch (onlineError) {
+          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+          // Fall back to offline data if online fails
+          const offlineData = await fetchOfflineData();
+          categoriesData = offlineData.categories;
+          levelsData = offlineData.levels;
         }
-      });
-      
-      if (categoriesResponse.ok) {
-        const categoriesData = await categoriesResponse.json();
-        if (categoriesData.success && categoriesData.data && categoriesData.data.categories) {
-          setCategories(categoriesData.data.categories);
-        }
+      } else {
+        // Offline mode: use offline services
+        console.log('📴 Offline mode: Using offline categories and levels data...');
+        const offlineData = await fetchOfflineData();
+        categoriesData = offlineData.categories;
+        levelsData = offlineData.levels;
       }
-      
-      // Fetch levels
-      const levelsResponse = await fetch('/api/courses/levels', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+
+      // Helper function to fetch offline data
+      const fetchOfflineData = async () => {
+        try {
+          const categories = await offlineIntegrationService.getCategories();
+          const levels = await offlineIntegrationService.getLevels();
+          
+          console.log('📱 Offline categories and levels loaded:', {
+            categories: categories.length,
+            levels: levels.length
+          });
+          
+          return { categories, levels };
+        } catch (error) {
+          console.error('❌ Failed to load offline categories and levels:', error);
+          return { categories: [], levels: [] };
         }
-      });
+      };
+
+      // Update state with fetched data
+      setCategories(categoriesData);
+      setLevels(levelsData);
       
-      if (levelsResponse.ok) {
-        const levelsData = await levelsResponse.json();
-        if (levelsData.success && levelsData.data && levelsData.data.levels) {
-          setLevels(levelsData.data.levels);
-        }
-      }
     } catch (error) {
-      console.error('Error fetching categories and levels:', error);
+      console.error('❌ Error fetching categories and levels:', error);
       // Keep default values if fetch fails
     }
   };
@@ -619,16 +679,8 @@ export default function CourseBuilder() {
         return;
       }
       setLoading(true);
-      const formData = new FormData();
-      formData.append('title', course.title);
-      formData.append('overview', course.overview || '');
-      formData.append('learningOutcomes', course.learningOutcomes || '');
-      formData.append('duration', course.duration || '');
-      formData.append('category', course.category || '');
-      formData.append('level', course.level || 'Beginner');
-      formData.append('isPublished', course.isPublished || false);
       
-      // Ensure modules have proper structure
+      // Prepare course data for offline/online saving
       const processedModules = modules.map((module, index) => ({
         _id: module._id || undefined,
         title: module.title || 'Untitled Module',
@@ -642,37 +694,93 @@ export default function CourseBuilder() {
         isMandatory: module.isMandatory !== undefined ? module.isMandatory : true
       }));
       
-      formData.append('modules', JSON.stringify(processedModules));
+      const courseData = {
+        title: course.title,
+        overview: course.overview || '',
+        learningOutcomes: course.learningOutcomes || '',
+        duration: course.duration || '',
+        category: course.category || '',
+        level: course.level || 'Beginner',
+        isPublished: course.isPublished || false,
+        modules: processedModules
+      };
       
-      if (courseImage) {
-        formData.append('course_profile_picture', courseImage);
-      }
+      const isOnline = navigator.onLine;
       
-      const token = localStorage.getItem('token');
-      const url = courseId ? `/api/courses/${courseId}` : '/api/courses';
-      const method = courseId ? 'PUT' : 'POST';
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: formData
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to save course');
-      }
-      
-      const result = await response.json();
-      const createdCourseId = courseId || result.data?.course?._id;
-      
-      alert(courseId ? 'Course updated successfully!' : 'Course created successfully!');
-      
-      // Navigate to course overview to show the new quick action buttons
-      if (createdCourseId) {
-        navigate(`/instructor/courses/${createdCourseId}/overview`);
+      if (isOnline) {
+        try {
+          console.log('🌐 Online mode: Saving course...');
+          
+          const formData = new FormData();
+          formData.append('title', course.title);
+          formData.append('overview', course.overview || '');
+          formData.append('learningOutcomes', course.learningOutcomes || '');
+          formData.append('duration', course.duration || '');
+          formData.append('category', course.category || '');
+          formData.append('level', course.level || 'Beginner');
+          formData.append('isPublished', course.isPublished || false);
+          formData.append('modules', JSON.stringify(processedModules));
+          
+          if (courseImage) {
+            formData.append('course_profile_picture', courseImage);
+          }
+          
+          const token = localStorage.getItem('token');
+          const url = courseId ? `/api/courses/${courseId}` : '/api/courses';
+          const method = courseId ? 'PUT' : 'POST';
+          const response = await fetch(url, {
+            method,
+            headers: {
+              'Authorization': `Bearer ${token}`
+            },
+            body: formData
+          });
+          
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Failed to save course');
+          }
+          
+          const result = await response.json();
+          const createdCourseId = courseId || result.data?.course?._id;
+          
+          // Store course data for offline use
+          await offlineIntegrationService.storeCourseBuilderData(courseData);
+          
+          alert(courseId ? 'Course updated successfully!' : 'Course created successfully!');
+          
+          // Navigate to course overview to show the new quick action buttons
+          if (createdCourseId) {
+            navigate(`/instructor/courses/${createdCourseId}/overview`);
+          } else {
+            navigate('/instructor/courses');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online save failed, queuing for offline sync:', onlineError);
+          
+          // Queue action for offline sync
+          await offlineIntegrationService.queueCourseBuilderAction({
+            action: courseId ? 'edit' : 'create',
+            courseId: courseId,
+            data: courseData,
+            courseImage: courseImage ? 'image_file' : null
+          });
+          
+          alert(`Course ${courseId ? 'update' : 'creation'} queued for sync when online`);
+          navigate('/instructor/courses');
+        }
       } else {
+        // Offline mode: queue action for sync
+        console.log('📴 Offline mode: Queuing course action for sync...');
+        
+        await offlineIntegrationService.queueCourseBuilderAction({
+          action: courseId ? 'edit' : 'create',
+          courseId: courseId,
+          data: courseData,
+          courseImage: courseImage ? 'image_file' : null
+        });
+        
+        alert(`Course ${courseId ? 'update' : 'creation'} queued for sync when online`);
         navigate('/instructor/courses');
       }
     } catch (error) {

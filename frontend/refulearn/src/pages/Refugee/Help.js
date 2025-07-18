@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
+import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
@@ -306,9 +307,130 @@ const Help = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Fetch help requests from backend (optional: for listing)
+  // Fetch help requests from backend
   useEffect(() => {
-    // Optionally fetch tickets for display here
+    const fetchHelpTickets = async () => {
+      try {
+        console.log('🎫 Fetching help tickets...');
+        
+        // First, check what's available offline
+        try {
+          const existingOfflineTickets = await offlineIntegrationService.getHelpTickets();
+          console.log('📋 Existing offline tickets:', existingOfflineTickets?.length || 0);
+          if (existingOfflineTickets && existingOfflineTickets.length > 0) {
+            existingOfflineTickets.forEach((ticket, index) => {
+              console.log(`📋 Offline ticket ${index + 1}:`, ticket.title || ticket.subject);
+            });
+          }
+        } catch (offlineCheckError) {
+          console.log('📋 No offline tickets found or error checking:', offlineCheckError.message);
+        }
+        const token = localStorage.getItem('token');
+        
+        const headers = {
+          'Content-Type': 'application/json'
+        };
+        
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+        
+        const response = await fetch('/api/help/tickets', { headers });
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('✅ Help tickets API response:', data);
+          
+          if (data.success && data.data && data.data.tickets) {
+            // Transform API data to match frontend expectations
+            const transformedTickets = data.data.tickets.map(ticket => ({
+              id: ticket._id || ticket.id,
+              title: ticket.title,
+              content: ticket.description || ticket.content,
+              author: ticket.user || 'Unknown',
+              date: ticket.createdAt ? new Date(ticket.createdAt).toLocaleDateString() : 'Unknown',
+              category: ticket.category || 'general',
+              helpType: ticket.assignedTo || 'general',
+              status: ticket.status || 'open',
+              priority: ticket.priority || 'medium',
+              tags: ticket.tags || [ticket.category || 'help'],
+              views: ticket.views || 0,
+              answers: ticket.messages || [],
+              votes: ticket.votes || 0
+            }));
+            
+            setHelpRequests(transformedTickets);
+            console.log('✅ Found help tickets:', transformedTickets.length);
+          }
+        } else {
+          console.error('❌ Help tickets API failed:', response.status);
+          
+          // Try to get offline data when API fails
+          try {
+            console.log('🔄 API failed, trying offline data...');
+            const offlineTickets = await offlineIntegrationService.getHelpTickets();
+            if (offlineTickets && offlineTickets.length > 0) {
+              // Transform offline data to match frontend expectations
+              const transformedOfflineTickets = offlineTickets.map(ticket => ({
+                id: ticket._id || ticket.id,
+                title: ticket.title,
+                content: ticket.description || ticket.content,
+                author: ticket.user || 'You',
+                date: ticket.createdAt ? new Date(ticket.createdAt).toLocaleDateString() : 'Unknown',
+                category: ticket.category || 'general',
+                helpType: ticket.assignedTo || 'general',
+                status: ticket.status || 'open',
+                priority: ticket.priority || 'medium',
+                tags: ticket.tags || [ticket.category || 'help'],
+                views: ticket.views || 0,
+                answers: ticket.messages || [],
+                votes: ticket.votes || 0
+              }));
+              
+              setHelpRequests(transformedOfflineTickets);
+              console.log('✅ Loaded offline help tickets:', transformedOfflineTickets.length);
+            } else {
+              console.log('⚠️ No offline help tickets available');
+            }
+          } catch (offlineError) {
+            console.error('❌ Offline data fetch also failed:', offlineError);
+          }
+        }
+      } catch (error) {
+        console.error('❌ Help tickets fetch failed:', error);
+        
+        // Fallback to offline data on network error
+        try {
+          console.log('🔄 Network error, trying offline data...');
+          const offlineTickets = await offlineIntegrationService.getHelpTickets();
+          if (offlineTickets && offlineTickets.length > 0) {
+            // Transform offline data to match frontend expectations
+            const transformedOfflineTickets = offlineTickets.map(ticket => ({
+              id: ticket._id || ticket.id,
+              title: ticket.title,
+              content: ticket.description || ticket.content,
+              author: ticket.user || 'You',
+              date: ticket.createdAt ? new Date(ticket.createdAt).toLocaleDateString() : 'Unknown',
+              category: ticket.category || 'general',
+              helpType: ticket.assignedTo || 'general',
+              status: ticket.status || 'open',
+              priority: ticket.priority || 'medium',
+              tags: ticket.tags || [ticket.category || 'help'],
+              views: ticket.views || 0,
+              answers: ticket.messages || [],
+              votes: ticket.votes || 0
+            }));
+            
+            setHelpRequests(transformedOfflineTickets);
+            console.log('✅ Loaded offline help tickets:', transformedOfflineTickets.length);
+          }
+        } catch (offlineError) {
+          console.error('❌ Offline data fetch also failed:', offlineError);
+        }
+      }
+    };
+
+    fetchHelpTickets();
   }, []);
 
   useEffect(() => {
@@ -345,33 +467,95 @@ const Help = () => {
       return;
     }
     setLoading(true);
-    const formData = new FormData();
-    formData.append('title', newHelp.title);
-    formData.append('description', newHelp.description);
-    formData.append('assignedTo', newHelp.assignedTo);
-    formData.append('category', newHelp.category);
-    formData.append('priority', newHelp.priority);
-    if (newHelp.attachments && newHelp.attachments.length > 0) {
-      newHelp.attachments.forEach(file => formData.append('attachments', file));
-    }
+    
     try {
-      const res = await fetch('/api/help/tickets', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-        },
-        body: formData
-      });
-      const data = await res.json();
-      if (data.success) {
-        setSuccess('Help ticket submitted successfully!');
-        setShowAskModal(false);
-        setNewHelp({ title: '', description: '', assignedTo: '', category: '', priority: 'medium', attachments: [] });
+      const isOnline = navigator.onLine;
+      let success = false;
+
+      if (isOnline) {
+        try {
+          // Try online submission first (preserving existing behavior)
+          console.log('🌐 Online mode: Submitting help ticket to API...');
+          
+          const formData = new FormData();
+          formData.append('title', newHelp.title);
+          formData.append('description', newHelp.description);
+          formData.append('assignedTo', newHelp.assignedTo);
+          formData.append('category', newHelp.category);
+          formData.append('priority', newHelp.priority);
+          if (newHelp.attachments && newHelp.attachments.length > 0) {
+            newHelp.attachments.forEach(file => formData.append('attachments', file));
+          }
+          
+          const res = await fetch('/api/help/tickets', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+            },
+            body: formData
+          });
+          
+          const data = await res.json();
+          if (data.success) {
+            success = true;
+            console.log('✅ Online help ticket submission successful');
+            setSuccess('Help ticket submitted successfully!');
+            setShowAskModal(false);
+            setNewHelp({ title: '', description: '', assignedTo: '', category: '', priority: 'medium', attachments: [] });
+          } else {
+            throw new Error(data.message || 'Failed to submit help ticket.');
+          }
+        } catch (onlineError) {
+          console.warn('⚠️ Online submission failed, using offline:', onlineError);
+          // Fall back to offline submission
+          const result = await offlineIntegrationService.submitHelpTicketOffline({
+            title: newHelp.title,
+            description: newHelp.description,
+            assignedTo: newHelp.assignedTo,
+            category: newHelp.category,
+            priority: newHelp.priority,
+            attachments: newHelp.attachments ? newHelp.attachments.map(f => f.name) : []
+          });
+          
+          if (result.success) {
+            success = true;
+            console.log('✅ Offline help ticket submission successful');
+            setSuccess('Help ticket submitted offline! Will sync when online.');
+            setShowAskModal(false);
+            setNewHelp({ title: '', description: '', assignedTo: '', category: '', priority: 'medium', attachments: [] });
+          } else {
+            throw new Error('Failed to submit help ticket offline');
+          }
+        }
       } else {
-        setError(data.message || 'Failed to submit help ticket.');
+        // Offline submission
+        console.log('📴 Offline mode: Submitting help ticket offline...');
+        const result = await offlineIntegrationService.submitHelpTicketOffline({
+          title: newHelp.title,
+          description: newHelp.description,
+          assignedTo: newHelp.assignedTo,
+          category: newHelp.category,
+          priority: newHelp.priority,
+          attachments: newHelp.attachments ? newHelp.attachments.map(f => f.name) : []
+        });
+        
+        if (result.success) {
+          success = true;
+          console.log('✅ Offline help ticket submission successful');
+          setSuccess('Help ticket submitted offline! Will sync when online.');
+          setShowAskModal(false);
+          setNewHelp({ title: '', description: '', assignedTo: '', category: '', priority: 'medium', attachments: [] });
+        } else {
+          throw new Error('Failed to submit help ticket offline');
+        }
+      }
+
+      if (!success) {
+        setError('Failed to submit help ticket');
       }
     } catch (err) {
-      setError('Network error.');
+      console.error('❌ Error submitting help ticket:', err);
+      setError('Failed to submit help ticket');
     } finally {
       setLoading(false);
     }
