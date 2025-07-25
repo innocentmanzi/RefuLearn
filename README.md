@@ -94,8 +94,8 @@
    NODE_ENV=development
    PORT=5001
    COUCHDB_URL=http://localhost:5984
-   COUCHDB_USERNAME=admin
-   COUCHDB_PASSWORD=password
+   COUCHDB_USERNAME=your username
+   COUCHDB_PASSWORD=your pasword
    JWT_SECRET=your-secret-key
    CORS_ORIGIN=http://localhost:3000
    ```
@@ -354,7 +354,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🎥 Demo
 
 ### Live Demo
-- **🌐 Live Application**: [RefuLearn Demo](YOUR_DEMO_LINK_HERE)
+- **🌐 Live Application**: [RefuLearn Demo](https://drive.google.com/file/d/1IkHYND99DENtc3cx5lBilWvG6WgQoG3c/view?usp=sharing)
 - **📱 PWA Installation**: Install the app directly from your browser for the best experience
 
 ### Demo Features to Showcase
@@ -363,42 +363,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Role-Based Access**: Experience different interfaces for Students, Instructors, Employers, and Admins
 - **PWA Installation**: Add to home screen for app-like experience
 - **Real-time Sync**: Test background synchronization when connection is restored
-
-### Demo Credentials (if applicable)
-```
-Student Account:
-- Email: student@refulearn.com
-- Password: demo123
-
-Instructor Account:
-- Email: instructor@refulearn.com
-- Password: demo123
-
-Employer Account:
-- Email: employer@refulearn.com
-- Password: demo123
-
-Admin Account:
-- Email: admin@refulearn.com
-- Password: demo123
-```
-
----
-
-## 📞 Support
-
-- **Documentation**: [Wiki](https://github.com/your-username/refulearn/wiki)
-- **Issues**: [GitHub Issues](https://github.com/your-username/refulearn/issues)
-- **Email**: support@refulearn.org
-
----
-
-<div align="center">
-
-**Made with ❤️ for refugee communities worldwide**
-
-[![GitHub stars](https://img.shields.io/github/stars/your-username/refulearn?style=social)](https://github.com/your-username/refulearn)
-[![GitHub forks](https://img.shields.io/github/forks/your-username/refulearn?style=social)](https://github.com/your-username/refulearn)
-[![GitHub issues](https://img.shields.io/github/issues/your-username/refulearn)](https://github.com/your-username/refulearn/issues)
-
 </div>
