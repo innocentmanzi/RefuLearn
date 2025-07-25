@@ -132,6 +132,9 @@ export default function CourseDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [enrolling, setEnrolling] = useState(false);
+  const [isEnrolled, setIsEnrolled] = useState(false);
+  const [isCompleted, setIsCompleted] = useState(false);
+  const [overviewExpanded, setOverviewExpanded] = useState(false);
 
   useEffect(() => {
     fetchCourse();
@@ -144,6 +147,7 @@ export default function CourseDetail() {
       const isOnline = navigator.onLine;
       
       let courseData = null;
+      let modulesData = [];
 
       if (isOnline) {
         try {
@@ -163,6 +167,42 @@ export default function CourseDetail() {
             console.log('✅ Course data received:', courseData);
             console.log('Course image path:', courseData.course_profile_picture);
             
+            // Fetch modules data
+            if (courseData.modules && courseData.modules.length > 0) {
+              console.log('🔍 Fetching modules data for course...');
+              const modulesResponse = await fetch(`/api/courses/modules?course=${courseId}`, {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+              
+              if (modulesResponse.ok) {
+                const modulesApiData = await modulesResponse.json();
+                modulesData = modulesApiData.data.modules || [];
+                console.log('✅ Modules data received:', modulesData.length, 'modules');
+                
+                // Store modules data for offline use (using data cache directly)
+                try {
+                  await offlineIntegrationService.dataCache.storeData(`modules_${courseId}`, modulesData);
+                } catch (cacheError) {
+                  console.warn('⚠️ Could not store modules data in cache:', cacheError);
+                }
+              } else {
+                console.warn('⚠️ Failed to fetch modules, using course module IDs');
+                // Fallback: use module IDs from course data
+                modulesData = courseData.modules.map((moduleId, index) => ({
+                  _id: moduleId,
+                  title: `Module ${index + 1}`,
+                  description: 'Module description not available',
+                  content: [],
+                  assessments: [],
+                  quizzes: [],
+                  discussions: []
+                }));
+              }
+            }
+            
             // Store course data for offline use
             await offlineIntegrationService.storeCourseData(courseId, courseData);
           } else {
@@ -172,15 +212,37 @@ export default function CourseDetail() {
           console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
           // Fall back to offline data if online fails
           courseData = await offlineIntegrationService.getCourseData(courseId);
+          try {
+            modulesData = await offlineIntegrationService.dataCache.getData(`modules_${courseId}`) || [];
+          } catch (cacheError) {
+            console.warn('⚠️ Could not get modules data from cache:', cacheError);
+            modulesData = [];
+          }
         }
       } else {
         // Offline mode: use offline services
         console.log('📴 Offline mode: Using offline course detail data...');
         courseData = await offlineIntegrationService.getCourseData(courseId);
+        try {
+          modulesData = await offlineIntegrationService.dataCache.getData(`modules_${courseId}`) || [];
+        } catch (cacheError) {
+          console.warn('⚠️ Could not get modules data from cache:', cacheError);
+          modulesData = [];
+        }
       }
 
       if (courseData) {
+        // Merge modules data with course data
+        courseData.modules = modulesData;
         setCourse(courseData);
+        
+        // Check enrollment status
+        const enrolled = await checkEnrollmentStatus();
+        
+        // Check completion status if enrolled
+        if (enrolled) {
+          await checkCompletionStatus();
+        }
       } else {
         setError('Course not available offline');
       }
@@ -189,6 +251,95 @@ export default function CourseDetail() {
       setError('Failed to load course');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const checkEnrollmentStatus = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const isOnline = navigator.onLine;
+      
+      if (isOnline) {
+        try {
+          const response = await fetch(`/api/courses/enrolled/courses/${courseId}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          if (response.ok) {
+            setIsEnrolled(true);
+            console.log('✅ User is enrolled in this course');
+            return true;
+          } else {
+            setIsEnrolled(false);
+            console.log('❌ User is not enrolled in this course');
+            return false;
+          }
+        } catch (error) {
+          console.warn('⚠️ Could not check enrollment status online:', error);
+          // Fall back to offline check
+          const enrolledCourses = await offlineIntegrationService.getEnrolledCourses();
+          const enrolled = enrolledCourses.includes(courseId);
+          setIsEnrolled(enrolled);
+          return enrolled;
+        }
+      } else {
+        // Offline mode: check from cached data
+        const enrolledCourses = await offlineIntegrationService.getEnrolledCourses();
+        const enrolled = enrolledCourses.includes(courseId);
+        setIsEnrolled(enrolled);
+        return enrolled;
+      }
+    } catch (error) {
+      console.error('❌ Error checking enrollment status:', error);
+      setIsEnrolled(false);
+      return false;
+    }
+  };
+
+  const checkCompletionStatus = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const isOnline = navigator.onLine;
+      
+      if (isOnline) {
+        try {
+          const response = await fetch(`/api/courses/${courseId}/progress`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            const progressPercentage = data.data?.progressPercentage || 0;
+            const completed = progressPercentage >= 95;
+            setIsCompleted(completed);
+            console.log(`✅ Course completion status: ${progressPercentage}% - ${completed ? 'Completed' : 'In Progress'}`);
+          } else {
+            setIsCompleted(false);
+            console.log('❌ Could not fetch course progress');
+          }
+        } catch (error) {
+          console.warn('⚠️ Could not check completion status online:', error);
+          setIsCompleted(false);
+        }
+      } else {
+        // Offline mode: check from cached data
+        const cachedCompleted = localStorage.getItem('refugee_completed_cache');
+        if (cachedCompleted) {
+          const completedCourses = JSON.parse(cachedCompleted);
+          setIsCompleted(completedCourses.includes(courseId));
+        } else {
+          setIsCompleted(false);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error checking completion status:', error);
+      setIsCompleted(false);
     }
   };
 
@@ -217,6 +368,9 @@ export default function CourseDetail() {
             success = true;
             console.log('✅ Online enrollment successful');
             alert('Successfully enrolled in course!');
+            setIsEnrolled(true);
+            // Check completion status after enrollment
+            await checkCompletionStatus();
             // Refresh course data to update enrollment status
             fetchCourse();
           } else {
@@ -290,10 +444,7 @@ export default function CourseDetail() {
       <CourseHeader>
         {(course.course_profile_picture || course.image) && (
           <CourseImage 
-            src={course.course_profile_picture?.startsWith('/') ? course.course_profile_picture : 
-                 course.course_profile_picture?.startsWith('uploads/') ? `/${course.course_profile_picture}` : 
-                 `/uploads/${course.course_profile_picture}` || 
-                 course.image || '/default-course-image.jpg'} 
+            src={course.course_profile_picture || course.image || '/default-course-image.jpg'} 
             alt={course.title}
             onError={(e) => {
               console.log('Image failed to load:', e.target.src);
@@ -302,6 +453,20 @@ export default function CourseDetail() {
           />
         )}
         <CourseTitle>{course.title}</CourseTitle>
+        {isCompleted && (
+          <div style={{
+            background: '#10b981',
+            color: 'white',
+            padding: '0.5rem 1rem',
+            borderRadius: '20px',
+            fontSize: '0.9rem',
+            fontWeight: '600',
+            display: 'inline-block',
+            marginBottom: '1rem'
+          }}>
+            ✅ Course Completed
+          </div>
+        )}
         
         <CourseInfo>
           <InfoItem>
@@ -325,7 +490,31 @@ export default function CourseDetail() {
         {course.overview && (
           <div>
             <h3 style={{ color: '#333', marginBottom: '0.5rem' }}>Course Overview</h3>
-            <p style={{ color: '#666', lineHeight: 1.6 }}>{course.overview}</p>
+            <p style={{ color: '#666', lineHeight: 1.6 }}>
+              {overviewExpanded 
+                ? course.overview 
+                : course.overview.length > 200 
+                  ? `${course.overview.substring(0, 200)}...` 
+                  : course.overview
+              }
+            </p>
+            {course.overview.length > 200 && (
+              <button 
+                onClick={() => setOverviewExpanded(!overviewExpanded)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#007BFF',
+                  cursor: 'pointer',
+                  padding: '0',
+                  marginTop: '0.5rem',
+                  fontSize: '0.9rem',
+                  fontWeight: '500'
+                }}
+              >
+                {overviewExpanded ? 'See Less' : 'See More'}
+              </button>
+            )}
           </div>
         )}
 
@@ -337,65 +526,122 @@ export default function CourseDetail() {
         )}
 
         <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-          <EnrollButton onClick={handleEnroll} disabled={enrolling}>
-            {enrolling ? 'Enrolling...' : 'Enroll in Course'}
-          </EnrollButton>
-          <button 
-            onClick={() => navigate(`/courses/${courseId}/overview`)}
-            style={{
-              background: '#6c757d',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              padding: '1rem 2rem',
-              fontSize: '1.1rem',
-              fontWeight: '600',
-              cursor: 'pointer',
-              transition: 'background 0.2s'
-            }}
-          >
-            View Course Overview
-          </button>
+          {isEnrolled ? (
+            <>
+              <button 
+                onClick={() => navigate(`/courses/${courseId}/overview`)}
+                style={{
+                  background: isCompleted ? '#10b981' : '#27ae60',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '1rem 2rem',
+                  fontSize: '1.1rem',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s'
+                }}
+              >
+                {isCompleted ? '✅ Review Course' : 'Continue Learning'}
+              </button>
+              <button 
+                onClick={() => navigate(`/courses/${courseId}/overview`)}
+                style={{
+                  background: '#007BFF',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '1rem 2rem',
+                  fontSize: '1.1rem',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s'
+                }}
+              >
+                View Course Overview
+              </button>
+            </>
+          ) : (
+            <>
+              <EnrollButton onClick={handleEnroll} disabled={enrolling}>
+                {enrolling ? 'Enrolling...' : 'Enroll in Course'}
+              </EnrollButton>
+              <button 
+                onClick={() => navigate(`/courses/${courseId}/overview`)}
+                style={{
+                  background: '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '1rem 2rem',
+                  fontSize: '1.1rem',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s'
+                }}
+              >
+                View Course Overview
+              </button>
+            </>
+          )}
         </div>
       </CourseHeader>
 
       {course.modules && course.modules.length > 0 && (
         <ModulesSection>
           <h2 style={{ color: '#007BFF', marginBottom: '1.5rem' }}>Course Modules</h2>
-          {course.modules.map((module, index) => (
-            <ModuleCard key={module._id || index}>
-              <ModuleTitle>Module {index + 1}: {module.title}</ModuleTitle>
-              {module.description && (
-                <ModuleDescription>{module.description}</ModuleDescription>
-              )}
-              <ModuleItems>
-                {module.content && module.content.length > 0 && (
-                  <ItemBadge>
-                    <PlayArrow fontSize="small" />
-                    {module.content.length} Content{module.content.length !== 1 ? 's' : ''}
-                  </ItemBadge>
+          {course.modules.map((module, index) => {
+            // Skip modules with placeholder titles
+            if (module.title === 'Module 1' && module.description === 'Module description not available') {
+              return null;
+            }
+            
+            return (
+              <ModuleCard key={module._id || index}>
+                <ModuleTitle>
+                  {module.title && module.title !== `Module ${index + 1}` 
+                    ? `Module ${index + 1}: ${module.title}` 
+                    : `Module ${index + 1}: ${module.title || 'Untitled Module'}`
+                  }
+                </ModuleTitle>
+                {module.description && module.description !== 'Module description not available' && (
+                  <ModuleDescription>{module.description}</ModuleDescription>
                 )}
-                {module.assessments && module.assessments.length > 0 && (
-                  <ItemBadge>
-                    <Assignment fontSize="small" />
-                    {module.assessments.length} Assessment{module.assessments.length !== 1 ? 's' : ''}
-                  </ItemBadge>
-                )}
-                {module.quizzes && module.quizzes.length > 0 && (
-                  <ItemBadge>
-                    <Quiz fontSize="small" />
-                    {module.quizzes.length} Quiz{module.quizzes.length !== 1 ? 'zes' : ''}
-                  </ItemBadge>
-                )}
-                {module.discussions && module.discussions.length > 0 && (
-                  <ItemBadge>
-                    <Forum fontSize="small" />
-                    {module.discussions.length} Discussion{module.discussions.length !== 1 ? 's' : ''}
-                  </ItemBadge>
-                )}
-              </ModuleItems>
-            </ModuleCard>
-          ))}
+                <ModuleItems>
+                  {module.content && Array.isArray(module.content) && module.content.length > 0 && (
+                    <ItemBadge>
+                      <PlayArrow fontSize="small" />
+                      {module.content.length} Content{module.content.length !== 1 ? 's' : ''}
+                    </ItemBadge>
+                  )}
+                  {module.assessments && Array.isArray(module.assessments) && module.assessments.length > 0 && (
+                    <ItemBadge>
+                      <Assignment fontSize="small" />
+                      {module.assessments.length} Assessment{module.assessments.length !== 1 ? 's' : ''}
+                    </ItemBadge>
+                  )}
+                  {module.quizzes && Array.isArray(module.quizzes) && module.quizzes.length > 0 && (
+                    <ItemBadge>
+                      <Quiz fontSize="small" />
+                      {module.quizzes.length} Quiz{module.quizzes.length !== 1 ? 'zes' : ''}
+                    </ItemBadge>
+                  )}
+                  {module.discussions && Array.isArray(module.discussions) && module.discussions.length > 0 && (
+                    <ItemBadge>
+                      <Forum fontSize="small" />
+                      {module.discussions.length} Discussion{module.discussions.length !== 1 ? 's' : ''}
+                    </ItemBadge>
+                  )}
+                  {module.resources && Array.isArray(module.resources) && module.resources.length > 0 && (
+                    <ItemBadge>
+                      <Assignment fontSize="small" />
+                      {module.resources.length} Resource{module.resources.length !== 1 ? 's' : ''}
+                    </ItemBadge>
+                  )}
+                </ModuleItems>
+              </ModuleCard>
+            );
+          })}
         </ModulesSection>
       )}
     </Container>

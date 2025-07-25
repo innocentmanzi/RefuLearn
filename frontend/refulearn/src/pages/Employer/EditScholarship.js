@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import offlineIntegrationService from '../../services/offlineIntegrationService';
+
 
 const Container = styled.div`
   padding: 2rem;
@@ -155,117 +155,57 @@ const EditScholarship = () => {
         setError('');
         
         const token = localStorage.getItem('token');
-        const isOnline = navigator.onLine;
         
-        let scholarshipData = null;
+        console.log('🌐 Fetching scholarship data from API...');
+        
+        const response = await fetch(`/api/employer/scholarships/${id}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache'
+          }
+        });
 
-        if (isOnline) {
+        console.log('📡 Response status:', response.status);
+
+        if (response.ok) {
+          const responseText = await response.text();
+          console.log('📄 Raw response:', responseText);
+          
           try {
-            // Try online API calls first (preserving existing behavior)
-            console.log('🌐 Online mode: Fetching scholarship data from API...');
+            const scholarshipApiData = JSON.parse(responseText);
+            console.log('🔍 Full API response:', scholarshipApiData);
+            const scholarshipData = scholarshipApiData.data?.scholarship || scholarshipApiData.data || scholarshipApiData;
+            console.log('✅ Scholarship data received:', scholarshipData);
             
-            const response = await fetch(`/api/employer/scholarships/${id}`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-                'Cache-Control': 'no-cache'
-              }
-            });
-
-            console.log('📡 Response status:', response.status);
-            console.log('📡 Response headers:', response.headers);
-
-            if (response.ok) {
-              const responseText = await response.text();
-              console.log('📄 Raw response:', responseText);
-              
-              try {
-                const scholarshipApiData = JSON.parse(responseText);
-                console.log('🔍 Full API response:', scholarshipApiData);
-                scholarshipData = scholarshipApiData.data?.scholarship || scholarshipApiData.data || scholarshipApiData;
-                console.log('✅ Scholarship data received:', scholarshipData);
-                
-                // Store scholarship for offline use
-                await offlineIntegrationService.storeScholarshipData(id, scholarshipData);
-              } catch (parseError) {
-                console.error('❌ JSON parse error:', parseError);
-                console.error('📄 Response was:', responseText);
-                throw new Error('Invalid JSON response from server');
-              }
-            } else {
-              const errorText = await response.text();
-              console.error('❌ API Error:', response.status, errorText);
-              throw new Error(`API returned ${response.status}: ${errorText}`);
+            if (scholarshipData) {
+              const mappedFormData = {
+                title: scholarshipData.title || '',
+                description: scholarshipData.description || '',
+                provider: scholarshipData.provider || '',
+                location: scholarshipData.location || '',
+                benefits: scholarshipData.benefits || '',
+                link: scholarshipData.link || scholarshipData.application_link || '',
+                requirements: scholarshipData.requirements || '',
+                deadline: (scholarshipData.deadline || scholarshipData.application_deadline || '').split('T')[0],
+                amount: scholarshipData.amount || '',
+                eligibility: scholarshipData.eligibility || '',
+                applicationProcess: scholarshipData.applicationProcess || scholarshipData.application_process || '',
+                contactEmail: scholarshipData.contactEmail || scholarshipData.contact_email || '',
+                contactPhone: scholarshipData.contactPhone || scholarshipData.contact_phone || ''
+              };
+              console.log('📝 Setting form data:', mappedFormData);
+              setFormData(mappedFormData);
             }
-
-          } catch (onlineError) {
-            console.warn('⚠️ Primary API failed, trying alternative endpoint:', onlineError);
-            
-            // Try alternative API endpoint
-            try {
-              console.log('🔄 Trying alternative API endpoint...');
-              const altResponse = await fetch(`/api/scholarships/${id}`, {
-                headers: {
-                  'Authorization': `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                  'Cache-Control': 'no-cache'
-                }
-              });
-
-              if (altResponse.ok) {
-                const altResponseText = await altResponse.text();
-                console.log('📄 Alternative API raw response:', altResponseText);
-                
-                try {
-                  const altScholarshipApiData = JSON.parse(altResponseText);
-                  console.log('🔍 Alternative API response:', altScholarshipApiData);
-                  scholarshipData = altScholarshipApiData.data?.scholarship || altScholarshipApiData.data || altScholarshipApiData;
-                  console.log('✅ Scholarship data from alternative API:', scholarshipData);
-                  
-                  // Store scholarship for offline use
-                  await offlineIntegrationService.storeScholarshipData(id, scholarshipData);
-                } catch (altParseError) {
-                  throw new Error('Alternative API also returned invalid JSON');
-                }
-              } else {
-                throw new Error(`Alternative API returned ${altResponse.status}`);
-              }
-              
-            } catch (altError) {
-              console.warn('⚠️ Alternative API also failed, falling back to offline data:', altError);
-              
-              // Fall back to offline data if both APIs fail
-              scholarshipData = await offlineIntegrationService.getScholarshipData(id);
-              
-              if (!scholarshipData) {
-                throw onlineError;
-              }
-            }
+          } catch (parseError) {
+            console.error('❌ JSON parse error:', parseError);
+            console.error('📄 Response was:', responseText);
+            throw new Error('Invalid JSON response from server');
           }
         } else {
-          // Offline mode: use offline services
-          console.log('📴 Offline mode: Using offline scholarship data...');
-          scholarshipData = await offlineIntegrationService.getScholarshipData(id);
-        }
-
-        if (scholarshipData) {
-          const mappedFormData = {
-            title: scholarshipData.title || '',
-            description: scholarshipData.description || '',
-            provider: scholarshipData.provider || '',
-            location: scholarshipData.location || '',
-            benefits: scholarshipData.benefits || '',
-            link: scholarshipData.link || scholarshipData.application_link || '',
-            requirements: scholarshipData.requirements || '',
-            deadline: (scholarshipData.deadline || scholarshipData.application_deadline || '').split('T')[0],
-            amount: scholarshipData.amount || '',
-            eligibility: scholarshipData.eligibility || '',
-            applicationProcess: scholarshipData.applicationProcess || scholarshipData.application_process || '',
-            contactEmail: scholarshipData.contactEmail || scholarshipData.contact_email || '',
-            contactPhone: scholarshipData.contactPhone || scholarshipData.contact_phone || ''
-          };
-          console.log('📝 Setting form data:', mappedFormData);
-          setFormData(mappedFormData);
+          const errorText = await response.text();
+          console.error('❌ API Error:', response.status, errorText);
+          throw new Error(`API returned ${response.status}: ${errorText}`);
         }
 
       } catch (err) {
@@ -294,110 +234,47 @@ const EditScholarship = () => {
       setSuccess('');
       
       const token = localStorage.getItem('token');
-      const isOnline = navigator.onLine;
-      let success = false;
+      
+      console.log('🌐 Updating scholarship...');
+      
+      // Remove amount field from submission since it's not needed
+      const { amount, ...submissionData } = formData;
+      
+      const response = await fetch(`/api/employer/scholarships/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(submissionData)
+      });
 
-      if (isOnline) {
-        try {
-          // Try online scholarship update first (preserving existing behavior)
-          console.log('🌐 Online mode: Updating scholarship...');
-          
-          // Remove amount field from submission since it's not needed
-          const { amount, ...submissionData } = formData;
-          
-          const response = await fetch(`/api/employer/scholarships/${id}`, {
-            method: 'PUT',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(submissionData)
-          });
+      console.log('📡 Update response status:', response.status);
 
-          console.log('📡 Update response status:', response.status);
-
-          if (response.ok) {
-            const updateResponseText = await response.text();
-            console.log('📄 Update response:', updateResponseText);
-            
-            let updateResult;
-            try {
-              updateResult = JSON.parse(updateResponseText);
-              console.log('✅ Update result:', updateResult);
-            } catch (parseError) {
-              console.log('⚠️ Non-JSON response, but status OK');
-              updateResult = { success: true };
-            }
-
-            success = true;
-            console.log('✅ Online scholarship update successful');
-            
-            setSuccess('Scholarship updated successfully!');
-            
-            // Store updated scholarship for offline use
-            await offlineIntegrationService.storeScholarshipData(id, submissionData);
-            
-            // Navigate back after delay
-            setTimeout(() => {
-              navigate('/employer/scholarships');
-            }, 1500);
-          } else {
-            const errorResponseText = await response.text();
-            console.error('❌ Update API Error:', response.status, errorResponseText);
-            throw new Error(`Failed to update scholarship: ${response.status} - ${errorResponseText}`);
-          }
-
-        } catch (onlineError) {
-          console.warn('⚠️ Online update failed, using offline:', onlineError);
-          
-          try {
-            // Fall back to offline scholarship update
-            const { amount: _, ...offlineSubmissionData } = formData;
-            const result = await offlineIntegrationService.updateScholarshipOffline(id, offlineSubmissionData);
-            console.log('📴 Offline update result:', result);
-            
-            if (result && result.success) {
-              success = true;
-              console.log('✅ Offline scholarship update successful');
-              
-              setSuccess('Scholarship updated offline! Changes will sync when online.');
-              
-              // Navigate back after delay
-              setTimeout(() => {
-                navigate('/employer/scholarships');
-              }, 1500);
-            } else {
-              throw new Error('Failed to update scholarship offline');
-            }
-          } catch (offlineError) {
-            console.error('❌ Offline update also failed:', offlineError);
-            throw new Error('Both online and offline updates failed');
-          }
-        }
-      } else {
-        // Offline scholarship update
-        console.log('📴 Offline mode: Updating scholarship offline...');
-        const { amount: _, ...offlineOnlySubmissionData } = formData;
-        const result = await offlineIntegrationService.updateScholarshipOffline(id, offlineOnlySubmissionData);
-        console.log('📴 Offline-only update result:', result);
+      if (response.ok) {
+        const updateResponseText = await response.text();
+        console.log('📄 Update response:', updateResponseText);
         
-        if (result && result.success) {
-          success = true;
-          console.log('✅ Offline scholarship update successful');
-          
-          setSuccess('Scholarship updated offline! Changes will sync when online.');
-          
-          // Navigate back after delay
-          setTimeout(() => {
-            navigate('/employer/scholarships');
-          }, 1500);
-        } else {
-          throw new Error('Failed to update scholarship offline');
+        let updateResult;
+        try {
+          updateResult = JSON.parse(updateResponseText);
+          console.log('✅ Update result:', updateResult);
+        } catch (parseError) {
+          console.log('⚠️ Non-JSON response, but status OK');
+          updateResult = { success: true };
         }
-      }
 
-      if (!success) {
-        throw new Error('Failed to update scholarship');
+        console.log('✅ Scholarship update successful');
+        setSuccess('Scholarship updated successfully!');
+        
+        // Navigate back after delay
+        setTimeout(() => {
+          navigate('/employer/scholarships');
+        }, 1500);
+      } else {
+        const errorResponseText = await response.text();
+        console.error('❌ Update API Error:', response.status, errorResponseText);
+        throw new Error(`Failed to update scholarship: ${response.status} - ${errorResponseText}`);
       }
 
     } catch (err) {

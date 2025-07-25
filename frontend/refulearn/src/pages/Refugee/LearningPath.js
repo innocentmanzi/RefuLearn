@@ -491,7 +491,7 @@ const LearningPath = () => {
               {recommendations.slice(0, 3).map((course) => (
                 <div key={course._id} style={{ marginBottom: '1rem', padding: '0.5rem', border: '1px solid #eee', borderRadius: '8px' }}>
                   <div style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>{course.title}</div>
-                  <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.5rem' }}>{course.description}</div>
+                  <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.5rem' }}>{course.description || course.overview || `Learn ${course.category || 'new skills'} in this comprehensive course designed for ${course.level || 'beginner'} level students.`}</div>
                   <ActionButton onClick={() => handleEnrollCourse(course._id)}>
                     Enroll
                   </ActionButton>

@@ -15,7 +15,7 @@ class OfflineDataCache {
     if (this.isInitialized) return;
 
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.dbName, 1);
+      const request = indexedDB.open(this.dbName, 5); // Increment version to trigger upgrade
       
       request.onupgradeneeded = (event) => {
         const db = event.target.result;
@@ -32,6 +32,18 @@ class OfflineDataCache {
         }
         if (!db.objectStoreNames.contains('jobs')) {
           db.createObjectStore('jobs', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('employerJobs')) {
+          db.createObjectStore('employerJobs', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('employerDashboard')) {
+          db.createObjectStore('employerDashboard', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('employerScholarships')) {
+          db.createObjectStore('employerScholarships', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('employerApplications')) {
+          db.createObjectStore('employerApplications', { keyPath: 'id' });
         }
         if (!db.objectStoreNames.contains('certificates')) {
           db.createObjectStore('certificates', { keyPath: 'id' });
@@ -52,12 +64,32 @@ class OfflineDataCache {
         if (!db.objectStoreNames.contains('syncQueue')) {
           db.createObjectStore('syncQueue', { keyPath: 'id', autoIncrement: true });
         }
+        
+        // Create a general courseData store for dynamic course storage
+        if (!db.objectStoreNames.contains('courseDataStore')) {
+          const courseDataStore = db.createObjectStore('courseDataStore', { keyPath: 'courseId' });
+          courseDataStore.createIndex('timestamp', 'timestamp', { unique: false });
+        }
+        
+        // Create object stores for discussion data
+        if (!db.objectStoreNames.contains('discussionLikes')) {
+          db.createObjectStore('discussionLikes', { keyPath: 'likeKey' });
+        }
+        if (!db.objectStoreNames.contains('discussionData')) {
+          db.createObjectStore('discussionData', { keyPath: 'key' });
+        }
       };
       
       request.onsuccess = (event) => {
         this.db = event.target.result;
         this.isInitialized = true;
         console.log('✅ OfflineDataCache initialized');
+        
+        // Check and fix database schema after initialization
+        this.checkAndFixDatabase().catch(error => {
+          console.warn('⚠️ Database check failed:', error);
+        });
+        
         resolve();
       };
       
@@ -69,36 +101,149 @@ class OfflineDataCache {
 
   // Store data in IndexedDB
   async storeData(storeName, data) {
-    if (!this.isInitialized) await this.initialize();
-    
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction([storeName], 'readwrite');
-      const store = transaction.objectStore(storeName);
+    try {
+      if (!this.isInitialized) await this.initialize();
       
-      if (Array.isArray(data)) {
-        data.forEach(item => store.put(item));
-      } else {
-        store.put(data);
+      // Check if the object store exists
+      if (!this.db.objectStoreNames.contains(storeName)) {
+        console.warn(`⚠️ Object store '${storeName}' not found, skipping storage`);
+        return;
       }
       
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-    });
+      return new Promise((resolve, reject) => {
+        const transaction = this.db.transaction([storeName], 'readwrite');
+        const store = transaction.objectStore(storeName);
+        
+        if (Array.isArray(data)) {
+          data.forEach(item => store.put(item));
+        } else {
+          store.put(data);
+        }
+        
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      });
+    } catch (error) {
+      console.warn(`⚠️ Failed to store data in '${storeName}':`, error);
+      // Don't throw error, just log it and continue
+    }
   }
 
   // Get data from IndexedDB
   async getData(storeName, id = null) {
-    if (!this.isInitialized) await this.initialize();
-    
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction([storeName], 'readonly');
-      const store = transaction.objectStore(storeName);
+    try {
+      if (!this.isInitialized) await this.initialize();
       
-      const request = id ? store.get(id) : store.getAll();
+      return new Promise((resolve, reject) => {
+        const transaction = this.db.transaction([storeName], 'readonly');
+        const store = transaction.objectStore(storeName);
+        
+        let request;
+        if (id) {
+          request = store.get(id);
+        } else {
+          request = store.getAll();
+        }
+        
+        request.onsuccess = () => {
+          resolve(request.result);
+        };
+        
+        request.onerror = () => {
+          reject(request.error);
+        };
+      });
+    } catch (error) {
+      console.error('❌ Error getting data from cache:', error);
+      return null;
+    }
+  }
+
+  // Remove data from IndexedDB
+  async removeData(storeName, id) {
+    try {
+      if (!this.isInitialized) await this.initialize();
       
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
+      return new Promise((resolve, reject) => {
+        const transaction = this.db.transaction([storeName], 'readwrite');
+        const store = transaction.objectStore(storeName);
+        
+        const request = store.delete(id);
+        
+        request.onsuccess = () => {
+          console.log('🗑️ Data removed from cache:', { storeName, id });
+          resolve(true);
+        };
+        
+        request.onerror = () => {
+          reject(request.error);
+        };
+      });
+    } catch (error) {
+      console.error('❌ Error removing data from cache:', error);
+      return false;
+    }
+  }
+
+  // Generic get method for key-value storage
+  async get(key) {
+    try {
+      if (!this.isInitialized) await this.initialize();
+      
+      return new Promise((resolve, reject) => {
+        const transaction = this.db.transaction(['courseDataStore'], 'readonly');
+        const store = transaction.objectStore('courseDataStore');
+        
+        const request = store.get(key);
+        
+        request.onsuccess = () => {
+          const result = request.result;
+          if (result && result.data) {
+            resolve(result.data);
+          } else {
+            resolve(null);
+          }
+        };
+        
+        request.onerror = () => {
+          reject(request.error);
+        };
+      });
+    } catch (error) {
+      console.error('❌ Error getting data from cache:', error);
+      return null;
+    }
+  }
+
+  // Generic set method for key-value storage
+  async set(key, data) {
+    try {
+      if (!this.isInitialized) await this.initialize();
+      
+      return new Promise((resolve, reject) => {
+        const transaction = this.db.transaction(['courseDataStore'], 'readwrite');
+        const store = transaction.objectStore('courseDataStore');
+        
+        const entry = {
+          courseId: key,
+          data: data,
+          timestamp: Date.now()
+        };
+        
+        const request = store.put(entry);
+        
+        request.onsuccess = () => {
+          console.log('✅ Data stored in cache:', key);
+          resolve();
+        };
+        
+        request.onerror = () => {
+          reject(request.error);
+        };
+      });
+    } catch (error) {
+      console.error('❌ Error storing data in cache:', error);
+    }
   }
 
   // Cache API response
@@ -335,6 +480,60 @@ class OfflineDataCache {
       return data !== null && data !== undefined;
     } catch (error) {
       return false;
+    }
+  }
+
+  // Force database upgrade by deleting and recreating
+  async forceUpgrade() {
+    try {
+      console.log('🔄 Force upgrading database...');
+      
+      // Close existing connection
+      if (this.db) {
+        this.db.close();
+        this.db = null;
+        this.isInitialized = false;
+      }
+      
+      // Delete the database
+      const deleteRequest = indexedDB.deleteDatabase(this.dbName);
+      deleteRequest.onsuccess = () => {
+        console.log('✅ Database deleted, recreating...');
+        this.initialize();
+      };
+      deleteRequest.onerror = () => {
+        console.error('❌ Failed to delete database');
+      };
+    } catch (error) {
+      console.error('❌ Error force upgrading database:', error);
+    }
+  }
+
+  // Check and fix database schema
+  async checkAndFixDatabase() {
+    try {
+      if (!this.isInitialized) await this.initialize();
+      
+      const requiredStores = [
+        'users', 'courses', 'progress', 'jobs', 'employerJobs', 
+        'employerDashboard', 'employerScholarships', 'employerApplications',
+        'certificates', 'scholarships', 'categories', 'courseData', 
+        'apiCache', 'syncQueue'
+      ];
+      
+      const missingStores = requiredStores.filter(store => 
+        !this.db.objectStoreNames.contains(store)
+      );
+      
+      if (missingStores.length > 0) {
+        console.warn('⚠️ Missing object stores:', missingStores);
+        console.log('🔄 Forcing database upgrade...');
+        await this.forceUpgrade();
+      } else {
+        console.log('✅ All required object stores are present');
+      }
+    } catch (error) {
+      console.error('❌ Failed to check/fix database:', error);
     }
   }
 

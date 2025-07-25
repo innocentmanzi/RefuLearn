@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import styled from 'styled-components';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import offlineIntegrationService from '../../services/offlineIntegrationService';
+
 
 const Container = styled.div`
   padding: 2rem;
@@ -37,6 +37,15 @@ const Input = styled.input`
   border-radius: 8px;
   border: 1px solid #ccc;
   font-size: 1rem;
+  
+  &[type="date"] {
+    cursor: pointer;
+    padding-right: 60px; /* Make room for the calendar icon */
+    
+    &::-webkit-calendar-picker-indicator {
+      display: none; /* Hide the default calendar icon */
+    }
+  }
 `;
 const TextArea = styled.textarea`
   padding: 0.7rem 1rem;
@@ -87,6 +96,45 @@ const Label = styled.label`
   color: #555;
 `;
 
+const DateInputWrapper = styled.div`
+  position: relative;
+  display: flex;
+  align-items: center;
+`;
+
+const CalendarIcon = styled.button`
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: ${props => props.hasValue ? '#007bff' : '#f8f9fa'};
+  border: 1px solid ${props => props.hasValue ? '#007bff' : '#ddd'};
+  border-radius: 4px;
+  font-size: 18px;
+  cursor: pointer;
+  color: ${props => props.hasValue ? 'white' : '#666'};
+  padding: 8px;
+  z-index: 1000;
+  min-width: 40px;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  &:hover {
+    color: ${props => props.hasValue ? 'white' : '#007bff'};
+    background: ${props => props.hasValue ? '#0056b3' : '#e9ecef'};
+    border-color: #007bff;
+  }
+  
+  &:active {
+    background: #007bff;
+    color: white;
+  }
+`;
+
+
+
 const PostScholarship = () => {
   const [form, setForm] = useState({
     title: '',
@@ -105,9 +153,43 @@ const PostScholarship = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
 
+  const dateInputRef = useRef(null);
+
   const handleChange = e => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
+
+  const handleCalendarClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('📅 Calendar icon clicked');
+    
+    if (dateInputRef.current) {
+      try {
+        // Try to open the date picker
+        if (dateInputRef.current.showPicker) {
+          dateInputRef.current.showPicker();
+          console.log('✅ Date picker opened successfully');
+        } else {
+          // Fallback: focus the input and trigger click
+          dateInputRef.current.focus();
+          dateInputRef.current.click();
+          console.log('✅ Date input focused and clicked');
+        }
+      } catch (error) {
+        console.log('❌ Error opening date picker:', error);
+        // Final fallback: just focus the input
+        dateInputRef.current.focus();
+      }
+    }
+  };
+
+  const handleDateChange = (e) => {
+    console.log('📅 Date changed:', e.target.value);
+    setForm({ ...form, deadline: e.target.value });
+  };
+
+
 
   const handleSubmit = async e => {
     e.preventDefault();
@@ -115,59 +197,25 @@ const PostScholarship = () => {
     setError('');
     setSuccess(false);
 
-    const isOnline = navigator.onLine;
-    
-    if (isOnline) {
-      try {
-        console.log('🌐 Online mode: Posting scholarship...');
-        
-        const response = await fetch('/api/scholarships', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-          },
-          body: JSON.stringify({
-            ...form,
-            requirements: form.requirements ? form.requirements.split(',').map(req => req.trim()) : [],
-            deadline: new Date(form.deadline).toISOString()
-          })
-        });
+    try {
+      console.log('🌐 Posting scholarship...');
+      
+      const response = await fetch('/api/scholarships', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+        },
+        body: JSON.stringify({
+          ...form,
+          requirements: form.requirements ? form.requirements.split(',').map(req => req.trim()) : [],
+          deadline: new Date(form.deadline).toISOString()
+        })
+      });
 
-        const data = await response.json();
+      const data = await response.json();
 
-        if (data.success) {
-          setSuccess(true);
-          setForm({
-            title: '',
-            description: '',
-            provider: '',
-            location: '',
-            benefits: '',
-            link: '',
-            requirements: '',
-            deadline: '',
-            isActive: true
-          });
-          setTimeout(() => {
-            navigate('/employer/scholarships');
-          }, 2000);
-        } else {
-          throw new Error(data.message || 'Failed to post scholarship');
-        }
-      } catch (onlineError) {
-        console.warn('⚠️ Online scholarship posting failed, queuing for offline sync:', onlineError);
-        
-        // Queue action for offline sync
-        await offlineIntegrationService.queueEmployerScholarshipAction({
-          action: 'create',
-          data: {
-            ...form,
-            requirements: form.requirements ? form.requirements.split(',').map(req => req.trim()) : [],
-            deadline: new Date(form.deadline).toISOString()
-          }
-        });
-        
+      if (data.success) {
         setSuccess(true);
         setForm({
           title: '',
@@ -183,38 +231,15 @@ const PostScholarship = () => {
         setTimeout(() => {
           navigate('/employer/scholarships');
         }, 2000);
+      } else {
+        throw new Error(data.message || 'Failed to post scholarship');
       }
-    } else {
-      // Offline mode: queue action for sync
-      console.log('📴 Offline mode: Queuing scholarship posting for sync...');
-      
-      await offlineIntegrationService.queueEmployerScholarshipAction({
-        action: 'create',
-        data: {
-          ...form,
-          requirements: form.requirements ? form.requirements.split(',').map(req => req.trim()) : [],
-          deadline: new Date(form.deadline).toISOString()
-        }
-      });
-      
-      setSuccess(true);
-      setForm({
-        title: '',
-        description: '',
-        provider: '',
-        location: '',
-        benefits: '',
-        link: '',
-        requirements: '',
-        deadline: '',
-        isActive: true
-      });
-      setTimeout(() => {
-        navigate('/employer/scholarships');
-      }, 2000);
+    } catch (error) {
+      console.error('❌ Scholarship posting error:', error);
+      setError('Failed to post scholarship. Please try again.');
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
   return (
@@ -304,13 +329,24 @@ const PostScholarship = () => {
 
         <FormGroup>
           <Label>Application Deadline *</Label>
-          <Input 
-            name="deadline" 
-            type="date" 
-            value={form.deadline} 
-            onChange={handleChange} 
-            required 
-          />
+          <DateInputWrapper>
+            <Input 
+              ref={dateInputRef}
+              name="deadline" 
+              type="date" 
+              value={form.deadline} 
+              onChange={handleDateChange} 
+              min={new Date().toISOString().split('T')[0]}
+              required 
+            />
+            <CalendarIcon 
+              type="button" 
+              onClick={handleCalendarClick}
+              hasValue={!!form.deadline}
+            >
+              📅
+            </CalendarIcon>
+          </DateInputWrapper>
         </FormGroup>
 
         <Button type="submit" disabled={loading}>

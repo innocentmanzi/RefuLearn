@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
   padding: 2rem;
-  background: ${({ theme }) => theme.colors.white};
+  background: #f8f9fa;
   min-height: 100vh;
 `;
 
 const Title = styled.h1`
-  color: ${({ theme }) => theme.colors.primary};
+  color: #333;
   margin-bottom: 1.5rem;
 `;
 
@@ -45,7 +44,7 @@ const StatCard = styled.div`
 const StatNumber = styled.div`
   font-size: 2rem;
   font-weight: bold;
-  color: ${({ color, theme }) => color || theme.colors.primary};
+  color: ${({ color }) => color || '#007bff'};
   margin-bottom: 0.5rem;
 `;
 
@@ -109,7 +108,7 @@ const TicketHeader = styled.div`
 `;
 
 const TicketTitle = styled.h3`
-  color: ${({ theme }) => theme.colors.primary};
+  color: #007bff;
   margin: 0;
   font-size: 1.2rem;
 `;
@@ -152,8 +151,8 @@ const TicketTags = styled.div`
 `;
 
 const Tag = styled.span`
-  background: ${({ theme }) => theme.colors.primary}20;
-  color: ${({ theme }) => theme.colors.primary};
+  background: #007bff20;
+  color: #007bff;
   padding: 0.3rem 0.8rem;
   border-radius: 20px;
   font-size: 0.8rem;
@@ -166,13 +165,13 @@ const ActionButtons = styled.div`
 `;
 
 const Button = styled.button`
-  background: ${({ variant, theme }) => {
+  background: ${({ variant }) => {
     switch(variant) {
-      case 'primary': return theme.colors.primary;
+      case 'primary': return '#007bff';
       case 'success': return '#27ae60';
       case 'warning': return '#f39c12';
       case 'secondary': return '#6c757d';
-      default: return theme.colors.primary;
+      default: return '#007bff';
     }
   }};
   color: #fff;
@@ -184,13 +183,13 @@ const Button = styled.button`
   transition: background 0.2s;
   
   &:hover {
-    background: ${({ variant, theme }) => {
+    background: ${({ variant }) => {
       switch(variant) {
-        case 'primary': return theme.colors.secondary;
+        case 'primary': return '#0056b3';
         case 'success': return '#229954';
         case 'warning': return '#e67e22';
         case 'secondary': return '#5a6268';
-        default: return theme.colors.secondary;
+        default: return '#0056b3';
       }
     }};
   }
@@ -222,7 +221,7 @@ const ModalContent = styled.div`
 `;
 
 const ModalTitle = styled.h2`
-  color: ${({ theme }) => theme.colors.primary};
+  color: #007bff;
   margin-bottom: 1.5rem;
 `;
 
@@ -252,7 +251,6 @@ const HelpManagement = () => {
   const [showResponseModal, setShowResponseModal] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [responseText, setResponseText] = useState('');
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState('all');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
@@ -263,67 +261,48 @@ const HelpManagement = () => {
       setLoading(true);
       setError('');
       
-      const isOnline = navigator.onLine;
-      let ticketsData = [];
-
-      if (isOnline) {
-        try {
-          // Try online API calls first (preserving existing behavior)
-          console.log('🌐 Online mode: Fetching admin help tickets from API...');
-          
-          let url = '/api/help/all-tickets';
-          const params = [];
-          if (statusFilter !== 'all') params.push(`status=${statusFilter}`);
-          if (priorityFilter !== 'all') params.push(`priority=${priorityFilter}`);
-          if (params.length > 0) url += '?' + params.join('&');
-          const res = await fetch(url, {
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-            }
-          });
-          const data = await res.json();
-          if (data.success) {
-            ticketsData = data.data.tickets || [];
-            
-            // Store tickets data for offline use
-            await offlineIntegrationService.storeAdminHelpTickets(ticketsData);
-            console.log('✅ Admin help tickets stored for offline use');
-          } else {
-            throw new Error(data.message || 'Failed to fetch tickets.');
-          }
-        } catch (onlineError) {
-          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
-          
-          // Fall back to offline data if online fails
-          ticketsData = await offlineIntegrationService.getAdminHelpTickets();
-          
-          if (ticketsData.length === 0) {
-            throw onlineError;
-          }
-        }
-      } else {
-        // Offline mode: use offline services
-        console.log('📴 Offline mode: Using offline admin help tickets data...');
-        ticketsData = await offlineIntegrationService.getAdminHelpTickets();
-      }
-
       try {
-        setTickets(ticketsData);
-        setFilteredTickets(ticketsData);
+        console.log('🎫 Fetching help tickets from admin API...');
+        
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/admin/help-tickets?_t=' + Date.now(), {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('✅ Help tickets received from admin API:', data);
+          console.log('🔍 Sample ticket data:', data.data?.[0]);
+          setTickets(data.data || []);
+          setFilteredTickets(data.data || []);
+        } else {
+          console.error('❌ Help tickets API error:', response.status, response.statusText);
+          const errorText = await response.text();
+          console.error('❌ Error response:', errorText);
+          throw new Error('Failed to fetch help tickets');
+        }
       } catch (err) {
-        setError('Network error.');
+        console.error('Error fetching tickets:', err);
+        setError('Failed to load help tickets');
       } finally {
         setLoading(false);
       }
     };
+    
     fetchTickets();
-  }, [statusFilter, priorityFilter]);
+  }, []);
 
   useEffect(() => {
     const filtered = tickets.filter(ticket => {
-      const matchesSearch = ticket.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (ticket.description && ticket.description.toLowerCase().includes(searchTerm.toLowerCase()));
-      const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
+      const matchesSearch = (ticket.subject || ticket.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (ticket.description || '').toLowerCase().includes(searchTerm.toLowerCase());
+      
+      // Handle both in-progress and in_progress status formats
+      const matchesStatus = statusFilter === 'all' || 
+        ticket.status === statusFilter || 
+        (statusFilter === 'in-progress' && ticket.status === 'in_progress') ||
+        (statusFilter === 'in_progress' && ticket.status === 'in-progress');
+      
       const matchesPriority = priorityFilter === 'all' || ticket.priority === priorityFilter;
       return matchesSearch && matchesStatus && matchesPriority;
     });
@@ -334,25 +313,20 @@ const HelpManagement = () => {
     setLoading(true);
     setError('');
     try {
-      let url = '/api/help/all-tickets';
-      const params = [];
-      if (statusFilter !== 'all') params.push(`status=${statusFilter}`);
-      if (priorityFilter !== 'all') params.push(`priority=${priorityFilter}`);
-      if (params.length > 0) url += '?' + params.join('&');
-      const res = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-        }
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/admin/help-tickets?_t=' + Date.now(), {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
-      const data = await res.json();
-      if (data.success) {
-        setTickets(data.data.tickets || []);
-        setFilteredTickets(data.data.tickets || []);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setTickets(data.data || []);
+        setFilteredTickets(data.data || []);
       } else {
-        setError(data.message || 'Failed to fetch tickets.');
+        throw new Error('Failed to fetch help tickets');
       }
     } catch (err) {
-      setError('Network error.');
+      setError('Failed to load help tickets');
     } finally {
       setLoading(false);
     }
@@ -362,22 +336,31 @@ const HelpManagement = () => {
     setActionLoading(true);
     setError('');
     try {
-      const res = await fetch(`/api/help/tickets/${ticketId}`, {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/help/tickets/${ticketId}`, {
         method: 'PUT',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ status: newStatus })
       });
-      const data = await res.json();
-      if (data.success) {
-        await refreshTickets();
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          alert(`Ticket marked as ${newStatus} successfully!`);
+          await refreshTickets();
+        } else {
+          throw new Error(data.message || `Failed to update ticket status`);
+        }
       } else {
-        setError(data.message || 'Failed to update ticket.');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `Failed to update ticket status`);
       }
     } catch (err) {
-      setError('Network error.');
+      console.error(`Error updating ticket:`, err);
+      alert(err.message || `Failed to update ticket status`);
     } finally {
       setActionLoading(false);
     }
@@ -393,25 +376,32 @@ const HelpManagement = () => {
     setActionLoading(true);
     setError('');
     try {
-      const res = await fetch(`/api/help/tickets/${selectedTicket._id || selectedTicket.id}`, {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/help/tickets/${selectedTicket._id}`, {
         method: 'PUT',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ status: 'resolved', response: responseText, resolvedDate: new Date().toISOString() })
+        body: JSON.stringify({ 
+          status: 'resolved', 
+          response: responseText, 
+          resolvedDate: new Date().toISOString() 
+        })
       });
-      const data = await res.json();
-      if (data.success) {
+      
+      if (response.ok) {
         setShowResponseModal(false);
         setResponseText('');
         setSelectedTicket(null);
         await refreshTickets();
+        alert('Response submitted successfully!');
       } else {
-        setError(data.message || 'Failed to submit response.');
+        throw new Error('Failed to submit response');
       }
     } catch (err) {
-      setError('Network error.');
+      console.error('Error submitting response:', err);
+      alert('Failed to submit response');
     } finally {
       setActionLoading(false);
     }
@@ -419,8 +409,8 @@ const HelpManagement = () => {
 
   const getStats = () => {
     const total = tickets.length;
-    const open = tickets.filter(t => t.status === 'open').length;
-    const inProgress = tickets.filter(t => t.status === 'in-progress').length;
+    const open = tickets.filter(t => t.status === 'open' || !t.status).length;
+    const inProgress = tickets.filter(t => t.status === 'in-progress' || t.status === 'in_progress').length;
     const resolved = tickets.filter(t => t.status === 'resolved').length;
     
     return { total, open, inProgress, resolved };
@@ -429,13 +419,30 @@ const HelpManagement = () => {
   const stats = getStats();
 
   const handleStatCardClick = (status) => {
-    setSelectedStatusFilter(status);
-    setStatusFilter(status);
+    setStatusFilter(status === 'all' ? 'all' : status);
   };
+
+  if (loading) {
+    return (
+      <Container>
+        <Title>Help Management</Title>
+        <p>Loading tickets...</p>
+      </Container>
+    );
+  }
+
+  if (error) {
+    return (
+      <Container>
+        <Title>Help Management</Title>
+        <p style={{ color: 'red' }}>{error}</p>
+      </Container>
+    );
+  }
 
   return (
     <Container>
-      <Title>Q&A Management</Title>
+      <Title>Help Management</Title>
       <Subtitle>
         Handle technical support requests and platform issues from users.
       </Subtitle>
@@ -471,7 +478,7 @@ const HelpManagement = () => {
         >
           <option value="all">All Statuses</option>
           <option value="open">Open</option>
-          <option value="in-progress">In Progress</option>
+          <option value="in_progress">In Progress</option>
           <option value="resolved">Resolved</option>
           <option value="closed">Closed</option>
         </FilterSelect>
@@ -487,43 +494,31 @@ const HelpManagement = () => {
       </FilterBar>
 
       <TicketsList>
-        {loading ? (
-          <div>Loading...</div>
-        ) : error ? (
-          <div style={{color:'red'}}>{error}</div>
-        ) : filteredTickets.length > 0 ? (
+        {filteredTickets.length > 0 ? (
           filteredTickets.map(ticket => (
-            <TicketCard key={ticket._id || ticket.id}>
+            <TicketCard key={ticket._id}>
               <TicketHeader>
-                <TicketTitle>{ticket.title}</TicketTitle>
-                <StatusBadge status={ticket.status}>
-                  {ticket.status ? ticket.status.replace('_', ' ').toUpperCase() : ''}
+                <TicketTitle>{ticket.subject || ticket.title || 'Help Request'}</TicketTitle>
+                <StatusBadge status={ticket.status || 'open'}>
+                  {(ticket.status || 'open').replace('_', ' ').toUpperCase()}
                 </StatusBadge>
               </TicketHeader>
               <TicketMeta>
-                <span>By {ticket.user || ticket.author || ''}</span>
-                <span>• {ticket.createdAt ? new Date(ticket.createdAt).toLocaleDateString() : ''}</span>
-                <span>• {ticket.category}</span>
-                <span>• Priority: {ticket.priority}</span>
+                <span>By {ticket.user?.firstName || 'Unknown'} {ticket.user?.lastName || 'User'}</span>
+                <span>• {new Date(ticket.createdAt || ticket.created).toLocaleDateString()}</span>
+                <span>• {ticket.category || 'general'}</span>
+                <span>• Priority: {ticket.priority || 'medium'}</span>
               </TicketMeta>
               <TicketContent>
-                {ticket.description}
+                {ticket.description || ticket.content || 'No description provided'}
               </TicketContent>
-              {ticket.attachments && ticket.attachments.length > 0 && (
-                <div style={{marginBottom:'0.5rem'}}>
-                  <strong>Attachments:</strong>
-                  <ul>
-                    {ticket.attachments.map((file, idx) => (
-                      <li key={idx}><a href={file} target="_blank" rel="noopener noreferrer">Attachment {idx+1}</a></li>
-                    ))}
-                  </ul>
-                </div>
+              {ticket.tags && ticket.tags.length > 0 && (
+                <TicketTags>
+                  {ticket.tags.map(tag => (
+                    <Tag key={tag}>{tag}</Tag>
+                  ))}
+                </TicketTags>
               )}
-              <TicketTags>
-                {ticket.tags && ticket.tags.map(tag => (
-                  <Tag key={tag}>{tag}</Tag>
-                ))}
-              </TicketTags>
               {ticket.response && (
                 <div style={{ background: '#f8f9fa', padding: '1rem', borderRadius: '8px', marginBottom: '1rem' }}>
                   <strong>Your Response:</strong>
@@ -532,11 +527,11 @@ const HelpManagement = () => {
                 </div>
               )}
               <ActionButtons>
-                {ticket.status === 'open' && (
+                {(ticket.status === 'open' || !ticket.status) && (
                   <>
                     <Button 
                       variant="warning" 
-                      onClick={() => handleStatusChange(ticket._id || ticket.id, 'in-progress')}
+                      onClick={() => handleStatusChange(ticket._id, 'in-progress')}
                       disabled={actionLoading}
                     >
                       Mark In Progress
@@ -550,7 +545,7 @@ const HelpManagement = () => {
                     </Button>
                   </>
                 )}
-                {ticket.status === 'in-progress' && (
+                {ticket.status === 'in_progress' && (
                   <Button 
                     variant="primary" 
                     onClick={() => handleRespond(ticket)}
@@ -562,7 +557,7 @@ const HelpManagement = () => {
                 {ticket.status === 'resolved' && (
                   <Button 
                     variant="secondary" 
-                    onClick={() => handleStatusChange(ticket._id || ticket.id, 'closed')}
+                    onClick={() => handleStatusChange(ticket._id, 'closed')}
                     disabled={actionLoading}
                   >
                     Close Ticket

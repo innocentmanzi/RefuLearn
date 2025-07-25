@@ -8,6 +8,8 @@ import { useUser } from '../contexts/UserContext';
 import { FaChevronDown } from 'react-icons/fa';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
+import { useLanguageRouting } from '../hooks/useLanguageRouting';
+import preloader from '../utils/preloader';
 
 const HamburgerButton = styled.button`
   display: none;
@@ -187,43 +189,45 @@ const UserRole = styled.div`
   margin-left: 0.5rem;
 `;
 
+
+
 const navigationItems = {
   refugee: [
     { to: '/dashboard', label: 'Dashboard' },
     { to: '/courses', label: 'Courses' },
     { to: '/jobs', label: 'Jobs' },
-    { to: '/peer-learning', label: 'Peer Learning' },
     { to: '/certificates', label: 'Certificates' },
     { to: '/help', label: 'Help' }
   ],
   instructor: [
     { to: '/instructor/dashboard', label: 'Dashboard' },
     { to: '/instructor/courses', label: 'Manage Courses' },
-    { to: '/instructor/assessments', label: 'Assessments' },
-    { to: '/instructor/help', label: 'Help Management' }
+    { to: '/instructor/quizzes', label: 'Quizzes' },
+    { to: '/instructor/help', label: 'Help' }
   ],
   admin: [
     { to: '/admin/dashboard', label: 'Dashboard' },
     { to: '/admin/users', label: 'Manage Users' },
-    { to: '/admin/analytics', label: 'Analytics' },
+    { to: '/admin/approvals', label: 'Approve Content' },
     { to: '/admin/help', label: 'Help Management' }
   ],
   employer: [
     { to: '/employer/dashboard', label: 'Dashboard' },
     { to: '/employer/jobs', label: 'Jobs' },
     { to: '/employer/scholarships', label: 'Scholarships' },
-    { to: '/employer/applicants', label: 'View Applicants' }
+    { to: '/employer/notifications', label: 'Notifications' }
   ]
 };
 
 const Sidebar = ({ role, children, onLogout, headerSpacing }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const { user } = useUser();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const userInfoRef = useRef(null);
   const navigate = useNavigate();
+  const { getTranslatedPath } = useLanguageRouting();
 
   const handleToggle = () => setOpen(o => !o);
   const handleClose = () => setOpen(false);
@@ -232,6 +236,11 @@ const Sidebar = ({ role, children, onLogout, headerSpacing }) => {
   useEffect(() => {
     setOpen(false);
   }, [location.pathname]);
+
+  // Force re-render when language changes
+  useEffect(() => {
+    // This will trigger a re-render when the language changes
+  }, [i18n.language]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -258,10 +267,10 @@ const Sidebar = ({ role, children, onLogout, headerSpacing }) => {
     setDropdownOpen(false);
     switch (action) {
       case 'profile':
-        navigate('/profile');
+        navigate(getTranslatedPath('/profile'));
         break;
       case 'settings':
-        navigate('/account-settings');
+        navigate(getTranslatedPath('/account-settings'));
         break;
       case 'logout':
         onLogout();
@@ -269,6 +278,43 @@ const Sidebar = ({ role, children, onLogout, headerSpacing }) => {
       default:
         break;
     }
+  };
+
+  const refugeeNavItems = [
+    { to: getTranslatedPath('/dashboard'), label: 'navigation.dashboard' },
+    { to: getTranslatedPath('/courses'), label: 'navigation.courses' },
+    { to: getTranslatedPath('/jobs'), label: 'navigation.jobs' },
+    { to: getTranslatedPath('/certificates'), label: 'navigation.certificates' },
+    { to: getTranslatedPath('/help'), label: 'navigation.help' }
+  ];
+
+  const instructorNavItems = [
+    { to: '/instructor/dashboard', label: 'navigation.dashboard' },
+    { to: '/instructor/courses', label: 'navigation.manageCourses' },
+    { to: '/instructor/quizzes', label: 'Quizzes' },
+    { to: '/instructor/help', label: 'navigation.help' }
+  ];
+
+  const adminNavItems = [
+    { to: '/admin/dashboard', label: 'navigation.dashboard' },
+    { to: '/admin/users', label: 'navigation.users' },
+    { to: '/admin/approvals', label: 'navigation.approvals' },
+    { to: '/admin/help', label: 'navigation.help' }
+  ];
+
+  const employerNavItems = [
+    { to: '/employer/dashboard', label: 'navigation.dashboard' },
+    { to: '/employer/jobs', label: 'navigation.jobs' },
+    { to: '/employer/scholarships', label: 'navigation.scholarships' },
+    { to: '/employer/notifications', label: 'navigation.notifications' }
+  ];
+
+  // Map roles to their navigation items
+  const navigationItems = {
+    refugee: refugeeNavItems,
+    instructor: instructorNavItems,
+    admin: adminNavItems,
+    employer: employerNavItems
   };
 
   return (
@@ -287,12 +333,19 @@ const Sidebar = ({ role, children, onLogout, headerSpacing }) => {
               <div key={link.to}>
                 <StyledNavLink 
                   to={link.to}
+                  onMouseEnter={() => {
+                    // Start preloading when user hovers over navigation items
+                    const pageType = link.to.split('/')[1] || 'dashboard';
+                    preloader.preloadPageData(pageType);
+                  }}
                 >
                   {t(link.label)}
                 </StyledNavLink>
               </div>
             ))}
           </NavLinks>
+          
+
           
           {/* User Info Section - now at the bottom of TopSection, scrollable */}
           <div ref={userInfoRef} style={{ width: '100%', marginTop: '0.5rem', marginBottom: '1rem', position: 'relative' }}>
@@ -302,14 +355,37 @@ const Sidebar = ({ role, children, onLogout, headerSpacing }) => {
             >
               <UserAvatar>
                 {user?.profilePic ? (
-                  <img src={user.profilePic} alt="Profile" />
+                  <img 
+                    src={(() => {
+                      if (user.profilePic) {
+                        // Convert Windows backslashes to forward slashes
+                        const normalizedPath = user.profilePic.replace(/\\/g, '/');
+                        
+                        if (normalizedPath.startsWith('http://') || normalizedPath.startsWith('https://')) {
+                          return normalizedPath;
+                        } else if (normalizedPath.startsWith('/uploads/')) {
+                          return normalizedPath;
+                        } else if (normalizedPath.startsWith('uploads/')) {
+                          return `/${normalizedPath}`;
+                        } else {
+                          return `/uploads/${normalizedPath}`;
+                        }
+                      }
+                      return user.profilePic;
+                    })()} 
+                    alt="Profile" 
+                    onError={(e) => {
+                      console.log('Profile image failed to load:', e.target.src);
+                      e.target.style.display = 'none';
+                    }}
+                  />
                 ) : (
                   ((user?.firstName || user?.lastName) ? `${user.firstName?.[0] || ''}${user.lastName?.[0] || ''}`.toUpperCase() : 'U')
                 )}
               </UserAvatar>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <UserName>{user?.firstName ? `${user.firstName} ${user.lastName}` : 'User'}</UserName>
-                <UserRole>{role?.charAt(0).toUpperCase() + role?.slice(1)}</UserRole>
+                <UserRole>{t(`roles.${role}`, role?.charAt(0).toUpperCase() + role?.slice(1))}</UserRole>
               </div>
             </UserInfoSection>
             {/* Dropdown menu */}
@@ -339,17 +415,41 @@ const Sidebar = ({ role, children, onLogout, headerSpacing }) => {
                     {user?.firstName ? `${user.firstName} ${user.lastName}` : 'User'}
                   </div>
                   <div style={{ color: '#666', fontSize: '0.95rem', textTransform: 'capitalize', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'left', marginLeft: '0.5rem' }}>
-                    {role?.charAt(0).toUpperCase() + role?.slice(1)}
+                    {t(`roles.${role}`, role?.charAt(0).toUpperCase() + role?.slice(1))}
                   </div>
                 </div>
-                <div style={{ padding: '0.75rem 1rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.75rem', color: '#333', fontSize: '0.9rem' }} onClick={() => handleMenuItemClick('profile')}>
-                  <span style={{ fontSize: '1rem', width: 16, textAlign: 'center' }}>👤</span> Edit Profile
+                <div style={{ 
+                  padding: '0.75rem 1rem', 
+                  cursor: 'pointer', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.5rem',
+                  fontSize: '0.9rem',
+                  color: '#666'
+                }} onClick={() => handleMenuItemClick('profile')}>
+                  <span style={{ fontSize: '1rem', width: 16, textAlign: 'center' }}>👤</span> {t('profile.editProfile', 'Edit Profile')}
                 </div>
-                <div style={{ padding: '0.75rem 1rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.75rem', color: '#333', fontSize: '0.9rem' }} onClick={() => handleMenuItemClick('settings')}>
-                  <span style={{ fontSize: '1rem', width: 16, textAlign: 'center' }}>⚙️</span> Account Settings
+                <div style={{ 
+                  padding: '0.75rem 1rem', 
+                  cursor: 'pointer', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.5rem',
+                  fontSize: '0.9rem',
+                  color: '#666'
+                }} onClick={() => handleMenuItemClick('settings')}>
+                  <span style={{ fontSize: '1rem', width: 16, textAlign: 'center' }}>⚙️</span> {t('profile.accountSettings', 'Account Settings')}
                 </div>
-                <div style={{ padding: '0.75rem 1rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.75rem', color: '#dc3545', fontSize: '0.9rem', borderTop: '1px solid #e0e0e0' }} onClick={() => handleMenuItemClick('logout')}>
-                  <span style={{ fontSize: '1rem', width: 16, textAlign: 'center' }}>🚪</span> Logout
+                <div style={{ 
+                  padding: '0.75rem 1rem', 
+                  cursor: 'pointer', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.5rem',
+                  fontSize: '0.9rem',
+                  color: '#e74c3c'
+                }} onClick={() => handleMenuItemClick('logout')}>
+                  <span style={{ fontSize: '1rem', width: 16, textAlign: 'center' }}>🚪</span> {t('profile.logout', 'Logout')}
                 </div>
               </div>
             )}

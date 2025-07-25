@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import styled from 'styled-components';
 import { ArrowBack, Edit, Visibility } from '@mui/icons-material';
-import offlineIntegrationService from '../../services/offlineIntegrationService';
+
 
 const Container = styled.div`
   padding: 2rem;
@@ -80,50 +80,23 @@ const InstructorQuizPreview = () => {
         setError('');
         
         const token = localStorage.getItem('token');
-        const isOnline = navigator.onLine;
+        console.log('🔄 Fetching quiz data...');
         
-        let quizData = null;
-
-        if (isOnline) {
-          try {
-            // Try online API calls first (preserving existing behavior)
-            console.log('🌐 Online mode: Fetching quiz data from API...');
-            
-            const response = await fetch(`/api/instructor/quizzes/${quizId}`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-              }
-            });
-
-            if (response.ok) {
-              const quizApiData = await response.json();
-              quizData = quizApiData.data.quiz;
-              console.log('✅ Quiz data received for preview');
-              
-              // Store quiz data for offline use
-              await offlineIntegrationService.storeQuizData(quizId, quizData);
-            } else {
-              throw new Error('Failed to fetch quiz data');
-            }
-
-          } catch (onlineError) {
-            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
-            
-            // Fall back to offline data if online fails
-            quizData = await offlineIntegrationService.getQuizData(quizId);
-            
-            if (!quizData) {
-              throw onlineError;
-            }
+        const response = await fetch(`/api/instructor/quizzes/${quizId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
           }
-        } else {
-          // Offline mode: use offline services
-          console.log('📴 Offline mode: Using offline quiz data...');
-          quizData = await offlineIntegrationService.getQuizData(quizId);
-        }
+        });
 
-        setQuiz(quizData);
+        if (response.ok) {
+          const quizApiData = await response.json();
+          const quizData = quizApiData.data.quiz;
+          console.log('✅ Quiz data received for preview');
+          setQuiz(quizData);
+        } else {
+          throw new Error('Failed to fetch quiz data');
+        }
 
       } catch (err) {
         console.error('❌ Error fetching quiz:', err);

@@ -1,15 +1,175 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { ArrowBack, Add, Edit, Delete, Quiz, Assignment, Assessment } from '@mui/icons-material';
 import { useUser } from '../../contexts/UserContext';
+import { theme } from '../../theme';
 import AssessmentCreator from '../../components/AssessmentCreator';
-import offlineIntegrationService from '../../services/offlineIntegrationService';
+
 
 const Container = styled.div`
   padding: 2rem;
-  background: #f4f8fb;
+  background: ${({ theme }) => theme.colors.white};
   min-height: 100vh;
+  @media (max-width: 768px) {
+    padding: 1rem;
+  }
+`;
+
+const Title = styled.h1`
+  color: ${({ theme }) => theme.colors.primary};
+  margin-bottom: 1.5rem;
+  @media (max-width: 768px) {
+    font-size: 1.8rem;
+  }
+`;
+
+const QuizList = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.5rem;
+  margin-top: 1rem;
+  
+  @media (min-width: 1200px) {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+`;
+
+const QuizCard = styled.div`
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  position: relative;
+  
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    border-color: ${({ theme }) => theme.colors.primary};
+  }
+
+  @media (max-width: 768px) {
+    padding: 1rem;
+  }
+`;
+
+const CardHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+`;
+
+const QuizTitle = styled.h3`
+  margin: 0;
+  color: ${({ theme }) => theme.colors.primary};
+  font-size: 1.2rem;
+  font-weight: 600;
+  line-height: 1.3;
+  flex: 1;
+  margin-right: 0.5rem;
+`;
+
+const StatusBadge = styled.span`
+  padding: 0.3rem 0.8rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-transform: capitalize;
+  background: ${({ status }) => 
+    status === 'published' ? '#d4edda' : 
+    status === 'draft' ? '#fff3cd' : '#f8d7da'
+  };
+  color: ${({ status }) => 
+    status === 'published' ? '#155724' : 
+    status === 'draft' ? '#856404' : '#721c24'
+  };
+  border: 1px solid ${({ status }) => 
+    status === 'published' ? '#c3e6cb' : 
+    status === 'draft' ? '#ffeaa7' : '#f5c6cb'
+  };
+`;
+
+const QuizDescription = styled.p`
+  margin: 0 0 1rem 0;
+  color: #666;
+  font-size: 0.9rem;
+  line-height: 1.4;
+`;
+
+const QuizMeta = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+`;
+
+const MetaItem = styled.span`
+  font-size: 0.85rem;
+  color: #555;
+`;
+
+const ActionButtons = styled.div`
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+`;
+
+const ActionButton = styled.button`
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  ${({ variant }) => {
+    switch (variant) {
+      case 'edit':
+        return `
+          background: #007bff;
+          color: white;
+          &:hover { background: #0056b3; }
+        `;
+      case 'view':
+        return `
+          background: #17a2b8;
+          color: white;
+          &:hover { background: #138496; }
+        `;
+      case 'delete':
+        return `
+          background: #dc3545;
+          color: white;
+          &:hover { background: #c82333; }
+        `;
+      case 'publish':
+        return `
+          background: #28a745;
+          color: white;
+          &:hover { background: #218838; }
+        `;
+      case 'unpublish':
+        return `
+          background: #6c757d;
+          color: white;
+          &:hover { background: #5a6268; }
+        `;
+      default:
+        return `
+          background: #6c757d;
+          color: white;
+          &:hover { background: #5a6268; }
+        `;
+    }
+  }}
 `;
 
 const HeaderContainer = styled.div`
@@ -17,129 +177,31 @@ const HeaderContainer = styled.div`
   justify-content: space-between;
   align-items: center;
   margin-bottom: 2rem;
-`;
-
-const Title = styled.h1`
-  color: #007BFF;
-  margin: 0;
-`;
-
-const BackButton = styled.button`
-  background: none;
-  border: none;
-  color: #007BFF;
-  font-weight: 600;
-  font-size: 1.1rem;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  margin-bottom: 1rem;
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: stretch;
+  }
 `;
 
 const AddButton = styled.button`
-  background: #007BFF;
+  background: ${({ theme }) => theme.colors.primary};
   color: white;
   border: none;
+  padding: 0.75rem 1.5rem;
   border-radius: 8px;
-  padding: 0.8rem 1.5rem;
-  font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  transition: background 0.2s;
+  transition: background 0.2s ease;
   
   &:hover {
-    background: #0056b3;
+    background: ${({ theme }) => theme.colors.primaryDark};
   }
-`;
-
-const QuizGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: 1.5rem;
-  margin-top: 2rem;
-`;
-
-const QuizCard = styled.div`
-  background: white;
-  border-radius: 12px;
-  padding: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-  transition: transform 0.2s, box-shadow 0.2s;
-  cursor: pointer;
   
-  &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  @media (max-width: 768px) {
+    width: 100%;
   }
-`;
-
-const QuizTitle = styled.h3`
-  color: #007BFF;
-  margin: 0 0 0.5rem 0;
-  font-size: 1.2rem;
-`;
-
-const QuizDescription = styled.p`
-  color: #666;
-  margin: 0 0 1rem 0;
-  line-height: 1.4;
-`;
-
-const QuizMeta = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-  font-size: 0.9rem;
-  color: #666;
-`;
-
-const StatusBadge = styled.span`
-  padding: 0.3rem 0.8rem;
-  border-radius: 20px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  background: #e6f9ec;
-  color: #1bbf4c;
-`;
-
-const ActionButtons = styled.div`
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 1rem;
-`;
-
-const ActionButton = styled.button`
-  background: ${({ variant }) => 
-    variant === 'edit' ? '#007BFF' : 
-    variant === 'submissions' ? '#28a745' :
-    variant === 'delete' ? '#000000' : '#6c757d'};
-  color: white;
-  border: none;
-  border-radius: 6px;
-  padding: 0.5rem 1rem;
-  font-size: 0.9rem;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  transition: opacity 0.2s;
-  
-  &:hover {
-    opacity: 0.8;
-  }
-`;
-
-const EmptyState = styled.div`
-  text-align: center;
-  padding: 3rem;
-  color: #666;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 `;
 
 const LoadingSpinner = styled.div`
@@ -147,8 +209,24 @@ const LoadingSpinner = styled.div`
   justify-content: center;
   align-items: center;
   height: 200px;
-  font-size: 1.2rem;
-  color: #007BFF;
+  font-size: 1.1rem;
+  color: #666;
+`;
+
+const EmptyState = styled.div`
+  text-align: center;
+  padding: 3rem 1rem;
+  color: #666;
+  
+  h3 {
+    margin-bottom: 1rem;
+    color: #333;
+  }
+  
+  p {
+    margin-bottom: 2rem;
+    font-size: 1rem;
+  }
 `;
 
 const ErrorMessage = styled.div`
@@ -169,548 +247,941 @@ const SuccessMessage = styled.div`
   border: 1px solid #c3e6cb;
 `;
 
+const ModalOverlay = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+`;
+
+const ModalContent = styled.div`
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  max-width: 800px;
+  max-height: 90vh;
+  overflow-y: auto;
+  width: 90%;
+`;
+
+const ModalTitle = styled.h2`
+  color: ${({ theme }) => theme.colors.primary};
+  margin-bottom: 1.5rem;
+  font-size: 1.5rem;
+`;
+
+const ModalActions = styled.div`
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+  margin-top: 2rem;
+`;
+
+const QuestionItem = styled.div`
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background: #f8f9fa;
+`;
+
+const QuestionText = styled.h4`
+  margin: 0 0 0.5rem 0;
+  color: #333;
+  font-size: 1rem;
+`;
+
+const QuestionType = styled.span`
+  background: #e9ecef;
+  color: #495057;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  margin-left: 0.5rem;
+`;
+
+const QuestionPoints = styled.span`
+  color: #007bff;
+  font-weight: 600;
+  margin-left: 0.5rem;
+`;
+
+const OptionsList = styled.ul`
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+`;
+
+const OptionItem = styled.li`
+  margin-bottom: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  ${({ isCorrect }) => isCorrect && `
+    color: #155724;
+    font-weight: 600;
+    background-color: #d4edda;
+    border: 1px solid #c3e6cb;
+  `}
+`;
+
+const CorrectAnswer = styled.div`
+  background: #d4edda;
+  color: #155724;
+  padding: 0.5rem;
+  border-radius: 4px;
+  margin-top: 0.5rem;
+  font-weight: 600;
+`;
+
+const SearchContainer = styled.div`
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  align-items: center;
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+`;
+
+const SearchInput = styled.input`
+  flex: 1;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 1rem;
+  
+  &:focus {
+    outline: none;
+    border-color: ${({ theme }) => theme.colors.primary};
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+  }
+`;
+
+const FilterSelect = styled.select`
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 1rem;
+  background: white;
+  min-width: 150px;
+  
+  &:focus {
+    outline: none;
+    border-color: ${({ theme }) => theme.colors.primary};
+  }
+`;
+
+const QuestionCard = styled.div`
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #f9f9f9;
+`;
+
+const QuestionHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+`;
+
+const QuestionNumber = styled.span`
+  font-weight: 600;
+  color: #333;
+  font-size: 1.1rem;
+`;
+
+const OptionsListNew = styled.ul`
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0;
+`;
+
+const OptionItemNew = styled.li`
+  padding: 0.75rem;
+  margin: 0.5rem 0;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: ${props => props.isCorrect ? '#d4edda' : '#fff'};
+  border-color: ${props => props.isCorrect ? '#28a745' : '#ddd'};
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+`;
+
+const CorrectBadge = styled.span`
+  background: #28a745;
+  color: white;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: bold;
+`;
+
+const NoQuestions = styled.div`
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+  font-style: italic;
+`;
+
+const ModalHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid #e0e0e0;
+  padding-bottom: 1rem;
+`;
+
+const ModalBody = styled.div`
+  max-height: 60vh;
+  overflow-y: auto;
+`;
+
+const CloseButton = styled.button`
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #666;
+  
+  &:hover {
+    color: #333;
+  }
+`;
+
 const Quizzes = () => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { user, token } = useUser();
+  const { token } = useUser();
   const [quizzes, setQuizzes] = useState([]);
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [showQuizCreator, setShowQuizCreator] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [showBuilder, setShowBuilder] = useState(false);
   const [editingQuiz, setEditingQuiz] = useState(null);
-
-  // Get course context from navigation state
-  const courseId = location.state?.courseId;
-  const courseName = location.state?.courseName;
-  const editQuizId = location.state?.editQuizId;
-  
-  // Get return URL from state or sessionStorage as fallback
-  const returnUrl = location.state?.returnUrl || sessionStorage.getItem('quizEditReturnUrl');
-  
-  // Debug logging for navigation state
-  console.log('🔍 Quizzes component - Navigation state:', {
-    courseId,
-    courseName,
-    editQuizId,
-    returnUrl,
-    fromState: location.state?.returnUrl,
-    fromSessionStorage: sessionStorage.getItem('quizEditReturnUrl'),
-    fullState: location.state
+  const [quizData, setQuizData] = useState({
+    title: '',
+    description: '',
+    courseId: '',
+    type: 'quiz',
+    duration: '',
+    totalPoints: 100,
+    passingScore: 70,
+    dueDate: '',
+    questions: []
   });
-  
-  // Check if returnUrl exists and log it specifically
-  if (returnUrl) {
-    console.log('✅ Return URL found:', returnUrl);
-  } else {
-    console.log('❌ Return URL is missing or null');
-    console.log('🔍 location.state?.returnUrl:', location.state?.returnUrl);
-    console.log('🔍 sessionStorage returnUrl:', sessionStorage.getItem('quizEditReturnUrl'));
-    console.log('🔍 Full location object:', location);
-  }
+  const [showSubmissionsModal, setShowSubmissionsModal] = useState(false);
+  const [selectedQuizSubmissions, setSelectedQuizSubmissions] = useState(null);
+  const [submissionsLoading, setSubmissionsLoading] = useState(false);
+  const [showQuizCreator, setShowQuizCreator] = useState(false);
+  const [editingQuizCreator, setEditingQuizCreator] = useState(null);
+  const [showQuestionsModal, setShowQuestionsModal] = useState(false);
+  const [selectedQuiz, setSelectedQuiz] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [courseFilter, setCourseFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
 
-  useEffect(() => {
-    if (token) {
-      fetchQuizzes();
-      fetchCourses();
-    }
-  }, [token]);
-
-  // Auto-open edit modal if editQuizId is provided
-  useEffect(() => {
-    if (editQuizId && quizzes.length > 0) {
-      const quizToEdit = quizzes.find(quiz => quiz._id === editQuizId);
-      if (quizToEdit) {
-        console.log('🎯 Auto-opening edit modal for quiz:', quizToEdit.title);
-        openEditModal(quizToEdit);
-        // Clear the state to prevent re-opening if user cancels and comes back
-        window.history.replaceState({}, document.title, window.location.pathname);
-      }
-    }
-  }, [editQuizId, quizzes]);
-
-  const fetchQuizzes = async () => {
+  // Fetch quizzes
+  const fetchQuizzes = async (courseFilterParam = null) => {
     try {
       setLoading(true);
-      console.log('🔍 Fetching quizzes from /api/instructor/quizzes...'); // Debug log
+      setError('');
+      console.log('🔄 Fetching instructor quizzes...', courseFilterParam ? `for course: ${courseFilterParam}` : 'all courses');
       
-      const isOnline = navigator.onLine;
-      let quizzesData = [];
-
-      if (isOnline) {
-        try {
-          // Try online API calls first (preserving existing behavior)
-          console.log('🌐 Online mode: Fetching instructor quizzes from API...');
-          
-          const response = await fetch('/api/instructor/quizzes', {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
-          });
-
-          console.log('📡 Quiz fetch response status:', response.status); // Debug log
-
-          if (!response.ok) {
-            throw new Error('Failed to fetch quizzes');
-          }
-
-          const data = await response.json();
-          console.log('📚 Quiz fetch response data:', data); // Debug log
-          
-          quizzesData = data.data?.quizzes || [];
-          console.log(`✅ Found ${quizzesData.length} quizzes:`, quizzesData.map(q => ({ id: q._id, title: q.title, moduleId: q.moduleId }))); // Debug log
-          
-          // Store quizzes data for offline use
-          await offlineIntegrationService.storeInstructorQuizzes(quizzesData);
-          
-        } catch (onlineError) {
-          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
-          // Fall back to offline data if online fails
-          quizzesData = await offlineIntegrationService.getInstructorQuizzes();
-        }
-      } else {
-        // Offline mode: use offline services
-        console.log('📴 Offline mode: Using offline instructor quizzes data...');
-        quizzesData = await offlineIntegrationService.getInstructorQuizzes();
+      // Build URL with optional course filter
+      let url = '/api/instructor/quizzes';
+      if (courseFilterParam) {
+        url += `?courseId=${courseFilterParam}`;
       }
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
 
-      setQuizzes(quizzesData || []);
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Quizzes data received from backend');
+        console.log('📝 Raw quizzes data:', data.data?.quizzes);
+        
+        // Log detailed quiz structure for debugging
+        data.data?.quizzes?.forEach((quiz, index) => {
+          console.log(`📝 Quiz ${index + 1} structure:`, {
+            id: quiz._id,
+            title: quiz.title,
+            courseId: quiz.courseId,
+            course: quiz.course,
+            courseName: quiz.courseName,
+            status: quiz.status,
+            questionCount: quiz.questions?.length || 0
+          });
+        });
+        
+        setQuizzes(data.data?.quizzes || []);
+      } else {
+        throw new Error('Failed to fetch quizzes');
+      }
     } catch (err) {
-      console.error('❌ Error fetching quizzes:', err); // Debug log
-      setError(err.message || 'Failed to load quizzes');
+      console.error('❌ Quizzes fetch failed:', err);
+      setError('Failed to load quizzes');
     } finally {
       setLoading(false);
     }
   };
 
+  // Fetch courses for dropdown
   const fetchCourses = async () => {
     try {
-      console.log('🔍 Fetching courses for dropdown...');
+      console.log('🔄 Fetching instructor courses for quizzes...');
       
-      const isOnline = navigator.onLine;
-      let coursesData = [];
-
-      if (isOnline) {
-        try {
-          // Try online API calls first (preserving existing behavior)
-          console.log('🌐 Online mode: Fetching instructor courses for quizzes...');
-          
-          const response = await fetch('/api/instructor/courses', {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
-          });
-
-          console.log('📡 Courses API response status:', response.status);
-
-          if (!response.ok) {
-            throw new Error('Failed to fetch courses');
-          }
-
-          const data = await response.json();
-          console.log('📚 Courses API response:', data);
-          coursesData = data.data?.courses || [];
-          console.log(`✅ Found ${coursesData.length} courses for dropdown:`, coursesData.map(c => ({ id: c._id, title: c.title })));
-          
-          // Store courses data for offline use
-          await offlineIntegrationService.storeInstructorCourses(coursesData);
-          
-        } catch (onlineError) {
-          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
-          // Fall back to offline data if online fails
-          coursesData = await offlineIntegrationService.getInstructorCourses();
-        }
-      } else {
-        // Offline mode: use offline services
-        console.log('📴 Offline mode: Using offline instructor courses for quizzes...');
-        coursesData = await offlineIntegrationService.getInstructorCourses();
-      }
-
-      setCourses(coursesData || []);
-    } catch (err) {
-      console.error('❌ Error fetching courses:', err);
-    }
-  };
-
-  const createQuiz = async (quizData) => {
-    const isOnline = navigator.onLine;
-    let success = false;
-
-    if (isOnline) {
-      try {
-        // Try online quiz creation first (preserving existing behavior)
-        console.log('🌐 Online mode: Creating quiz...');
-        
-        const response = await fetch('/api/instructor/quizzes', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(quizData)
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.message || 'Failed to create quiz');
-        }
-
-        success = true;
-        console.log('✅ Quiz created successfully online');
-        
-        // Show success message and refresh quiz list
-        const successMessage = returnUrl ? 'Quiz created successfully!' : 'Quiz created successfully';
-        setSuccess(successMessage);
-        fetchQuizzes();
-        
-        // Clear success message after delay
-        setTimeout(() => setSuccess(''), 3000);
-        
-      } catch (onlineError) {
-        console.warn('⚠️ Online quiz creation failed, using offline:', onlineError);
-        // Fall back to offline quiz creation
-        const offlineResult = await offlineIntegrationService.storeQuizCreation(quizData);
-        
-        if (offlineResult.success) {
-          success = true;
-          console.log('✅ Quiz creation queued for offline sync');
-          
-          const successMessage = returnUrl ? 'Quiz created offline! Will sync when online.' : 'Quiz created offline! Will sync when online.';
-          setSuccess(successMessage);
-          fetchQuizzes();
-          
-          // Clear success message after delay
-          setTimeout(() => setSuccess(''), 3000);
-        } else {
-          throw new Error('Failed to create quiz offline');
-        }
-      }
-    } else {
-      // Offline quiz creation
-      console.log('📴 Offline mode: Creating quiz offline...');
-      const offlineResult = await offlineIntegrationService.storeQuizCreation(quizData);
-      
-      if (offlineResult.success) {
-        success = true;
-        console.log('✅ Quiz creation queued for offline sync');
-        
-        const successMessage = returnUrl ? 'Quiz created offline! Will sync when online.' : 'Quiz created offline! Will sync when online.';
-        setSuccess(successMessage);
-        fetchQuizzes();
-        
-        // Clear success message after delay
-        setTimeout(() => setSuccess(''), 3000);
-      } else {
-        throw new Error('Failed to create quiz offline');
-      }
-    }
-
-    if (!success) {
-      throw new Error('Failed to create quiz');
-    }
-
-    return { success: true };
-  };
-
-  const updateQuiz = async (quizId, quizData) => {
-    console.log('🔄 updateQuiz called with:', { quizId, quizData });
-    
-    const isOnline = navigator.onLine;
-    let success = false;
-
-    if (isOnline) {
-      try {
-        // Try online quiz update first (preserving existing behavior)
-        console.log('🌐 Online mode: Updating quiz...');
-        
-        const response = await fetch(`/api/instructor/quizzes/${quizId}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(quizData)
-        });
-
-        console.log('📡 API response status:', response.status);
-        console.log('📡 API response ok:', response.ok);
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          console.error('❌ API error response:', errorData);
-          throw new Error(errorData.message || 'Failed to update quiz');
-        }
-
-        const responseData = await response.json();
-        console.log('✅ API success response:', responseData);
-
-        success = true;
-        console.log('✅ Quiz updated successfully online');
-        
-        // Show success message and refresh quiz list
-        const successMessage = returnUrl ? 'Quiz updated successfully!' : 'Quiz updated successfully';
-        setSuccess(successMessage);
-        fetchQuizzes();
-        
-        // Clear success message after delay
-        setTimeout(() => setSuccess(''), 3000);
-        
-      } catch (onlineError) {
-        console.warn('⚠️ Online quiz update failed, using offline:', onlineError);
-        // Fall back to offline quiz update
-        const offlineResult = await offlineIntegrationService.storeQuizUpdate(quizId, quizData);
-        
-        if (offlineResult.success) {
-          success = true;
-          console.log('✅ Quiz update queued for offline sync');
-          
-          const successMessage = returnUrl ? 'Quiz updated offline! Will sync when online.' : 'Quiz updated offline! Will sync when online.';
-          setSuccess(successMessage);
-          fetchQuizzes();
-          
-          // Clear success message after delay
-          setTimeout(() => setSuccess(''), 3000);
-        } else {
-          throw new Error('Failed to update quiz offline');
-        }
-      }
-    } else {
-      // Offline quiz update
-      console.log('📴 Offline mode: Updating quiz offline...');
-      const offlineResult = await offlineIntegrationService.storeQuizUpdate(quizId, quizData);
-      
-      if (offlineResult.success) {
-        success = true;
-        console.log('✅ Quiz update queued for offline sync');
-        
-        const successMessage = returnUrl ? 'Quiz updated offline! Will sync when online.' : 'Quiz updated offline! Will sync when online.';
-        setSuccess(successMessage);
-        fetchQuizzes();
-        
-        // Clear success message after delay
-        setTimeout(() => setSuccess(''), 3000);
-      } else {
-        throw new Error('Failed to update quiz offline');
-      }
-    }
-
-    if (!success) {
-      throw new Error('Failed to update quiz');
-    }
-
-    console.log('✅ updateQuiz completed successfully');
-    return { success: true };
-  };
-
-  const deleteQuiz = async (quizId) => {
-    if (!window.confirm('Are you sure you want to delete this quiz?')) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/instructor/quizzes/${quizId}`, {
-        method: 'DELETE',
+      const response = await fetch('/api/instructor/courses', {
+        method: 'GET',
         headers: {
+          'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         }
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to delete quiz');
+        throw new Error('Failed to fetch courses');
       }
 
-      setSuccess('Quiz deleted successfully');
-      fetchQuizzes();
-      setTimeout(() => setSuccess(''), 3000);
+      const data = await response.json();
+      console.log('📚 Fetched courses from database:', data.data?.courses);
+      
+      const coursesData = data.data?.courses || [];
+      
+      if (coursesData.length === 0) {
+        console.warn('❌ No courses found. Create some courses first.');
+      } else {
+        console.log(`✅ Found ${coursesData.length} courses total`);
+        coursesData.forEach((course, index) => {
+          console.log(`📚 Course ${index + 1}:`, {
+            id: course._id,
+            title: course.title,
+            instructor: course.instructor
+          });
+        });
+      }
+      
+      setCourses(coursesData);
     } catch (err) {
-      setError(err.message || 'Failed to delete quiz');
-      setTimeout(() => setError(''), 3000);
+      console.error('❌ Courses fetch failed:', err);
+      setError('Failed to load courses');
     }
   };
 
-  const handleQuizCreatorSave = async (quizData, originalQuiz) => {
+  // Create quiz
+  const createQuiz = async (quizData) => {
     try {
-      console.log('🔍 handleQuizCreatorSave called with:', {
-        quizData,
-        originalQuiz,
-        returnUrl
+      console.log('🔄 Creating quiz:', quizData);
+      
+      const response = await fetch('/api/instructor/quizzes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(quizData)
       });
-      
-      const submissionData = {
-        title: quizData.title,
-        description: quizData.description,
-        courseId: quizData.courseId,
-        moduleId: quizData.moduleId, // Include moduleId
-        type: 'quiz',
-        duration: quizData.timeLimit || 30,
-        totalPoints: quizData.totalPoints || 0,
-        passingScore: 70,
-        dueDate: quizData.dueDate ? new Date(quizData.dueDate).toISOString() : null,
-        questions: quizData.questions.map((q, index) => ({
-          question: q.question,
-          type: q.type,
-          points: q.points,
-          options: q.options || [],
-          correctAnswer: q.correctAnswer,
-          explanation: q.explanation || ''
-        }))
-      };
 
-      console.log('📤 Submission data prepared:', submissionData);
-
-      let result;
-      if (originalQuiz) {
-        console.log('🔄 Updating existing quiz with ID:', originalQuiz._id);
-        result = await updateQuiz(originalQuiz._id, submissionData);
+      if (response.ok) {
+        const result = await response.json();
+        console.log('✅ Quiz created successfully:', result);
+        setSuccess('Quiz created successfully!');
+        fetchQuizzes(); // Refresh the list
+        return result;
       } else {
-        console.log('🆕 Creating new quiz');
-        result = await createQuiz(submissionData);
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to create quiz');
       }
-      
-      console.log('✅ API call completed, result:', result);
-      
-      // Don't clear modal state here - let AssessmentCreator handle it
-      // The modal state will be cleared when AssessmentCreator calls onClose()
-      
-      console.log('✅ Quiz saved successfully, returning success');
-      return { success: true };
     } catch (err) {
-      console.error('❌ Error in handleQuizCreatorSave:', err);
-      setError(err.message || 'Failed to save quiz');
-      setTimeout(() => setError(''), 3000);
-      // Re-throw error so AssessmentCreator knows it failed
+      console.error('❌ Quiz creation failed:', err);
+      setError(err.message || 'Failed to create quiz');
       throw err;
     }
   };
 
+  // Update quiz
+  const updateQuiz = async (quizId, quizData) => {
+    try {
+      console.log('🔄 Updating quiz:', quizId, quizData);
+      
+      const response = await fetch(`/api/instructor/quizzes/${quizId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(quizData)
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('✅ Quiz updated successfully:', result);
+        setSuccess('Quiz updated successfully!');
+        fetchQuizzes(); // Refresh the list
+        return result;
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to update quiz');
+      }
+    } catch (err) {
+      console.error('❌ Quiz update failed:', err);
+      setError(err.message || 'Failed to update quiz');
+      throw err;
+    }
+  };
+
+  // Delete quiz
+  const deleteQuiz = async (quizId) => {
+    if (!window.confirm('Are you sure you want to delete this quiz? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      console.log('🔄 Deleting quiz:', quizId);
+      
+      const response = await fetch(`/api/instructor/quizzes/${quizId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        console.log('✅ Quiz deleted successfully');
+        setSuccess('Quiz deleted successfully!');
+        fetchQuizzes(); // Refresh the list
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to delete quiz');
+      }
+    } catch (err) {
+      console.error('❌ Quiz deletion failed:', err);
+      setError(err.message || 'Failed to delete quiz');
+    }
+  };
+
+  // Toggle quiz status
+  const toggleStatus = async (quizId, currentStatus) => {
+    try {
+      const newStatus = currentStatus === 'published' ? 'draft' : 'published';
+      console.log('🔄 Toggling quiz status:', quizId, currentStatus, '->', newStatus);
+      console.log('📝 Request payload:', { status: newStatus });
+      
+      const response = await fetch(`/api/instructor/quizzes/${quizId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ status: newStatus })
+      });
+
+      console.log('📡 Response status:', response.status);
+      console.log('📡 Response ok:', response.ok);
+
+      if (response.ok) {
+        const responseData = await response.json();
+        console.log('✅ Quiz status updated successfully:', responseData);
+        setSuccess(`Quiz ${newStatus} successfully!`);
+        fetchQuizzes(); // Refresh the list
+      } else {
+        const errorData = await response.json();
+        console.error('❌ Server error response:', errorData);
+        throw new Error(errorData.message || 'Failed to update quiz status');
+      }
+    } catch (err) {
+      console.error('❌ Quiz status update failed:', err);
+      setError(err.message || 'Failed to update quiz status');
+    }
+  };
+
+  // Fetch quiz submissions
+  const fetchQuizSubmissions = async (quizId) => {
+    try {
+      setSubmissionsLoading(true);
+      console.log('🔄 Fetching quiz submissions:', quizId);
+      
+      const response = await fetch(`/api/instructor/quizzes/${quizId}/submissions`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Quiz submissions received:', data);
+        setSelectedQuizSubmissions(data.data);
+        setShowSubmissionsModal(true);
+      } else {
+        throw new Error('Failed to fetch quiz submissions');
+      }
+    } catch (err) {
+      console.error('❌ Quiz submissions fetch failed:', err);
+      setError('Failed to load quiz submissions');
+    } finally {
+      setSubmissionsLoading(false);
+    }
+  };
+
+  // View quiz submissions
+  const viewQuizSubmissions = (quiz) => {
+    console.log('🔄 Viewing quiz submissions:', quiz);
+    fetchQuizSubmissions(quiz._id);
+  };
+
+  // View quiz questions
+  const viewQuizQuestions = (quiz) => {
+    console.log('🔍 Viewing quiz questions for:', quiz.title);
+    console.log('📝 Quiz questions:', quiz.questions);
+    
+    // Ensure questions are properly formatted for display
+    const formattedQuestions = quiz.questions?.map((question, index) => {
+      // Handle different question types and ensure proper string conversion
+      let questionText = '';
+      let options = [];
+      let correctAnswer = '';
+      
+      if (typeof question === 'string') {
+        questionText = question;
+      } else if (typeof question === 'object' && question !== null) {
+        // Handle question object
+        questionText = question.question || question.text || question.title || JSON.stringify(question);
+        
+        // Handle options
+        if (question.options && Array.isArray(question.options)) {
+          options = question.options.map(opt => 
+            typeof opt === 'string' ? opt : JSON.stringify(opt)
+          );
+        } else if (question.choices && Array.isArray(question.choices)) {
+          options = question.choices.map(choice => 
+            typeof choice === 'string' ? choice : JSON.stringify(choice)
+          );
+        }
+        
+        // Handle correct answer
+        if (question.correctAnswer !== undefined) {
+          if (typeof question.correctAnswer === 'number') {
+            correctAnswer = options[question.correctAnswer] || `Option ${question.correctAnswer + 1}`;
+          } else if (typeof question.correctAnswer === 'string') {
+            correctAnswer = question.correctAnswer;
+    } else {
+            correctAnswer = JSON.stringify(question.correctAnswer);
+          }
+        }
+      } else {
+        questionText = String(question);
+      }
+      
+      return {
+        id: index + 1,
+        question: questionText,
+        options: options,
+        correctAnswer: correctAnswer,
+        type: question.type || 'multiple-choice'
+      };
+    }) || [];
+    
+    console.log('✅ Formatted questions:', formattedQuestions);
+    setSelectedQuiz({ ...quiz, formattedQuestions });
+    setShowQuestionsModal(true);
+  };
+
+  // Fetch quiz directly from backend for debugging
+  const fetchQuizDirectly = async (quizId) => {
+    try {
+      console.log('🔍 Fetching quiz directly from backend:', quizId);
+      const response = await fetch(`/api/instructor/quizzes/${quizId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('📝 Direct quiz data from backend:', data.data?.quiz);
+        console.log('📝 Direct questions data:', data.data?.quiz?.questions?.map((q, i) => ({
+          question: q.question,
+          type: q.type,
+          correctAnswer: q.correctAnswer,
+          correctAnswerType: typeof q.correctAnswer,
+          options: q.options
+        })));
+      }
+    } catch (error) {
+      console.error('❌ Error fetching quiz directly:', error);
+    }
+  };
+
+  // Open add modal
   const openAddModal = () => {
+    setQuizData({
+      title: '',
+      description: '',
+      courseId: '',
+      type: 'quiz',
+      duration: '',
+      totalPoints: 100,
+      passingScore: 70,
+      dueDate: '',
+      questions: []
+    });
     setEditingQuiz(null);
     setShowQuizCreator(true);
   };
 
-  const openEditModal = (quiz) => {
-    // Build URL to the module content where this quiz appears
-    const courseId = quiz.course || quiz.courseId;
-    const moduleId = quiz.moduleId;
-    
-    let returnUrl;
-    if (courseId && moduleId) {
-      returnUrl = `/instructor/courses/${courseId}/modules/${moduleId}`;
-      console.log('🔍 Built return URL to module content:', returnUrl);
-    } else {
-      returnUrl = window.location.href; // Fallback to current page
-      console.log('🔍 Using current page as fallback return URL:', returnUrl);
+  // Handle quiz creator save
+  const handleQuizCreatorSave = async (quizData, originalQuiz) => {
+    try {
+      if (originalQuiz) {
+        await updateQuiz(originalQuiz._id, quizData);
+      } else {
+        await createQuiz(quizData);
+      }
+      setShowQuizCreator(false);
+      setEditingQuizCreator(null);
+    } catch (error) {
+      console.error('❌ Quiz save failed:', error);
+      // Error is already set in createQuiz/updateQuiz
     }
-    
-    sessionStorage.setItem('quizEditReturnUrl', returnUrl);
-    console.log('🔍 Stored return URL:', returnUrl);
-    
-    // Show alert to confirm where we'll go back to
-    alert(`After editing, you'll be redirected to: ${returnUrl}`);
-    
-    setEditingQuiz({
-      ...quiz,
-      courseId: quiz.course || quiz.courseId,
-      timeLimit: quiz.duration || quiz.timeLimit || 30
+  };
+
+  // Close modal
+  const closeModal = () => {
+    setShowModal(false);
+    setShowBuilder(false);
+    setEditingQuiz(null);
+    setQuizData({
+      title: '',
+      description: '',
+      courseId: '',
+      type: 'quiz',
+      duration: '',
+      totalPoints: 100,
+      passingScore: 70,
+      dueDate: '',
+      questions: []
     });
-    setShowQuizCreator(true);
   };
 
-  const viewSubmissions = (quizId) => {
-    navigate(`/instructor/quizzes/${quizId}/submissions`);
+  // Load data on component mount
+  useEffect(() => {
+    fetchQuizzes();
+    fetchCourses();
+  }, [token]);
+
+  // Trigger filtering when search or filters change
+  useEffect(() => {
+    console.log('🔄 Filters changed, re-filtering quizzes...');
+    console.log('🔍 Current state - Search:', searchTerm, 'Status:', statusFilter);
+  }, [searchTerm, statusFilter]); // Removed courseFilter since it's handled by backend fetch
+
+  // Clear success/error messages after 5 seconds
+  useEffect(() => {
+    if (success) {
+      const timer = setTimeout(() => setSuccess(''), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [success]);
+
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => setError(''), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
+
+  // Filter quizzes based on search and filters
+  const getFilteredQuizzes = () => {
+    let filtered = quizzes;
+    console.log('🔍 Starting filtering process...');
+    console.log('📝 Total quizzes before filtering:', filtered.length);
+    console.log('🔍 Current filters - Search:', searchTerm, 'Course:', courseFilter, 'Status:', statusFilter);
+
+    // Search filter (client-side)
+    if (searchTerm) {
+      filtered = filtered.filter(quiz =>
+        quiz.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        quiz.description?.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+      console.log('🔍 After search filter:', filtered.length, 'quizzes');
+    }
+
+    // Status filter (client-side)
+    if (statusFilter && statusFilter !== '') {
+      filtered = filtered.filter(quiz => {
+        const quizStatus = quiz.status || 'published';
+        const matches = quizStatus === statusFilter;
+        console.log(`🔍 Quiz "${quiz.title}" status check:`, {
+          quizStatus,
+          statusFilter,
+          matches
+        });
+        return matches;
+      });
+      console.log('🔍 After status filter:', filtered.length, 'quizzes');
+    }
+
+    console.log('✅ Final filtered quizzes:', filtered.length);
+    return filtered;
   };
 
-  if (loading) {
-    return (
-      <Container>
-        <LoadingSpinner>Loading quizzes...</LoadingSpinner>
-      </Container>
-    );
-  }
+  // Render quiz cards
+  const renderQuizCards = () => {
+    if (loading) {
+      return <LoadingSpinner>Loading quizzes...</LoadingSpinner>;
+    }
 
-  return (
-    <Container>
-      <BackButton onClick={() => navigate(-1)}>
-        <ArrowBack style={{ marginRight: 6 }} /> Back
-      </BackButton>
+    const filteredQuizzes = getFilteredQuizzes();
 
-      {success && <SuccessMessage>{success}</SuccessMessage>}
-      {error && <ErrorMessage>{error}</ErrorMessage>}
-
-      <HeaderContainer>
-        <Title>Manage Quizzes</Title>
-        <AddButton onClick={openAddModal}>
-          <Add /> Create New Quiz
-        </AddButton>
-      </HeaderContainer>
-
-      {quizzes.length === 0 ? (
+    if (filteredQuizzes.length === 0) {
+      if (quizzes.length === 0) {
+        return (
         <EmptyState>
-          <Quiz style={{ fontSize: '4rem', color: '#007BFF', marginBottom: '1rem' }} />
-          <h3>No Quizzes Yet</h3>
-          <p>Create your first quiz to get started with quick knowledge assessments.</p>
-          <AddButton onClick={openAddModal}>
-            <Add /> Create Your First Quiz
-          </AddButton>
+            <h3>No Quizzes Found</h3>
+            <p>
+              You haven't created any quizzes yet. Create your first quiz to get started.
+            </p>
+            <AddButton onClick={openAddModal}>Create New Quiz</AddButton>
         </EmptyState>
-      ) : (
-        <QuizGrid>
-          {quizzes.map((quiz) => (
+        );
+      } else {
+        return (
+          <EmptyState>
+            <h3>No Quizzes Match Your Search</h3>
+            <p>
+              Try adjusting your search terms or filters to find the quiz you're looking for.
+            </p>
+          </EmptyState>
+        );
+      }
+    }
+
+    return (
+      <QuizList>
+        {filteredQuizzes.map((quiz) => (
             <QuizCard key={quiz._id}>
+            <CardHeader>
               <QuizTitle>{quiz.title}</QuizTitle>
-              <QuizDescription>{quiz.description}</QuizDescription>
+              <StatusBadge status={quiz.status || 'published'}>
+                {quiz.status || 'Published'}
+              </StatusBadge>
+            </CardHeader>
+            
+            <QuizDescription>{quiz.description || 'No description available'}</QuizDescription>
               
               <QuizMeta>
-                <span>Course: {quiz.courseName || 'Unknown'}</span>
-                <StatusBadge>Published</StatusBadge>
+              <MetaItem><strong>Points:</strong> {quiz.totalPoints || 0}</MetaItem>
+              {quiz.dueDate && (
+                <MetaItem><strong>Due:</strong> {new Date(quiz.dueDate).toLocaleDateString()}</MetaItem>
+              )}
               </QuizMeta>
 
               <QuizMeta>
-                <span>Questions: {quiz.questions?.length || 0}</span>
-                <span>Points: {quiz.totalPoints || 0}</span>
-                <span>Duration: {quiz.duration || 30} min</span>
+              <MetaItem><strong>Points:</strong> {quiz.totalPoints || 0}</MetaItem>
+              <MetaItem><strong>Questions:</strong> {quiz.questions?.length || 0}</MetaItem>
+              {quiz.dueDate && (
+                <MetaItem><strong>Due:</strong> {new Date(quiz.dueDate).toLocaleDateString()}</MetaItem>
+              )}
               </QuizMeta>
 
               <ActionButtons>
-                <ActionButton variant="edit" onClick={() => openEditModal(quiz)}>
-                  <Edit fontSize="small" /> Edit
+              <ActionButton 
+                variant="edit"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEditingQuizCreator({
+                    ...quiz,
+                    courseId: quiz.course || quiz.courseId
+                  });
+                  setShowQuizCreator(true);
+                }}
+              >
+                Edit Quiz
                 </ActionButton>
-                <ActionButton variant="submissions" onClick={() => viewSubmissions(quiz._id)}>
-                  <Assessment fontSize="small" /> Submissions
+              <ActionButton 
+                variant="view"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  viewQuizQuestions(quiz);
+                }}
+              >
+                View Questions
                 </ActionButton>
-                <ActionButton variant="delete" onClick={() => deleteQuiz(quiz._id)}>
-                  <Delete fontSize="small" /> Delete
+              <ActionButton 
+                variant={quiz.status === 'published' ? 'unpublish' : 'publish'}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  console.log('🔘 Toggle button clicked for quiz:', quiz._id, 'Current status:', quiz.status);
+                  toggleStatus(quiz._id, quiz.status);
+                }}
+              >
+                {quiz.status === 'published' ? 'Deactivate' : 'Activate'}
+              </ActionButton>
+              <ActionButton 
+                variant="delete"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteQuiz(quiz._id);
+                }}
+              >
+                Delete Quiz
                 </ActionButton>
               </ActionButtons>
             </QuizCard>
           ))}
-        </QuizGrid>
-      )}
+      </QuizList>
+    );
+  };
 
+  return (
+    <Container>
+      {success && <SuccessMessage>{success}</SuccessMessage>}
+      {error && <ErrorMessage>{error}</ErrorMessage>}
+      
+      <HeaderContainer>
+        <Title>Manage Quizzes</Title>
+        <AddButton onClick={openAddModal}>Create New Quiz</AddButton>
+      </HeaderContainer>
+
+      <SearchContainer>
+        <SearchInput
+          type="text"
+          placeholder="Search quizzes by title or description..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+        <FilterSelect
+          value={courseFilter}
+          onChange={(e) => {
+            const selectedCourse = e.target.value;
+            console.log('🔍 Course filter changed to:', selectedCourse);
+            setCourseFilter(selectedCourse);
+            if (selectedCourse) {
+              fetchQuizzes(selectedCourse); // Fetch fresh data for specific course
+            } else {
+              fetchQuizzes(); // Fetch all quizzes
+            }
+          }}
+        >
+          <option value="">All Courses</option>
+          {courses.map(course => (
+            <option key={course._id} value={course._id}>
+              {course.title}
+            </option>
+          ))}
+        </FilterSelect>
+        <FilterSelect
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+        >
+          <option value="">All Status</option>
+          <option value="published">Published</option>
+          <option value="draft">Draft</option>
+        </FilterSelect>
+      </SearchContainer>
+
+      {renderQuizCards()}
+
+      {/* Quiz Creator Modal */}
+      {showQuizCreator && (
       <AssessmentCreator
         isOpen={showQuizCreator}
         onClose={() => {
-          console.log('🔍 Modal onClose called - Return URL:', returnUrl); // Debug log
-          console.log('🔍 Clearing modal state...');
           setShowQuizCreator(false);
-          setEditingQuiz(null);
-          console.log('✅ Modal state cleared');
-          
-          // Don't clear sessionStorage immediately - let AssessmentCreator handle it
-          // This way navigation can still work even if modal closes first
-          console.log('🔍 Modal closed, sessionStorage preserved for navigation');
+            setEditingQuizCreator(null);
         }}
         onSave={handleQuizCreatorSave}
-        assessment={editingQuiz}
+          assessment={editingQuizCreator}
         isQuiz={true}
-        courses={courses}
-        preSelectedCourse={courseId}
-        returnUrl={returnUrl}
-      />
+        />
+      )}
+
+      {/* Questions Modal */}
+      {showQuestionsModal && selectedQuiz && (
+        <ModalOverlay>
+          <ModalContent>
+            <ModalHeader>
+              <h2>Quiz Questions: {selectedQuiz.title}</h2>
+              <CloseButton onClick={() => setShowQuestionsModal(false)}>&times;</CloseButton>
+            </ModalHeader>
+            <ModalBody>
+              {selectedQuiz.formattedQuestions && selectedQuiz.formattedQuestions.length > 0 ? (
+                selectedQuiz.formattedQuestions.map((q, index) => (
+                  <QuestionCard key={index}>
+                    <QuestionHeader>
+                      <QuestionNumber>Question {q.id}</QuestionNumber>
+                      <QuestionType>{q.type}</QuestionType>
+                    </QuestionHeader>
+                    <QuestionText>{q.question}</QuestionText>
+                    {q.options && q.options.length > 0 && (
+                      <OptionsListNew>
+                        {q.options.map((option, optIndex) => (
+                          <OptionItemNew 
+                            key={optIndex}
+                            isCorrect={option === q.correctAnswer}
+                          >
+                            {String(option)}
+                            {option === q.correctAnswer && <CorrectBadge>✓ Correct</CorrectBadge>}
+                          </OptionItemNew>
+                        ))}
+                      </OptionsListNew>
+                    )}
+                    {q.correctAnswer && (
+                      <CorrectAnswer>
+                        <strong>Correct Answer:</strong> {String(q.correctAnswer)}
+                      </CorrectAnswer>
+                    )}
+                  </QuestionCard>
+                ))
+              ) : (
+                <NoQuestions>No questions found for this quiz.</NoQuestions>
+              )}
+            </ModalBody>
+            <ModalActions>
+              <ActionButton 
+                variant="edit"
+                onClick={() => {
+                  setShowQuestionsModal(false);
+                  setEditingQuizCreator({
+                    ...selectedQuiz,
+                    courseId: selectedQuiz.course || selectedQuiz.courseId
+                  });
+                  setShowQuizCreator(true);
+                }}
+              >
+                Edit Quiz
+              </ActionButton>
+              <ActionButton 
+                color="#6c757d" 
+                onClick={() => setShowQuestionsModal(false)}
+              >
+                Close
+              </ActionButton>
+            </ModalActions>
+          </ModalContent>
+        </ModalOverlay>
+      )}
     </Container>
   );
 };

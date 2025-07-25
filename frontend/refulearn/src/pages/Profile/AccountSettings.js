@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
+import { useTranslation } from 'react-i18next';
 import { FiUser, FiLock, FiBell, FiShield, FiGlobe, FiSave, FiAlertCircle } from 'react-icons/fi';
 import { useUser } from '../../contexts/UserContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 const Container = styled.div`
   padding: 2rem;
@@ -245,7 +247,9 @@ const LoadingSpinner = styled.div`
 `;
 
 const AccountSettings = () => {
+  const { t } = useTranslation();
   const { user, token } = useUser();
+  const { changeLanguage } = useLanguage();
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -277,12 +281,13 @@ const AccountSettings = () => {
         setLoading(true);
         setError('');
         
-        console.log('🌐 Fetching account settings from API...');
+        console.log('🌐 Fetching fresh account settings from API...');
         
         const response = await fetch('/api/auth/settings', {
           headers: {
             'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache' // Prevent caching
           }
         });
 
@@ -306,13 +311,19 @@ const AccountSettings = () => {
           setSettings(settingsWithDefaults);
           
           // Set form data from settings
+          const userLanguage = settingsData.language || 'en';
+          
           setPersonalData({
             firstName: user?.firstName || '',
             lastName: user?.lastName || '',
             email: settingsData.email || '',
             phone: user?.phone || '',
-            language: settingsData.language || 'en'
+            language: userLanguage
           });
+          
+          // Update the frontend language context to match user's saved preference
+          changeLanguage(userLanguage);
+          console.log(`🌍 Language context synchronized with user preference: ${userLanguage}`);
           
           setNotificationSettings({
             emailNotifications: settingsData.notifications?.email ?? true,
@@ -362,6 +373,14 @@ const AccountSettings = () => {
         setSuccess('Settings updated successfully!');
       } else {
         const errorData = await response.json().catch(() => ({}));
+        console.error('❌ Backend validation error:', errorData);
+        
+        // Show specific validation errors if available
+        if (errorData.errors && Array.isArray(errorData.errors)) {
+          const errorMessages = errorData.errors.map(err => `${err.field}: ${err.message}`).join(', ');
+          throw new Error(`Validation failed: ${errorMessages}`);
+        }
+        
         throw new Error(errorData.message || 'Failed to update settings');
       }
 
@@ -483,8 +502,17 @@ const AccountSettings = () => {
       setError('');
       setSuccess('');
 
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (personalData.email && !emailRegex.test(personalData.email)) {
+        setError('Please enter a valid email address');
+        setLoading(false);
+        return;
+      }
+
       // Prepare settings data structure matching backend expectations
       const settingsData = {
+        email: personalData.email, // Add email field
         language: personalData.language,
         notifications: {
           email: notificationSettings.emailNotifications,
@@ -494,7 +522,15 @@ const AccountSettings = () => {
         }
       };
 
+      console.log('📤 Sending settings data:', settingsData);
+
       await handleUpdateSettings('all', settingsData);
+      
+      // Update the frontend language context if language was changed
+      if (settingsData.language) {
+        changeLanguage(settingsData.language);
+        console.log(`🌍 Language context updated to: ${settingsData.language}`);
+      }
       
       setSuccess('All settings saved successfully!');
     } catch (error) {
@@ -525,7 +561,7 @@ const AccountSettings = () => {
   if (loading) {
     return (
       <Container>
-        <Title>Account Settings</Title>
+        <Title>{t('accountSettings.title', 'Account Settings')}</Title>
         <div style={{ textAlign: 'center', padding: '2rem' }}>
           <LoadingSpinner />
           <p>Loading settings...</p>
@@ -536,7 +572,7 @@ const AccountSettings = () => {
 
   return (
     <Container>
-      <Title>Account Settings</Title>
+      <Title>{t('accountSettings.title', 'Account Settings')}</Title>
       
       {error && (
         <Alert className="error">
@@ -558,11 +594,11 @@ const AccountSettings = () => {
             <CardIcon>
               <FiUser />
             </CardIcon>
-            <CardTitle>Personal Information</CardTitle>
+            <CardTitle>{t('accountSettings.personalInfo.title')}</CardTitle>
           </CardHeader>
           
           <FormGroup>
-            <Label>First Name</Label>
+            <Label>{t('accountSettings.personalInfo.firstName')}</Label>
             <Input
               type="text"
               value={personalData.firstName}
@@ -571,7 +607,7 @@ const AccountSettings = () => {
           </FormGroup>
           
           <FormGroup>
-            <Label>Last Name</Label>
+            <Label>{t('accountSettings.personalInfo.lastName')}</Label>
             <Input
               type="text"
               value={personalData.lastName}
@@ -580,7 +616,7 @@ const AccountSettings = () => {
           </FormGroup>
           
           <FormGroup>
-            <Label>Email Address</Label>
+            <Label>{t('accountSettings.personalInfo.email')}</Label>
             <Input
               type="email"
               value={personalData.email}
@@ -589,7 +625,7 @@ const AccountSettings = () => {
           </FormGroup>
           
           <FormGroup>
-            <Label>Phone Number</Label>
+            <Label>{t('accountSettings.personalInfo.phone')}</Label>
             <Input
               type="tel"
               value={personalData.phone}
@@ -598,15 +634,15 @@ const AccountSettings = () => {
           </FormGroup>
           
           <FormGroup>
-            <Label>Language</Label>
+            <Label>{t('accountSettings.personalInfo.language')}</Label>
             <Select
               value={personalData.language}
               onChange={(e) => handleInputChange('language', e.target.value)}
             >
-              <option value="en">English</option>
-              <option value="fr">French</option>
-              <option value="ar">Arabic</option>
-              <option value="sw">Swahili</option>
+              <option value="en">{t('accountSettings.personalInfo.languageOptions.en')}</option>
+              <option value="fr">{t('accountSettings.personalInfo.languageOptions.fr')}</option>
+              <option value="rw">{t('accountSettings.personalInfo.languageOptions.rw')}</option>
+              <option value="sw">{t('accountSettings.personalInfo.languageOptions.sw')}</option>
             </Select>
           </FormGroup>
         </SettingsCard>
@@ -617,13 +653,13 @@ const AccountSettings = () => {
             <CardIcon>
               <FiBell />
             </CardIcon>
-            <CardTitle>Notifications</CardTitle>
+            <CardTitle>{t('accountSettings.notifications.title')}</CardTitle>
           </CardHeader>
           
           <NotificationItem>
             <NotificationText>
-              <NotificationTitle>Email Notifications</NotificationTitle>
-              <NotificationDescription>Receive notifications via email</NotificationDescription>
+              <NotificationTitle>{t('accountSettings.notifications.email')}</NotificationTitle>
+              <NotificationDescription>{t('accountSettings.notifications.emailDesc')}</NotificationDescription>
             </NotificationText>
             <ToggleSwitch>
               <ToggleInput
@@ -637,8 +673,8 @@ const AccountSettings = () => {
           
           <NotificationItem>
             <NotificationText>
-              <NotificationTitle>Push Notifications</NotificationTitle>
-              <NotificationDescription>Receive push notifications in browser</NotificationDescription>
+              <NotificationTitle>{t('accountSettings.notifications.push')}</NotificationTitle>
+              <NotificationDescription>{t('accountSettings.notifications.pushDesc')}</NotificationDescription>
             </NotificationText>
             <ToggleSwitch>
               <ToggleInput
@@ -652,8 +688,8 @@ const AccountSettings = () => {
           
           <NotificationItem>
             <NotificationText>
-              <NotificationTitle>Course Updates</NotificationTitle>
-              <NotificationDescription>Get notified about new courses and updates</NotificationDescription>
+              <NotificationTitle>{t('accountSettings.notifications.courseUpdates')}</NotificationTitle>
+              <NotificationDescription>{t('accountSettings.notifications.courseUpdatesDesc')}</NotificationDescription>
             </NotificationText>
             <ToggleSwitch>
               <ToggleInput
@@ -667,8 +703,8 @@ const AccountSettings = () => {
           
           <NotificationItem>
             <NotificationText>
-              <NotificationTitle>Grade Updates</NotificationTitle>
-              <NotificationDescription>Get notified about grade updates</NotificationDescription>
+              <NotificationTitle>{t('accountSettings.notifications.gradeUpdates')}</NotificationTitle>
+              <NotificationDescription>{t('accountSettings.notifications.gradeUpdatesDesc')}</NotificationDescription>
             </NotificationText>
             <ToggleSwitch>
               <ToggleInput
@@ -687,27 +723,27 @@ const AccountSettings = () => {
             <CardIcon>
               <FiShield />
             </CardIcon>
-            <CardTitle>Privacy Settings</CardTitle>
+            <CardTitle>{t('accountSettings.privacy.title')}</CardTitle>
           </CardHeader>
           
           <NotificationItem>
             <NotificationText>
-              <NotificationTitle>Profile Visibility</NotificationTitle>
-              <NotificationDescription>Allow others to see your profile</NotificationDescription>
+              <NotificationTitle>{t('accountSettings.privacy.profileVisibility')}</NotificationTitle>
+              <NotificationDescription>{t('accountSettings.privacy.profileVisibilityDesc')}</NotificationDescription>
             </NotificationText>
             <Select
               value={settings?.privacy?.profileVisibility || "public"}
               onChange={(e) => handlePrivacyChange('profileVisibility', e.target.value)}
             >
-              <option value="public">Public</option>
-              <option value="private">Private</option>
+              <option value="public">{t('accountSettings.privacy.profileVisibilityOptions.public')}</option>
+              <option value="private">{t('accountSettings.privacy.profileVisibilityOptions.private')}</option>
             </Select>
           </NotificationItem>
           
           <NotificationItem>
             <NotificationText>
-              <NotificationTitle>Show Email Address</NotificationTitle>
-              <NotificationDescription>Allow others to see your email address</NotificationDescription>
+              <NotificationTitle>{t('accountSettings.privacy.showEmail')}</NotificationTitle>
+              <NotificationDescription>{t('accountSettings.privacy.showEmailDesc')}</NotificationDescription>
             </NotificationText>
             <ToggleSwitch>
               <ToggleInput
@@ -721,8 +757,8 @@ const AccountSettings = () => {
           
           <NotificationItem>
             <NotificationText>
-              <NotificationTitle>Show Phone Number</NotificationTitle>
-              <NotificationDescription>Allow others to see your phone number</NotificationDescription>
+              <NotificationTitle>{t('accountSettings.privacy.showPhone')}</NotificationTitle>
+              <NotificationDescription>{t('accountSettings.privacy.showPhoneDesc')}</NotificationDescription>
             </NotificationText>
             <ToggleSwitch>
               <ToggleInput
@@ -736,8 +772,8 @@ const AccountSettings = () => {
           
           <NotificationItem>
             <NotificationText>
-              <NotificationTitle>Allow Messages</NotificationTitle>
-              <NotificationDescription>Allow instructors and administrators to message you</NotificationDescription>
+              <NotificationTitle>{t('accountSettings.privacy.allowMessages')}</NotificationTitle>
+              <NotificationDescription>{t('accountSettings.privacy.allowMessagesDesc')}</NotificationDescription>
             </NotificationText>
             <ToggleSwitch>
               <ToggleInput
@@ -756,34 +792,34 @@ const AccountSettings = () => {
             <CardIcon>
               <FiLock />
             </CardIcon>
-            <CardTitle>Security</CardTitle>
+            <CardTitle>{t('accountSettings.security.title')}</CardTitle>
           </CardHeader>
           
           <FormGroup>
-            <Label>Current Password</Label>
+            <Label>{t('accountSettings.security.currentPassword')}</Label>
             <Input 
               type="password" 
-              placeholder="Enter current password"
+              placeholder={t('accountSettings.security.currentPasswordPlaceholder')}
               value={passwordData.currentPassword}
               onChange={(e) => handlePasswordChange('currentPassword', e.target.value)}
             />
           </FormGroup>
           
           <FormGroup>
-            <Label>New Password</Label>
+            <Label>{t('accountSettings.security.newPassword')}</Label>
             <Input 
               type="password" 
-              placeholder="Enter new password"
+              placeholder={t('accountSettings.security.newPasswordPlaceholder')}
               value={passwordData.newPassword}
               onChange={(e) => handlePasswordChange('newPassword', e.target.value)}
             />
           </FormGroup>
           
           <FormGroup>
-            <Label>Confirm New Password</Label>
+            <Label>{t('accountSettings.security.confirmNewPassword')}</Label>
             <Input 
               type="password" 
-              placeholder="Confirm new password"
+              placeholder={t('accountSettings.security.confirmNewPasswordPlaceholder')}
               value={passwordData.confirmPassword}
               onChange={(e) => handlePasswordChange('confirmPassword', e.target.value)}
             />
@@ -794,7 +830,7 @@ const AccountSettings = () => {
             disabled={false} // This button is not directly editable via this UI, it's part of the backend
           >
             {/* {changingPassword ? <LoadingSpinner /> : <FiLock />} */}
-            Change Password
+            {t('accountSettings.security.changePassword')}
           </Button>
         </SettingsCard>
       </SettingsGrid>
@@ -802,10 +838,10 @@ const AccountSettings = () => {
       <div style={{ marginTop: '2rem', textAlign: 'center' }}>
         <Button onClick={handleSave} disabled={loading}>
           {loading ? <LoadingSpinner /> : <FiSave />}
-          {loading ? 'Saving...' : 'Save All Changes'}
+          {loading ? t('accountSettings.save.saving') : t('accountSettings.save.saveAll')}
         </Button>
         <Button className="secondary" onClick={handleResetToDefault}>
-          Reset to Default
+          {t('accountSettings.save.resetToDefault')}
         </Button>
       </div>
     </Container>

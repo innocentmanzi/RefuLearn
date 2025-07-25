@@ -441,7 +441,7 @@ const OfflineAssessmentSystem = () => {
     try {
       setProcessing(prev => new Set(prev).add('submit'));
       
-      const answersArray = Object.entries(answers).map(([questionId, answer]) => ({
+      const answersArray = Object.entries(answers || {}).map(([questionId, answer]) => ({
         questionId: parseInt(questionId),
         answer: answer
       }));

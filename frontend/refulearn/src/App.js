@@ -10,7 +10,7 @@
  * ✅ Error boundaries for graceful offline error handling
  * ✅ Real-time sync status and network indicators
  * 🔍 DEBUG: Added navigation logging and direct test buttons
- * 🔍 ADMIN ROUTES: /admin/dashboard, /admin/users, /admin/analytics, /admin/help
+ * 🔍 ADMIN ROUTES: /admin/dashboard, /admin/users, /admin/approvals, /admin/help
  * 🔍 TESTING: Each admin menu item now has a TEST button for direct navigation
  * 
  * Platform now works 100% offline! 🎯
@@ -24,10 +24,13 @@ import { ThemeProvider } from '@mui/material/styles';
 import { createTheme } from '@mui/material/styles';
 import { ThemeProvider as StyledThemeProvider } from 'styled-components';
 import { ThemeContextProvider, useTheme } from './contexts/ThemeContext';
-import FloatingThemeSwitcher from './components/FloatingThemeSwitcher';
+import { useLanguageRouting } from './hooks/useLanguageRouting';
+// import FloatingThemeSwitcher from './components/FloatingThemeSwitcher';
 import OfflineStatus from './components/OfflineStatus';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
+import LanguageRedirect from './components/LanguageRedirect';
 import CacheManager from './utils/cacheManager';
+import './i18n'; // Initialize i18n
 
 import Landing from './pages/Landing/Landing';
 import Login from './pages/Auth/Login';
@@ -36,25 +39,27 @@ import ForgotPassword from './pages/Auth/ForgotPassword';
 import ResetPassword from './pages/Auth/ResetPassword';
 import RefugeeDashboard from './pages/Refugee/Dashboard';
 import InstructorDashboard from './pages/Instructor/InstructorDashboard';
-import SimpleInstructorDashboard from './pages/Instructor/InstructorDashboardSimple';
 import AdminDashboard from './pages/Admin/AdminDashboard';
-import Analytics from './pages/Admin/Analytics';
+
 import ManageUsers from './pages/Admin/ManageUsers';
 import AdminHelpManagement from './pages/Admin/HelpManagement';
+import ApprovalManagement from './pages/Admin/ApprovalManagement';
+import ApprovalDetail from './pages/Admin/ApprovalDetail';
 import EmployerDashboard from './pages/Employer/EmployerDashboard';
 import PostJobs from './pages/Employer/PostJobs';
-import ViewApplicants from './pages/Employer/ViewApplicants';
+
 import EmployerJobs from './pages/Employer/Jobs';
 import EditJob from './pages/Employer/EditJob';
 import Scholarships from './pages/Employer/Scholarships';
 import PostScholarship from './pages/Employer/PostScholarship';
 import EditScholarship from './pages/Employer/EditScholarship';
+import Notifications from './pages/Employer/Notifications';
 import Sidebar from './components/Sidebar';
 import Profile from './pages/Profile/Profile';
 import AccountSettings from './pages/Profile/AccountSettings';
 import Jobs from './pages/Refugee/Jobs';
 import DetailPage from './pages/Refugee/DetailPage';
-import PeerLearning from './pages/Refugee/PeerLearning';
+
 import BrowseCourses from './pages/Refugee/BrowseCourses';
 import CategoryCourses from './pages/Refugee/CategoryCourses';
 import LearningPath from './pages/Refugee/LearningPath';
@@ -68,8 +73,8 @@ import FullCoursePage from './pages/Refugee/FullCoursePage';
 import DiscussionPage from './pages/Refugee/DiscussionPage';
 import HelpTickets from './pages/Refugee/HelpTickets';
 import HelpManagement from './pages/Instructor/HelpManagement';
-import ModuleContent from './pages/Instructor/ModuleContent';
-import GroupDetails from './pages/Refugee/GroupDetails';
+import ModuleContent from './components/ModuleContent';
+
 import CourseContentPage from './pages/Refugee/CourseContentPage';
 import CourseDiscussionPage from './pages/Refugee/CourseDiscussionPage';
 import AssessmentPage from './pages/Refugee/AssessmentPage';
@@ -77,17 +82,29 @@ import AssessmentDetailPage from './pages/Refugee/AssessmentDetailPage';
 import Grades from './pages/Instructor/Grades';
 import MyGrades from './pages/Refugee/MyGrades';
 import CourseDetail from './pages/Refugee/CourseDetail';
+import QuizRedirect from './components/QuizRedirect';
 import StudentCourseOverview from './pages/Refugee/StudentCourseOverview';
-import SharedModuleContent from './components/ModuleContent';
+
 import ContentItemViewer from './components/ContentItemViewer';
 import InstructorQuizPreview from './pages/Instructor/QuizPreview';
 import QuizSubmissions from './pages/Instructor/QuizSubmissions';
 import Submissions from './pages/Instructor/Submissions';
 import CourseBuilder from './pages/Instructor/CourseBuilder';
 import CourseOverview from './pages/Instructor/CourseOverview';
-// import CreateModule from './pages/Instructor/CreateModule';
+import CreateModule from './pages/Instructor/CreateModule';
 import AssessmentCreator from './components/AssessmentCreator';
 import StudentQuizPage from './pages/Refugee/StudentQuizPage';
+import CertificateVerification from './pages/Refugee/CertificateVerification';
+
+// Global safety wrapper for Object.entries to prevent runtime errors
+const originalObjectEntries = Object.entries;
+Object.entries = function(obj) {
+  if (obj === undefined || obj === null) {
+    console.warn('Object.entries called with undefined/null object, returning empty array');
+    return [];
+  }
+  return originalObjectEntries.call(this, obj);
+};
 
 // ROUTING & AUTHENTICATION FIX APPLIED - 2025-01-02 - v6 - NAMING CONFLICT FIXED
 // CACHE BUSTER - Force complete reload - Timestamp: 1735740000000
@@ -159,6 +176,7 @@ class SafeRouteWrapper extends React.Component {
 
 function AppRoutes() {
   const { isAuthenticated, userRole, logout, loading } = useUser();
+  const { getTranslatedPath } = useLanguageRouting();
 
   // Initialize complete offline system (simplified)
   useEffect(() => {
@@ -209,6 +227,7 @@ function AppRoutes() {
     <>
       <OfflineStatus />
       <PWAInstallPrompt />
+      <LanguageRedirect />
       <Routes>
         {/* Landing page accessible to all users */}
         <Route path="/" element={<Landing />} />
@@ -229,7 +248,17 @@ function AppRoutes() {
                 <Profile />
               </Sidebar>
             } />
+            <Route path={getTranslatedPath('/profile')} element={
+              <Sidebar role={userRole} onLogout={logout}>
+                <Profile />
+              </Sidebar>
+            } />
             <Route path="/account-settings" element={
+              <Sidebar role={userRole} onLogout={logout}>
+                <AccountSettings />
+              </Sidebar>
+            } />
+            <Route path={getTranslatedPath('/account-settings')} element={
               <Sidebar role={userRole} onLogout={logout}>
                 <AccountSettings />
               </Sidebar>
@@ -256,7 +285,17 @@ function AppRoutes() {
                     <RefugeeDashboard />
                   </Sidebar>
                 } />
+                <Route path={getTranslatedPath('/dashboard')} element={
+                  <Sidebar role="refugee" onLogout={logout}>
+                    <RefugeeDashboard />
+                  </Sidebar>
+                } />
                 <Route path="/courses" element={
+                  <Sidebar role="refugee" onLogout={logout}>
+                    <BrowseCourses />
+                  </Sidebar>
+                } />
+                <Route path={getTranslatedPath('/courses')} element={
                   <Sidebar role="refugee" onLogout={logout}>
                     <BrowseCourses />
                   </Sidebar>
@@ -266,9 +305,21 @@ function AppRoutes() {
                     <CategoryCourses />
                   </Sidebar>
                 } />
-                <Route path="/courses/:courseId" element={
+                {/* Content routes - redirect quiz requests to proper route */}
+                <Route path="/courses/:courseId/content/:moduleId/quiz/:contentId" element={
                   <Sidebar role="refugee" onLogout={logout}>
-                    <CourseDetail />
+                    <QuizRedirect />
+                  </Sidebar>
+                } />
+                {/* Other content routes */}
+                <Route path="/courses/:courseId/content/:moduleId/:contentType/:contentId" element={
+                  <Sidebar role="refugee" onLogout={logout}>
+                    <ContentItemViewer />
+                  </Sidebar>
+                } />
+                <Route path="/courses/:courseId/module/:moduleId" element={
+                  <Sidebar role="refugee" onLogout={logout}>
+                    <ModuleContent />
                   </Sidebar>
                 } />
                 <Route path="/courses/:courseId/overview" element={
@@ -276,23 +327,12 @@ function AppRoutes() {
                     <StudentCourseOverview />
                   </Sidebar>
                 } />
-                <Route path="/courses/:courseId/module/:moduleId" element={
-                  <Sidebar role="refugee" onLogout={logout}>
-                    <SharedModuleContent />
-                  </Sidebar>
-                } />
-                <Route path="/courses/:courseId/content/:moduleId/:contentType/:contentId" element={
-                  <Sidebar role="refugee" onLogout={logout}>
-                    <ContentItemViewer />
-                  </Sidebar>
-                } />
-
-                <Route path="/courses/:courseId/discussion/:discussionId" element={
+                <Route path="/courses/:courseId/modules/:moduleId/discussion/:discussionId" element={
                   <Sidebar role="refugee" onLogout={logout}>
                     <CourseDiscussionPage />
                   </Sidebar>
                 } />
-                <Route path="/courses/:courseId/modules/:moduleId/discussion/:discussionId" element={
+                <Route path="/courses/:courseId/discussion/:discussionId" element={
                   <Sidebar role="refugee" onLogout={logout}>
                     <CourseDiscussionPage />
                   </Sidebar>
@@ -300,6 +340,11 @@ function AppRoutes() {
                 <Route path="/courses/:courseId/assessment/:assessmentId" element={
                   <Sidebar role="refugee" onLogout={logout}>
                     <AssessmentPage />
+                  </Sidebar>
+                } />
+                <Route path="/courses/:courseId" element={
+                  <Sidebar role="refugee" onLogout={logout}>
+                    <CourseDetail />
                   </Sidebar>
                 } />
                 <Route path="/assessment/:assessmentId" element={
@@ -312,7 +357,17 @@ function AppRoutes() {
                     <Jobs />
                   </Sidebar>
                 } />
+                <Route path={getTranslatedPath('/jobs')} element={
+                  <Sidebar role="refugee" onLogout={logout}>
+                    <Jobs />
+                  </Sidebar>
+                } />
                 <Route path="/jobs/:id" element={
+                  <Sidebar role="refugee" onLogout={logout}>
+                    <DetailPage />
+                  </Sidebar>
+                } />
+                <Route path={getTranslatedPath('/jobs') + '/:id'} element={
                   <Sidebar role="refugee" onLogout={logout}>
                     <DetailPage />
                   </Sidebar>
@@ -322,22 +377,13 @@ function AppRoutes() {
                     <DetailPage />
                   </Sidebar>
                 } />
-                <Route path="/peer-learning" element={
-                  <Sidebar role="refugee" onLogout={logout}>
-                    <PeerLearning />
-                  </Sidebar>
-                } />
-                <Route path="/peer-learning/group/:groupId" element={
-                  <Sidebar role="refugee" onLogout={logout}>
-                    <GroupDetails />
-                  </Sidebar>
-                } />
-                <Route path="/peer-learning/discussion/:discussionId" element={
-                  <Sidebar role="refugee" onLogout={logout}>
-                    <DiscussionPage />
-                  </Sidebar>
-                } />
+
                 <Route path="/learning-path" element={
+                  <Sidebar role="refugee" onLogout={logout}>
+                    <LearningPath />
+                  </Sidebar>
+                } />
+                <Route path={getTranslatedPath('/learning-path')} element={
                   <Sidebar role="refugee" onLogout={logout}>
                     <LearningPath />
                   </Sidebar>
@@ -347,12 +393,29 @@ function AppRoutes() {
                     <Certificates />
                   </Sidebar>
                 } />
+                <Route path={getTranslatedPath('/certificates')} element={
+                  <Sidebar role="refugee" onLogout={logout}>
+                    <Certificates />
+                  </Sidebar>
+                } />
+                <Route path="/verify-certificate" element={<CertificateVerification />} />
+                <Route path="/certificate/verify/:certificateNumber" element={<CertificateVerification />} />
                 <Route path="/help" element={
                   <Sidebar role="refugee" onLogout={logout}>
                     <HelpTickets />
                   </Sidebar>
                 } />
+                <Route path={getTranslatedPath('/help')} element={
+                  <Sidebar role="refugee" onLogout={logout}>
+                    <HelpTickets />
+                  </Sidebar>
+                } />
                 <Route path="/my-grades" element={
+                  <Sidebar role="refugee" onLogout={logout}>
+                    <MyGrades />
+                  </Sidebar>
+                } />
+                <Route path={getTranslatedPath('/my-grades')} element={
                   <Sidebar role="refugee" onLogout={logout}>
                     <MyGrades />
                   </Sidebar>
@@ -418,6 +481,11 @@ function AppRoutes() {
                     <ModuleContent />
                   </Sidebar>
                 } />
+                <Route path="/instructor/courses/:courseId/modules/:moduleId/quiz" element={
+                  <Sidebar role="instructor" onLogout={logout}>
+                    <ModuleContent />
+                  </Sidebar>
+                } />
                 <Route path="/instructor/courses/:courseId/modules/:moduleId/quiz/:quizId" element={
                   <Sidebar role="instructor" onLogout={logout}>
                     <ModuleContent />
@@ -433,8 +501,12 @@ function AppRoutes() {
                     <ModuleContent />
                   </Sidebar>
                 } />
-                {/* Temporarily disabled CreateModule routes due to import issue */}
-                {/* <Route path="/instructor/courses/create/module" element={
+                <Route path="/instructor/courses/:courseId/modules/:moduleId/*" element={
+                  <Sidebar role="instructor" onLogout={logout}>
+                    <ModuleContent />
+                  </Sidebar>
+                } />
+                <Route path="/instructor/courses/create/module" element={
                   <Sidebar role="instructor" onLogout={logout}>
                     <CreateModule />
                   </Sidebar>
@@ -443,10 +515,15 @@ function AppRoutes() {
                   <Sidebar role="instructor" onLogout={logout}>
                     <CreateModule />
                   </Sidebar>
-                } /> */}
+                } />
                 <Route path="/instructor/assessments" element={
                   <Sidebar role="instructor" onLogout={logout}>
                     <Assessments />
+                  </Sidebar>
+                } />
+                <Route path="/instructor/quizzes" element={
+                  <Sidebar role="instructor" onLogout={logout}>
+                    <Quizzes />
                   </Sidebar>
                 } />
                 <Route path="/instructor/courses/create" element={
@@ -521,14 +598,20 @@ function AppRoutes() {
                     <ManageUsers />
                   </Sidebar>
                 } />
-                <Route path="/admin/analytics" element={
-                  <Sidebar role="admin" onLogout={logout}>
-                    <Analytics />
-                  </Sidebar>
-                } />
+
                 <Route path="/admin/help" element={
                   <Sidebar role="admin" onLogout={logout}>
                     <AdminHelpManagement />
+                  </Sidebar>
+                } />
+                <Route path="/admin/approvals" element={
+                  <Sidebar role="admin" onLogout={logout}>
+                    <ApprovalManagement />
+                  </Sidebar>
+                } />
+                <Route path="/admin/approvals/detail/:id" element={
+                  <Sidebar role="admin" onLogout={logout}>
+                    <ApprovalDetail />
                   </Sidebar>
                 } />
                 {/* Removed automatic dashboard redirect - users can navigate to specific pages */}
@@ -573,11 +656,12 @@ function AppRoutes() {
                     <EditScholarship />
                   </Sidebar>
                 } />
-                <Route path="/employer/applicants" element={
+                <Route path="/employer/notifications" element={
                   <Sidebar role="employer" onLogout={logout}>
-                    <ViewApplicants />
+                    <Notifications />
                   </Sidebar>
                 } />
+
                 {/* Removed automatic dashboard redirect - users can navigate to specific pages */}
               </>
             )}
@@ -644,19 +728,40 @@ function AppRoutes() {
 const ThemeWrapper = () => {
   const { theme } = useTheme();
   
+  // Create a Material-UI theme from our theme object
+  const muiTheme = createTheme({
+    palette: {
+      mode: 'light', // Add explicit mode
+      primary: {
+        main: theme.colors.primary,
+      },
+      secondary: {
+        main: theme.colors.secondary,
+      },
+      background: {
+        default: theme.colors.background,
+        paper: theme.colors.cardBackground,
+      },
+      text: {
+        primary: theme.colors.text,
+        secondary: theme.colors.textSecondary,
+      },
+    },
+  });
+  
   return (
-    <ThemeProvider theme={theme}>
+    <ThemeProvider theme={muiTheme}>
       <StyledThemeProvider theme={theme}>
-        <LanguageProvider>
-          <UserProvider>
+        <UserProvider>
+          <LanguageProvider>
             <Router>
               <SafeRouteWrapper>
                 <AppRoutes />
-                <FloatingThemeSwitcher />
+                {/* <FloatingThemeSwitcher /> */}
               </SafeRouteWrapper>
             </Router>
-          </UserProvider>
-        </LanguageProvider>
+          </LanguageProvider>
+        </UserProvider>
       </StyledThemeProvider>
     </ThemeProvider>
   );

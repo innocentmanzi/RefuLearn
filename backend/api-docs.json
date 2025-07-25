@@ -997,7 +997,7 @@
                           "type": "object",
                           "properties": {
                             "email": { "type": "string" },
-                            "language": { "type": "string", "enum": ["en", "fr", "ar", "sw"] },
+                            "language": { "type": "string", "enum": ["en", "fr", "rw", "sw"] },
                             "timezone": { "type": "string" },
                             "notifications": {
                               "type": "object",
@@ -1045,7 +1045,7 @@
                 "type": "object",
                 "properties": {
                   "email": { "type": "string", "format": "email" },
-                  "language": { "type": "string", "enum": ["en", "fr", "ar", "sw"] },
+                  "language": { "type": "string", "enum": ["en", "fr", "rw", "sw"] },
                   "timezone": { "type": "string" },
                   "notifications": {
                     "type": "object",

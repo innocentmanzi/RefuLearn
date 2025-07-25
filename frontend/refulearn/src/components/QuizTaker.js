@@ -62,34 +62,7 @@ const QuizDescription = styled.div`
   line-height: 1.5;
 `;
 
-const QuizStats = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 1rem;
-  padding: 1rem;
-  background: #f9fafb;
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
-`;
 
-const StatItem = styled.div`
-  text-align: center;
-`;
-
-const StatValue = styled.div`
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: #1f2937;
-  margin-bottom: 0.25rem;
-`;
-
-const StatLabel = styled.div`
-  font-size: 0.75rem;
-  color: #6b7280;
-  text-transform: uppercase;
-  font-weight: 500;
-  letter-spacing: 0.5px;
-`;
 
 const QuizMeta = styled.div`
   display: flex;
@@ -287,7 +260,7 @@ const EditButton = styled.button`
   }
 `;
 
-function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
+function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1, isLoading = false }) {
   const [answers, setAnswers] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [score, setScore] = useState(0);
@@ -313,6 +286,112 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
     questionCount: quiz?.questions?.length
   });
 
+  // Debug: Log the complete quiz data received
+  console.log('🔍 COMPLETE QUIZ DATA RECEIVED BY QUIZTAKER:', {
+    quizId: quiz?._id,
+    title: quiz?.title,
+    description: quiz?.description,
+    questions: quiz?.questions?.map((q, idx) => ({
+      question: q.question,
+      type: q.type,
+      correctAnswer: q.correctAnswer,
+      options: q.options
+    })) || [],
+    allQuizFields: quiz ? Object.keys(quiz) : []
+  });
+  
+  // Add debug function to window for easy access
+  useEffect(() => {
+    window.debugQuizData = () => {
+      console.log('🔍 DEBUG QUIZ DATA:', {
+        quizId: quiz?._id,
+        title: quiz?.title,
+        description: quiz?.description,
+        questions: quiz?.questions?.map((q, idx) => ({
+          question: q.question,
+          type: q.type,
+          correctAnswer: q.correctAnswer,
+          options: q.options
+        })) || [],
+        allQuizFields: quiz ? Object.keys(quiz) : [],
+        url: window.location.href
+      });
+    };
+    
+    // Add debug function to check quiz completion status
+    window.checkQuizCompletion = () => {
+      console.log('🔍 Checking quiz completion status...');
+      checkSubmissionStatus();
+    };
+    
+    // Add debug function to manually search for quiz data
+    window.searchQuizData = async () => {
+      console.log('🔍 Manually searching for quiz completion data...');
+      const token = localStorage.getItem('token');
+      
+      try {
+        // Check quiz sessions
+        console.log('🔍 Checking quiz sessions...');
+        const sessionResponse = await fetch(`/api/quiz-sessions/user/${quiz?._id}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (sessionResponse.ok) {
+          const sessionData = await sessionResponse.json();
+          console.log('📋 Quiz sessions data:', sessionData);
+        }
+        
+        // Check course submissions
+        console.log('🔍 Checking course submissions...');
+        const submissionsResponse = await fetch(`/api/courses/${quiz?.courseId}/submissions`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (submissionsResponse.ok) {
+          const submissionsData = await submissionsResponse.json();
+          console.log('📋 Course submissions data:', submissionsData);
+        }
+        
+        // Check course progress
+        console.log('🔍 Checking course progress...');
+        const progressResponse = await fetch(`/api/courses/${quiz?.courseId}/progress`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (progressResponse.ok) {
+          const progressData = await progressResponse.json();
+          console.log('📋 Course progress data:', progressData);
+        }
+        
+        // Check all user quiz sessions (debug endpoint)
+        console.log('🔍 Checking all user quiz sessions...');
+        const allSessionsResponse = await fetch(`/api/quiz-sessions/debug/user-sessions`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (allSessionsResponse.ok) {
+          const allSessionsData = await allSessionsResponse.json();
+          console.log('📋 All user quiz sessions:', allSessionsData);
+        }
+        
+      } catch (error) {
+        console.error('❌ Error searching for quiz data:', error);
+      }
+    };
+  }, [quiz]);
+
   // Check for existing submissions
   const checkSubmissionStatus = async () => {
     if (!quiz?._id) {
@@ -329,33 +408,146 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
     
     try {
       const token = localStorage.getItem('token');
-      const url = `/api/courses/${quiz.courseId}/submissions?assessmentId=${quiz._id}`;
-      console.log('🔍 Submission check URL:', url);
       
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      // Check for quiz completion in multiple ways
+      let isCompleted = false;
+      let completionData = null;
       
-      console.log('📋 Submission check response status:', response.status);
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log('📋 Submission check data:', data);
+      // Method 1: Check quiz sessions
+      try {
+        const sessionResponse = await fetch(`/api/quiz-sessions/${quiz._id}/completion-status`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
         
-        if (data.success && data.data.submissions && data.data.submissions.length > 0) {
-          console.log('✅ Found existing submission:', data.data.submissions[0]);
-          setAlreadySubmitted(true);
-          setSubmissionData(data.data.submissions[0]); // Get the first submission
-        } else {
-          console.log('📋 No submissions found for this assessment');
+        if (sessionResponse.ok) {
+          const sessionData = await sessionResponse.json();
+          if (sessionData.success && sessionData.data && sessionData.data.isCompleted) {
+            isCompleted = true;
+            completionData = {
+              score: sessionData.data.score,
+              timeSpent: sessionData.data.timeSpent,
+              submittedAt: sessionData.data.completedAt,
+              answers: sessionData.data.answers
+            };
+            console.log('✅ Found quiz completion via session:', completionData);
+          }
         }
-      } else {
-        const errorText = await response.text();
-        console.error('❌ Error response:', errorText);
+      } catch (sessionError) {
+        console.log('ℹ️ Session check failed:', sessionError.message);
       }
+      
+      // Method 1.5: Check all quiz sessions for this quiz
+      if (!isCompleted) {
+        try {
+          const allSessionsResponse = await fetch(`/api/quiz-sessions/user/${quiz._id}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          if (allSessionsResponse.ok) {
+            const sessionsData = await allSessionsResponse.json();
+            if (sessionsData.success && sessionsData.data && sessionsData.data.sessions) {
+              const completedSession = sessionsData.data.sessions.find(s => s.status === 'completed');
+              if (completedSession) {
+                isCompleted = true;
+                completionData = {
+                  score: completedSession.score,
+                  timeSpent: completedSession.timeSpent,
+                  submittedAt: completedSession.submittedAt,
+                  answers: completedSession.answers
+                };
+                console.log('✅ Found quiz completion via user sessions:', completionData);
+              }
+            }
+          }
+        } catch (userSessionsError) {
+          console.log('ℹ️ User sessions check failed:', userSessionsError.message);
+        }
+      }
+      
+      // Method 2: Check course submissions
+      if (!isCompleted) {
+        try {
+          const url = `/api/courses/${quiz.courseId}/submissions?assessmentId=${quiz._id}`;
+          const response = await fetch(url, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.data.submissions && data.data.submissions.length > 0) {
+              isCompleted = true;
+              const submission = data.data.submissions[0];
+              completionData = {
+                score: submission.score,
+                timeSpent: submission.timeSpent,
+                submittedAt: submission.submittedAt,
+                answers: submission.answers
+              };
+              console.log('✅ Found quiz completion via submissions:', completionData);
+            }
+          }
+        } catch (submissionError) {
+          console.log('ℹ️ Submission check failed:', submissionError.message);
+        }
+      }
+      
+      // Method 2.5: Check all submissions for this user and find quiz submissions
+      if (!isCompleted) {
+        try {
+          const allSubmissionsResponse = await fetch(`/api/courses/${quiz.courseId}/submissions`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          if (allSubmissionsResponse.ok) {
+            const allSubmissionsData = await allSubmissionsResponse.json();
+            if (allSubmissionsData.success && allSubmissionsData.data && allSubmissionsData.data.submissions) {
+              // Look for any submission that matches this quiz ID
+              const quizSubmission = allSubmissionsData.data.submissions.find(s => 
+                s.assessmentId === quiz._id || 
+                s.quizId === quiz._id ||
+                s._id === quiz._id
+              );
+              
+              if (quizSubmission) {
+                isCompleted = true;
+                completionData = {
+                  score: quizSubmission.score,
+                  timeSpent: quizSubmission.timeSpent,
+                  submittedAt: quizSubmission.submittedAt,
+                  answers: quizSubmission.answers
+                };
+                console.log('✅ Found quiz completion via all submissions:', completionData);
+              }
+            }
+          }
+        } catch (allSubmissionsError) {
+          console.log('ℹ️ All submissions check failed:', allSubmissionsError.message);
+        }
+      }
+      
+      // If quiz is completed, set the completion state
+      if (isCompleted && completionData) {
+        setAlreadySubmitted(true);
+        setSubmissionData(completionData);
+        setSubmitted(true);
+        setScore(completionData.score || 0);
+        console.log('✅ Quiz already completed, showing results');
+      } else {
+        console.log('📋 Quiz not completed yet, allowing new attempt');
+      }
+      
     } catch (error) {
       console.error('❌ Error checking submission status:', error);
     } finally {
@@ -369,7 +561,7 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
     
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/quiz-sessions/${quiz._id}/status`, {
+              const response = await fetch(`/api/quiz-sessions/${quiz._id}/status?v=${Date.now()}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -380,6 +572,7 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
         const data = await response.json();
         if (data.success && data.data.hasActiveSession) {
           console.log('✅ Found existing quiz session:', data.data);
+          console.log('🔧 Setting sessionId to:', data.data.sessionId);
           setSessionId(data.data.sessionId);
           setQuizStarted(true);
           setTimeRemaining(data.data.timeRemaining);
@@ -398,6 +591,14 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
   // Debug logging for quiz data
   useEffect(() => {
     console.log('🔍 QuizTaker received quiz data:', quiz);
+    console.log('🔍 Quiz required properties:', {
+      _id: quiz?._id,
+      courseId: quiz?.courseId,
+      moduleId: quiz?.moduleId,
+      duration: quiz?.duration,
+      hasQuestions: !!quiz?.questions,
+      questionCount: quiz?.questions?.length || 0
+    });
     console.log('🔍 Quiz questions:', quiz?.questions);
     if (quiz?.questions) {
       quiz.questions.forEach((q, index) => {
@@ -432,7 +633,12 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
             handleSubmit();
             return 0;
           }
-          return prev - 1;
+          const newTime = prev - 1;
+          // Log every 30 seconds to track timer
+          if (newTime % 30 === 0) {
+            console.log(`⏰ Timer: ${formatTime(newTime)} remaining`);
+          }
+          return newTime;
         });
       }, 1000);
     }
@@ -440,7 +646,7 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
     return () => {
       if (timer) clearInterval(timer);
     };
-  }, [timerActive, timeRemaining, submitted]);
+  }, [timerActive, submitted]);
 
   // Start quiz function
   const startQuiz = async () => {
@@ -448,6 +654,40 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
       const token = localStorage.getItem('token');
       const isOnline = navigator.onLine;
       let success = false;
+      
+      // Check if quiz object exists
+      if (!quiz) {
+        throw new Error('Quiz data is not available. Please refresh the page and try again.');
+      }
+
+      console.log('🚀 Starting quiz with data:', {
+        quizId: quiz._id,
+        courseId: quiz.courseId,
+        moduleId: quiz.moduleId,
+        duration: quiz.duration,
+        isOnline,
+        hasToken: !!token
+      });
+
+      // Validate required quiz data
+      if (!quiz._id) {
+        console.error('❌ Quiz object missing _id:', quiz);
+        throw new Error('Quiz ID is missing. Please refresh the page and try again.');
+      }
+      if (!quiz.courseId) {
+        console.error('❌ Quiz object missing courseId:', quiz);
+        throw new Error('Course ID is missing. Please refresh the page and try again.');
+      }
+      if (!quiz.moduleId) {
+        console.error('❌ Quiz object missing moduleId:', quiz);
+        throw new Error('Module ID is missing. Please refresh the page and try again.');
+      }
+      if (!quiz.duration) {
+        console.warn('⚠️ Quiz duration not set, using default 30 minutes');
+      }
+      if (!quiz.questions || quiz.questions.length === 0) {
+        throw new Error('Quiz has no questions');
+      }
 
       if (isOnline) {
         try {
@@ -469,58 +709,52 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
           });
 
           if (response.ok) {
-            success = true;
-            console.log('✅ Online quiz start successful');
+            const data = await response.json();
+            console.log('✅ Online quiz start successful:', data);
+            
+            if (data.success && data.data && data.data.sessionId) {
+              setSessionId(data.data.sessionId);
+              success = true;
+              console.log('✅ Session ID set:', data.data.sessionId);
+            } else {
+              console.log('⚠️ No sessionId in response, but continuing with quiz start...');
+              console.log('⚠️ Response data:', data);
+              success = true; // Continue anyway, will use fallback submission
+            }
           } else {
+            const errorText = await response.text();
+            console.error('❌ Quiz start failed:', response.status, errorText);
             throw new Error('Failed to start quiz online');
           }
         } catch (onlineError) {
-          console.warn('⚠️ Online quiz start failed, using offline:', onlineError);
-          // Fall back to offline quiz start
-          const result = await offlineIntegrationService.startQuizOffline({
-            quizId: quiz._id,
-            courseId: quiz.courseId,
-            moduleId: quiz.moduleId,
-            duration: parseInt(quiz.duration) || 30
-          });
-          
-          if (result.success) {
-            success = true;
-            console.log('✅ Offline quiz start successful');
-          } else {
-            throw new Error('Failed to start quiz offline');
-          }
+          console.warn('⚠️ Online quiz start failed:', onlineError);
+          // Fall back to simple local quiz start (no offline service dependency)
+          console.log('🔄 Falling back to local quiz start...');
+          success = true;
+          console.log('✅ Local quiz start successful (no session tracking)');
         }
       } else {
-        // Offline quiz start
-        console.log('📴 Offline mode: Starting quiz offline...');
-        const result = await offlineIntegrationService.startQuizOffline({
-          quizId: quiz._id,
-          courseId: quiz.courseId,
-          moduleId: quiz.moduleId,
-          duration: parseInt(quiz.duration) || 30
-        });
-        
-        if (result.success) {
-          success = true;
-          console.log('✅ Offline quiz start successful');
-        } else {
-          throw new Error('Failed to start quiz offline');
-        }
+        // Offline quiz start (simplified)
+        console.log('📴 Offline mode: Starting quiz locally...');
+        success = true;
+        console.log('✅ Offline quiz start successful (local mode)');
       }
 
       if (success) {
         // Quiz started successfully (either online or offline)
+        const durationInSeconds = parseInt(quiz.duration) * 60;
         setQuizStarted(true);
-        setTimeRemaining(parseInt(quiz.duration) * 60); // Convert to seconds
+        setTimeRemaining(durationInSeconds); // Convert to seconds
         setTimerActive(true);
-        console.log('🚀 Quiz started! Timer:', quiz?.duration, 'minutes');
+        console.log('🚀 Quiz started! Timer:', quiz?.duration, 'minutes (', durationInSeconds, 'seconds)');
+        console.log('⏰ Timer initialized with:', durationInSeconds, 'seconds');
       } else {
         throw new Error('Failed to start quiz');
       }
     } catch (error) {
       console.error('❌ Error starting quiz session:', error);
-      alert('Failed to start quiz. Please try again.');
+      const errorMessage = error.message || 'Failed to start quiz. Please try again.';
+      alert(errorMessage);
     }
   };
 
@@ -570,18 +804,34 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
     
     setLoading(true);
     try {
+      console.log('🚀 Submitting quiz with sessionId:', sessionId);
+      console.log('🚀 Answers to submit:', answers);
+      
       if (sessionId) {
         // Submit via quiz session endpoint
         const token = localStorage.getItem('token');
+        console.log('🚀 Submitting to quiz session endpoint...');
+        console.log('🔧 Using sessionId:', sessionId);
+        
+
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+        
         const response = await fetch(`/api/quiz-sessions/${sessionId}/submit`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ answers })
+          body: JSON.stringify({ answers }),
+          signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
 
+        console.log('🚀 Submit response status:', response.status);
+        
         if (response.ok) {
           const data = await response.json();
           console.log('✅ Quiz submitted successfully:', data.data);
@@ -600,12 +850,119 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
             });
           }
         } else {
-          const errorData = await response.json();
-          console.error('❌ Failed to submit quiz:', errorData);
-          alert('Failed to submit quiz: ' + (errorData.message || 'Unknown error'));
+          const errorText = await response.text();
+          console.error('❌ Failed to submit quiz:', response.status, errorText);
+          // Don't show alert here, let it fall through to the catch block
+          throw new Error(errorText || 'Quiz session submission failed');
         }
-      } else {
-        // Fallback to local calculation (for instructors or if no session)
+              } else {
+          console.log('⚠️ No sessionId available, trying course-based submission...');
+          
+          // Try course-based submission as fallback
+          try {
+            const token = localStorage.getItem('token');
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+            
+            const response = await fetch(`/api/courses/${quiz.courseId}/quiz/${quiz._id}/submit`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ 
+                answers,
+                timeSpent: (parseInt(quiz.duration) * 60) - (timeRemaining || 0) // Calculate time spent
+              }),
+              signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+
+            console.log('🚀 Course-based submit response status:', response.status);
+            
+            if (response.ok) {
+              const data = await response.json();
+              console.log('✅ Course-based quiz submission successful:', data.data);
+              
+              setScore(data.data.score || 0);
+              setSubmitted(true);
+              setTimerActive(false);
+              
+              // Call completion callback
+              if (onComplete) {
+                onComplete({
+                  score: data.data.score || 0,
+                  answers: data.data.answers,
+                  totalQuestions: quiz.questions.length,
+                  timeSpent: data.data.timeSpent
+                });
+              }
+            } else {
+              const errorText = await response.text();
+              console.error('❌ Course-based submission failed:', response.status, errorText);
+              throw new Error(errorText || 'Course-based submission failed');
+            }
+          } catch (courseError) {
+            console.log('⚠️ Course-based submission failed, using local calculation...');
+            console.log('⚠️ Course error:', courseError.message);
+            
+            // Final fallback to local calculation
+            let correctAnswers = 0;
+            quiz.questions.forEach((question, index) => {
+              const userAnswer = answers[index];
+              const correctAnswer = question.correctAnswer;
+              
+              if (question.type === 'multiple_choice') {
+                if (userAnswer === correctAnswer) {
+                  correctAnswers++;
+                }
+              } else if (question.type === 'true_false') {
+                // Handle different formats of true/false answers
+                const normalizedUserAnswer = userAnswer === true || userAnswer === 'true' || userAnswer === 1 || userAnswer === '1';
+                const normalizedCorrectAnswer = correctAnswer === true || correctAnswer === 'true' || correctAnswer === 1 || correctAnswer === '1';
+                
+                if (normalizedUserAnswer === normalizedCorrectAnswer) {
+                  correctAnswers++;
+                }
+              } else if (question.type === 'short_answer') {
+                // For short answers, we'll mark as correct for now
+                // In a real app, this would need manual grading or better matching
+                if (userAnswer && userAnswer.trim().length > 0) {
+                  correctAnswers++;
+                }
+              }
+            });
+            
+            const calculatedScore = Math.round((correctAnswers / quiz.questions.length) * 100);
+            console.log('✅ Local calculation completed:', {
+              correctAnswers,
+              totalQuestions: quiz.questions.length,
+              score: calculatedScore
+            });
+            
+            setScore(calculatedScore);
+            setSubmitted(true);
+            setTimerActive(false);
+            
+            // Call completion callback
+            if (onComplete) {
+              onComplete({
+                score: calculatedScore,
+                answers: answers,
+                totalQuestions: quiz.questions.length,
+                correctAnswers: correctAnswers,
+                timeSpent: (parseInt(quiz.duration) * 60) - (timeRemaining || 0)
+              });
+            }
+          }
+        }
+    } catch (error) {
+      console.error('Error submitting quiz:', error);
+      
+      if (error.name === 'AbortError') {
+        alert('Quiz submission timed out. Using local calculation instead.');
+        // Fall back to local calculation
         let correctAnswers = 0;
         quiz.questions.forEach((question, index) => {
           const userAnswer = answers[index];
@@ -616,7 +973,6 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
               correctAnswers++;
             }
           } else if (question.type === 'true_false') {
-            // Handle different formats of true/false answers
             const normalizedUserAnswer = userAnswer === true || userAnswer === 'true' || userAnswer === 1 || userAnswer === '1';
             const normalizedCorrectAnswer = correctAnswer === true || correctAnswer === 'true' || correctAnswer === 1 || correctAnswer === '1';
             
@@ -624,8 +980,6 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
               correctAnswers++;
             }
           } else if (question.type === 'short_answer') {
-            // For short answers, we'll mark as correct for now
-            // In a real app, this would need manual grading or better matching
             if (userAnswer && userAnswer.trim().length > 0) {
               correctAnswers++;
             }
@@ -635,27 +989,29 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
         const calculatedScore = Math.round((correctAnswers / quiz.questions.length) * 100);
         setScore(calculatedScore);
         setSubmitted(true);
+        setTimerActive(false);
         
-        // Call completion callback
         if (onComplete) {
           onComplete({
             score: calculatedScore,
             answers: answers,
             totalQuestions: quiz.questions.length,
-            correctAnswers: correctAnswers
+            correctAnswers: correctAnswers,
+            timeSpent: (parseInt(quiz.duration) * 60) - (timeRemaining || 0)
           });
         }
+      } else {
+        alert(error.message || 'Failed to submit quiz. Please try again.');
       }
-    } catch (error) {
-      console.error('Error submitting quiz:', error);
-      alert('Failed to submit quiz. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   const getAnsweredCount = () => {
-    return Object.keys(answers).length;
+    const count = Object.keys(answers).length;
+    console.log('🔍 Answered count:', count, 'Answers:', answers);
+    return count;
   };
 
   const renderQuestion = (question, index) => {
@@ -882,7 +1238,8 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
     );
   };
 
-  if (!quiz || !quiz.questions || quiz.questions.length === 0) {
+  // Show assignment submission form for assessments without questions
+  if (quiz.type === 'assessment' && (!quiz.questions || quiz.questions.length === 0)) {
     return (
       <QuizContainer>
         <QuizHeader>
@@ -939,10 +1296,10 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
                 marginBottom: '1rem'
               }}>
                 <h3 style={{ color: '#155724', marginBottom: '0.5rem' }}>
-                  ✅ Assignment Already Submitted
+                  ✅ Quiz Already Completed
                 </h3>
                 <p style={{ color: '#155724', margin: 0 }}>
-                  You have already submitted this assignment on {new Date(submissionData?.submittedAt).toLocaleDateString()}
+                  You have already completed this quiz on {new Date(submissionData?.submittedAt).toLocaleDateString()}
                 </p>
               </div>
               {submissionData && (
@@ -950,23 +1307,28 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
                   background: '#f8f9fa',
                   padding: '1rem',
                   borderRadius: '8px',
-                  textAlign: 'left'
+                  textAlign: 'center'
                 }}>
-                  <h4 style={{ color: '#374151', marginBottom: '0.5rem' }}>
-                    Submission Details:
+                  <h4 style={{ color: '#374151', marginBottom: '1rem' }}>
+                    Quiz Results:
                   </h4>
+                  <div style={{
+                    fontSize: '2rem',
+                    fontWeight: 'bold',
+                    color: submissionData.score >= 70 ? '#28a745' : '#dc3545',
+                    marginBottom: '0.5rem'
+                  }}>
+                    {submissionData.score}%
+                  </div>
+                  <div style={{ color: '#6b7280', marginBottom: '1rem' }}>
+                    {submissionData.score >= 70 ? '🎉 Great job! You passed the quiz.' : '📚 Consider reviewing the material.'}
+                  </div>
                   <p style={{ color: '#6b7280', margin: '0.25rem 0' }}>
-                    <strong>Type:</strong> {submissionData.submissionType === 'file' ? 'File Upload' : 'Link Submission'}
+                    <strong>Completed:</strong> {new Date(submissionData.submittedAt).toLocaleString()}
                   </p>
-                  <p style={{ color: '#6b7280', margin: '0.25rem 0' }}>
-                    <strong>Submitted:</strong> {new Date(submissionData.submittedAt).toLocaleString()}
-                  </p>
-                  <p style={{ color: '#6b7280', margin: '0.25rem 0' }}>
-                    <strong>Status:</strong> {submissionData.status || 'Submitted'}
-                  </p>
-                  {submissionData.grade && (
+                  {submissionData.timeSpent && (
                     <p style={{ color: '#6b7280', margin: '0.25rem 0' }}>
-                      <strong>Grade:</strong> {submissionData.grade}
+                      <strong>Time Spent:</strong> {Math.floor(submissionData.timeSpent / 60)}m {submissionData.timeSpent % 60}s
                     </p>
                   )}
                 </div>
@@ -1043,6 +1405,56 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
     );
   }
 
+  // Show error message for quizzes without questions
+  if (!quiz || !quiz.questions || quiz.questions.length === 0) {
+    return (
+      <QuizContainer>
+        <QuizHeader>
+          <QuizHeaderTop>
+            <QuizInfo>
+              <QuizTitle>Quiz: {quiz?.title || 'Untitled Quiz'}</QuizTitle>
+              {quiz?.description && (
+                <QuizDescription>{quiz.description}</QuizDescription>
+              )}
+            </QuizInfo>
+          </QuizHeaderTop>
+        </QuizHeader>
+        
+        <QuizBody>
+          <div style={{
+            background: '#fff3cd',
+            color: '#856404',
+            padding: '2rem',
+            borderRadius: '8px',
+            border: '1px solid #ffeaa7',
+            textAlign: 'center'
+          }}>
+            <h3 style={{ color: '#856404', marginBottom: '1rem' }}>
+              ⚠️ Quiz Has No Questions
+            </h3>
+            <p style={{ color: '#856404', marginBottom: '1rem' }}>
+              This quiz exists but doesn't have any questions yet. Please contact your instructor to add questions.
+            </p>
+            <div style={{
+              background: '#fff',
+              padding: '1rem',
+              borderRadius: '4px',
+              textAlign: 'left',
+              fontSize: '0.875rem'
+            }}>
+              <strong>Quiz Info:</strong><br/>
+              Title: {quiz?.title || 'Untitled'}<br/>
+              Description: {quiz?.description || 'No description'}<br/>
+              Questions: {quiz?.questions?.length || 0}<br/>
+              ID: {quiz?._id}<br/>
+              Type: {quiz?.type || 'quiz'}
+            </div>
+          </div>
+        </QuizBody>
+      </QuizContainer>
+    );
+  }
+
   return (
     <QuizContainer>
       <QuizHeader>
@@ -1069,43 +1481,6 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
             )}
           </QuizInfo>
         </QuizHeaderTop>
-        
-        <QuizStats>
-          <StatItem>
-            <StatValue>{quiz.questions?.length || 0}</StatValue>
-            <StatLabel>Questions</StatLabel>
-          </StatItem>
-          <StatItem>
-            <StatValue>
-              {quiz.duration ? 
-                `${quiz.duration} min` : 
-                'No Time Limit'
-              }
-            </StatValue>
-            <StatLabel>Time Limit</StatLabel>
-          </StatItem>
-          <StatItem>
-            <StatValue>
-              {quiz.dueDate ? 
-                new Date(quiz.dueDate).toLocaleDateString() : 
-                'No Due Date'
-              }
-            </StatValue>
-            <StatLabel>Due Date</StatLabel>
-          </StatItem>
-          {/* Active Timer Display */}
-          {timerActive && timeRemaining !== null && (
-            <StatItem>
-              <StatValue style={{ 
-                color: timeRemaining < 300 ? '#dc3545' : '#007BFF',
-                fontWeight: 'bold' 
-              }}>
-                {formatTime(timeRemaining)}
-              </StatValue>
-              <StatLabel>Time Remaining</StatLabel>
-            </StatItem>
-          )}
-        </QuizStats>
       </QuizHeader>
 
 
@@ -1123,7 +1498,51 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
             {score >= 70 ? '🎉 Great job! You passed the quiz.' : '📚 Consider reviewing the material and trying again.'}
           </div>
         </ResultsContainer>
-      ) : !quizStarted && userRole === 'refugee' ? (
+      ) : isLoading ? (
+        /* Loading Screen */
+        <div style={{
+          background: '#fff',
+          borderRadius: '12px',
+          border: '1px solid #e5e7eb',
+          padding: '3rem 2rem',
+          margin: '1rem 0',
+          textAlign: 'center',
+          boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)'
+        }}>
+          <div style={{ marginBottom: '2rem' }}>
+            <h3 style={{ 
+              color: '#1f2937', 
+              fontSize: '1.5rem', 
+              fontWeight: '600', 
+              marginBottom: '1rem' 
+            }}>
+              Loading Quiz...
+            </h3>
+            <p style={{ 
+              color: '#6b7280', 
+              fontSize: '1rem', 
+              lineHeight: '1.6'
+            }}>
+              Please wait while we prepare your quiz.
+            </p>
+          </div>
+          <div style={{
+            display: 'inline-block',
+            width: '40px',
+            height: '40px',
+            border: '4px solid #f3f3f3',
+            borderTop: '4px solid #007BFF',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite'
+          }}></div>
+          <style>{`
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          `}</style>
+        </div>
+      ) : !quizStarted && userRole === 'refugee' && quiz && quiz._id ? (
         /* Start Quiz Screen for Refugees */
         <div style={{
           background: '#fff',
@@ -1143,63 +1562,151 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
             }}>
               Ready to Start the Quiz?
             </h3>
-            <p style={{ 
+                        <p style={{ 
               color: '#6b7280', 
               fontSize: '1rem', 
               lineHeight: '1.6',
-              marginBottom: '1.5rem' 
+              marginBottom: '2rem' 
             }}>
               Once you click "Start Quiz", the timer will begin and you'll have{' '}
               <strong>{quiz.duration || 'unlimited'} {quiz.duration ? 'minutes' : 'time'}</strong> to complete all questions.
             </p>
-            <div style={{
-              background: '#f3f4f6',
-              padding: '1rem',
-              borderRadius: '8px',
-              marginBottom: '2rem'
-            }}>
-              <h4 style={{ color: '#374151', marginBottom: '0.5rem' }}>Quiz Information:</h4>
-              <div style={{ color: '#6b7280', fontSize: '0.875rem' }}>
-                <div>📝 {quiz.questions?.length || 0} questions</div>
-                <div>⏰ {quiz.duration ? `${quiz.duration} minutes` : 'No time limit'}</div>
-                <div>📅 Due: {quiz.dueDate ? new Date(quiz.dueDate).toLocaleDateString() : 'No due date'}</div>
-              </div>
-            </div>
           </div>
           <button
             onClick={startQuiz}
+            disabled={isLoading || !quiz || !quiz._id}
             style={{
-              background: '#007BFF',
+              background: isLoading || !quiz || !quiz._id ? '#9ca3af' : '#007BFF',
               color: 'white',
               border: 'none',
               padding: '1rem 2rem',
               borderRadius: '8px',
               fontSize: '1.1rem',
               fontWeight: '600',
-              cursor: 'pointer',
+              cursor: isLoading || !quiz || !quiz._id ? 'not-allowed' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem',
               margin: '0 auto',
               transition: 'background 0.2s'
             }}
+            onMouseOver={(e) => {
+              if (!isLoading && quiz && quiz._id) {
+                e.target.style.background = '#0056b3';
+              }
+            }}
+            onMouseOut={(e) => {
+              if (!isLoading && quiz && quiz._id) {
+                e.target.style.background = '#007BFF';
+              }
+            }}
+          >
+            {isLoading ? '⏳ Loading...' : '🚀 Start Quiz'}
+          </button>
+        </div>
+      ) : !quiz || !quiz._id ? (
+        /* Quiz Not Loaded Screen */
+        <div style={{
+          background: '#fff',
+          borderRadius: '12px',
+          border: '1px solid #e5e7eb',
+          padding: '3rem 2rem',
+          margin: '1rem 0',
+          textAlign: 'center',
+          boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)'
+        }}>
+          <div style={{ marginBottom: '2rem' }}>
+            <h3 style={{ 
+              color: '#dc3545', 
+              fontSize: '1.5rem', 
+              fontWeight: '600', 
+              marginBottom: '1rem' 
+            }}>
+              Quiz Not Available
+            </h3>
+            <p style={{ 
+              color: '#6b7280', 
+              fontSize: '1rem', 
+              lineHeight: '1.6'
+            }}>
+              The quiz data could not be loaded. Please refresh the page or contact support.
+            </p>
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            style={{
+              background: '#007BFF',
+              color: 'white',
+              border: 'none',
+              padding: '0.75rem 1.5rem',
+              borderRadius: '6px',
+              fontSize: '1rem',
+              fontWeight: '500',
+              cursor: 'pointer',
+              transition: 'background 0.2s'
+            }}
             onMouseOver={(e) => e.target.style.background = '#0056b3'}
             onMouseOut={(e) => e.target.style.background = '#007BFF'}
           >
-            🚀 Start Quiz
+            🔄 Refresh Page
           </button>
         </div>
       ) : (
         <>
+          {/* Timer Display */}
+          {(timerActive || timeRemaining !== null) && (
+            <div style={{
+              background: '#fff',
+              border: '2px solid #007BFF',
+              borderRadius: '8px',
+              padding: '1rem',
+              margin: '1rem 0',
+              textAlign: 'center',
+              boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+            }}>
+              <div style={{
+                fontSize: '1.2rem',
+                fontWeight: '600',
+                color: timeRemaining <= 300 ? '#dc3545' : '#007BFF', // Red when 5 minutes or less
+                marginBottom: '0.5rem'
+              }}>
+                ⏰ Time Remaining: {timeRemaining !== null ? formatTime(timeRemaining) : 'Timer not active'}
+              </div>
+              {timeRemaining <= 300 && timeRemaining > 0 && (
+                <div style={{
+                  fontSize: '0.9rem',
+                  color: '#dc3545',
+                  fontWeight: '500'
+                }}>
+                  ⚠️ Less than 5 minutes remaining!
+                </div>
+              )}
+
+            </div>
+          )}
+          
           <QuizBody>
             {quiz.questions.map((question, index) => renderQuestion(question, index))}
           </QuizBody>
 
           <QuizActions>
             <ProgressInfo>
-              {userRole === 'refugee' && 
-                `${getAnsweredCount()} of ${quiz.questions.length} questions answered`
-              }
+              {userRole === 'refugee' && (
+                <>
+                  <div style={{ marginBottom: '0.5rem' }}>
+                    {`${getAnsweredCount()} of ${quiz.questions.length} questions answered`}
+                  </div>
+                  {timerActive && timeRemaining !== null && (
+                    <div style={{
+                      fontSize: '0.9rem',
+                      color: timeRemaining <= 300 ? '#dc3545' : '#007BFF',
+                      fontWeight: '500'
+                    }}>
+                      ⏰ {formatTime(timeRemaining)} remaining
+                    </div>
+                  )}
+                </>
+              )}
             </ProgressInfo>
             {userRole === 'instructor' ? (
               <ActionButton onClick={onEdit}>
@@ -1212,7 +1719,7 @@ function QuizTaker({ quiz, userRole, onEdit, onComplete, quizNumber = 1 }) {
                 disabled={loading || getAnsweredCount() === 0}
               >
                 <Send />
-                {loading ? 'Submitting...' : 'Submit Quiz'}
+                {loading ? 'Submitting...' : `Submit Quiz (${getAnsweredCount()}/${quiz.questions.length})`}
               </ActionButton>
             )}
           </QuizActions>

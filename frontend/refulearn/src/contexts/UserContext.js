@@ -199,16 +199,16 @@ export function UserProvider({ children }) {
   }, [user, isAuthenticated, userRole]);
 
   // Fetch user profile from backend
-  const fetchUserProfile = useCallback(async () => {
-    // Don't fetch if we already have user data
-    if (user && Object.keys(user).length > 0) {
-      console.log('✅ User data already available, skipping fetch');
-      return;
-    }
-
+  const fetchUserProfile = useCallback(async (forceRefresh = false) => {
     const token = localStorage.getItem('token');
     if (!token) {
       console.log('❌ No token available, skipping profile fetch');
+      return;
+    }
+
+    // Only skip if we have complete user data and not forcing refresh
+    if (!forceRefresh && user && user._id && user.firstName && user.email) {
+      console.log('✅ Complete user data already available, skipping fetch');
       return;
     }
 
@@ -219,42 +219,59 @@ export function UserProvider({ children }) {
 
       if (isOnline) {
         try {
-          // Try online API calls first (preserving existing behavior)
-          console.log('🌐 Online mode: Fetching user profile from API...');
+          // Always try to fetch fresh data from API
+          console.log('🌐 Fetching fresh user profile from API...');
           
           const response = await fetch('/api/users/profile', {
             headers: {
               'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
+              'Content-Type': 'application/json',
+              'Cache-Control': 'no-cache' // Prevent caching
             }
           });
 
           if (response.ok) {
             const data = await response.json();
             profileData = data.data.user;
-            console.log('✅ User profile data received');
+            console.log('✅ Fresh user profile data received:', profileData);
             
-            // Store profile data for offline use - DISABLED TO PREVENT ERRORS
-            // await offlineIntegrationService.storeUserProfile(profileData);
+            // Always update localStorage with fresh data
+            localStorage.setItem('user', JSON.stringify(profileData));
+            localStorage.setItem('userRole', profileData.role || 'refugee');
             
             setUser(profileData);
+            setUserRole(profileData.role || 'refugee');
           } else {
-            throw new Error('Failed to fetch user profile');
+            throw new Error(`Failed to fetch user profile: ${response.status}`);
           }
         } catch (onlineError) {
-          console.warn('⚠️ Online profile fetch failed, using offline:', onlineError);
-          // Fall back to offline data if online fails - DISABLED TO PREVENT ERRORS
-          // profileData = await offlineIntegrationService.getUserProfile();
-          if (profileData) {
-            setUser(profileData);
+          console.warn('⚠️ Online profile fetch failed, using cached data:', onlineError);
+          // Fall back to cached data if online fails
+          const cachedUser = localStorage.getItem('user');
+          if (cachedUser) {
+            try {
+              const userData = JSON.parse(cachedUser);
+              console.log('✅ Using cached user data:', userData);
+              setUser(userData);
+              setUserRole(userData.role || 'refugee');
+            } catch (parseError) {
+              console.error('❌ Error parsing cached user data:', parseError);
+            }
           }
         }
       } else {
-        // Offline mode: use offline services
-        console.log('📴 Offline mode: Using offline user profile data...');
-        // profileData = await offlineIntegrationService.getUserProfile();
-        if (profileData) {
-          setUser(profileData);
+        // Offline mode: use cached data
+        console.log('📴 Offline mode: Using cached user profile data...');
+        const cachedUser = localStorage.getItem('user');
+        if (cachedUser) {
+          try {
+            const userData = JSON.parse(cachedUser);
+            console.log('✅ Using cached user data in offline mode:', userData);
+            setUser(userData);
+            setUserRole(userData.role || 'refugee');
+          } catch (parseError) {
+            console.error('❌ Error parsing cached user data:', parseError);
+          }
         }
       }
     } catch (error) {
@@ -262,7 +279,7 @@ export function UserProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, []); // Remove user dependency to prevent infinite loop
 
   // Update user profile
   const updateUserProfile = async (updatedData) => {
@@ -339,7 +356,8 @@ export function UserProvider({ children }) {
     }
   };
 
-  const login = (userData) => {
+  const login = async (userData) => {
+    // Set basic user data immediately for UI responsiveness
     setUser(userData);
     setUserRole(userData.role);
     setIsAuthenticated(true);
@@ -348,6 +366,19 @@ export function UserProvider({ children }) {
     localStorage.setItem('user', JSON.stringify(userData));
     localStorage.setItem('userRole', userData.role);
     localStorage.setItem('isAuthenticated', 'true');
+    
+    // Emit login event for other contexts to listen to
+    window.dispatchEvent(new CustomEvent('userLogin', { detail: userData }));
+    
+    // Immediately fetch complete profile data including profile picture
+    console.log('🔄 Login successful, fetching complete profile data...');
+    try {
+      await fetchUserProfile(true); // Force refresh to get complete data
+      console.log('✅ Complete profile data loaded after login');
+    } catch (error) {
+      console.warn('⚠️ Failed to fetch complete profile after login:', error);
+      // Don't fail login if profile fetch fails
+    }
   };
 
   const logout = async () => {

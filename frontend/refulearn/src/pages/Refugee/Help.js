@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
+import { useTranslation } from 'react-i18next';
 import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
@@ -288,6 +289,7 @@ const HelpTypeBadge = styled.span`
 `;
 
 const Help = () => {
+  const { t } = useTranslation();
   const [helpRequests, setHelpRequests] = useState([]);
   const [filteredRequests, setFilteredRequests] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');

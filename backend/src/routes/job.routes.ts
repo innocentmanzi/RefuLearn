@@ -86,7 +86,7 @@ router.get('/', [
 ], validate([]), asyncHandler(async (req: Request, res: Response) => {
   const { category, location, type, search, page = 1, limit = 10 } = req.query;
   
-  const selector: any = { type: 'job', is_active: true };
+  const selector: any = { type: 'job', is_active: true, approvalStatus: 'approved' };
   
   if (category) {
     selector.category = category;
@@ -393,15 +393,27 @@ router.post('/', authenticateToken, authorizeRoles('employer', 'admin'), [
     salary_range: salary_range || 'Competitive',
     application_deadline,
     application_link: application_link || '',
-    is_active: is_active !== undefined ? is_active : true,
+    is_active: false, // Set to false until approved by admin
+    isActive: false, // Also set isActive for consistency
     remote_work: remote_work !== undefined ? remote_work : false,
     employer: userId,
+    approvalStatus: 'pending', // Add approval status
     createdAt: new Date(),
     updatedAt: new Date()
   };
   
   console.log('Creating job with data:', JSON.stringify(jobData, null, 2));
   const job = await db.put(jobData);
+  console.log('✅ Job created successfully:', job);
+  
+  // Verify the job was saved by retrieving it
+  try {
+    const savedJob = await db.get(job.id);
+    console.log('✅ Job retrieved from database:', savedJob);
+  } catch (error) {
+    console.error('❌ Error retrieving job from database:', error);
+  }
+  
   res.status(201).json({
     success: true,
     message: 'Job created successfully',
@@ -604,7 +616,11 @@ router.get('/debug/all-jobs', authenticateToken, authorizeRoles('employer', 'adm
     hasEmployer: job.hasOwnProperty('employer'),
     currentUserId: userId,
     currentUserIdString: userId,
-    matches: job.employer === userId
+    matches: job.employer === userId,
+    approvalStatus: job.approvalStatus,
+    is_active: job.is_active,
+    isActive: job.isActive,
+    createdAt: job.createdAt
   }));
   
   res.json({
@@ -619,6 +635,37 @@ router.get('/debug/all-jobs', authenticateToken, authorizeRoles('employer', 'adm
       jobs: jobsInfo
     }
   });
+}));
+
+// DEBUG: Simple endpoint to check all jobs (no auth required for testing)
+router.get('/debug/check-jobs', asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const result = await db.find({ selector: { type: 'job' } });
+    console.log('🔍 All jobs in database:', result.docs.length);
+    console.log('📋 Jobs:', result.docs.map((job: any) => ({
+      id: job._id,
+      title: job.title,
+      approvalStatus: job.approvalStatus,
+      is_active: job.is_active,
+      isActive: job.isActive,
+      employer: job.employer,
+      createdAt: job.createdAt
+    })));
+    
+    res.json({
+      success: true,
+      data: {
+        totalJobs: result.docs.length,
+        jobs: result.docs
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error checking jobs:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
 }));
 
 // Get job applications (employer and admin only)
@@ -768,40 +815,54 @@ router.post('/admin/fix-employer-field', authenticateToken, authorizeRoles('admi
   });
 }));
 
-// UTILITY: Fix employer's own jobs (employer/admin)
-router.post('/fix-my-jobs', authenticateToken, authorizeRoles('employer', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { userId } = ensureAuth(req);
-  
-  // Find all jobs that might belong to this user but have undefined/missing employer field
+// UTILITY: Fix all jobs to ensure they have proper approval status (admin only)
+router.post('/fix-all-jobs-approval', authenticateToken, authorizeRoles('admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const allJobs = await db.find({ selector: { type: 'job' } });
   
-  // Fix: Properly type the jobs and filter
-  const jobsToFix = allJobs.docs.filter((job: any) => 
-    job.type === 'job' && (!job.employer || job.employer === 'undefined' || job.employer === undefined)
-  );
-
-  if (jobsToFix.length === 0) {
-    return res.json({
-      success: true,
-      message: 'No jobs found that need fixing',
-      data: { results: [] }
-    });
-  }
-
   const results = [];
-  for (const jobDoc of jobsToFix) {
+  for (const jobDoc of allJobs.docs) {
     try {
-      // Fix: Get the latest job document and update it properly
       const job = await db.get(jobDoc._id) as JobDoc;
-      job.employer = userId;
-      job.updatedAt = new Date();
-      await db.put(job);
-      results.push({ 
-        jobId: job._id, 
-        status: 'updated', 
-        title: job.title,
-        assignedTo: userId 
-      });
+      let needsUpdate = false;
+      
+      // Ensure job has approvalStatus field
+      if (!job.approvalStatus) {
+        job.approvalStatus = job.is_active || job.isActive ? 'approved' : 'pending';
+        needsUpdate = true;
+      }
+      
+      // Ensure job has both is_active and isActive fields
+      if (job.is_active !== undefined && job.isActive === undefined) {
+        job.isActive = job.is_active;
+        needsUpdate = true;
+      }
+      
+      if (job.isActive !== undefined && job.is_active === undefined) {
+        job.is_active = job.isActive;
+        needsUpdate = true;
+      }
+      
+      if (needsUpdate) {
+        job.updatedAt = new Date();
+        await db.put(job);
+        results.push({ 
+          jobId: job._id, 
+          status: 'updated', 
+          title: job.title,
+          approvalStatus: job.approvalStatus,
+          is_active: job.is_active,
+          isActive: job.isActive
+        });
+      } else {
+        results.push({ 
+          jobId: job._id, 
+          status: 'no_change', 
+          title: job.title,
+          approvalStatus: job.approvalStatus,
+          is_active: job.is_active,
+          isActive: job.isActive
+        });
+      }
     } catch (error) {
       results.push({ 
         jobId: jobDoc._id, 
@@ -813,7 +874,7 @@ router.post('/fix-my-jobs', authenticateToken, authorizeRoles('employer', 'admin
 
   res.json({
     success: true,
-    message: `Fixed ${results.filter(r => r.status === 'updated').length} jobs`,
+    message: `Processed ${results.length} jobs, ${results.filter(r => r.status === 'updated').length} updated`,
     data: { results }
   });
 }));

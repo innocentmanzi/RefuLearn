@@ -5,6 +5,7 @@ import { validate } from '../middleware/validation';
 import { asyncHandler } from '../middleware/errorHandler';
 import PouchDB from 'pouchdb';
 import PouchDBFind from 'pouchdb-find';
+import { createNotification } from '../services/notificationService';
 
 const router = express.Router();
 
@@ -848,42 +849,185 @@ router.get('/dashboard', authenticateToken, authorizeRoles('admin'), asyncHandle
     return result.docs.length;
   });
 
-  // Recent activity
-  const recentUsers = await db.find({ selector: { type: 'user' } })
-    .then(result => result.docs
-      .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .slice(0, 5)
-      .map((user: any) => ({
-        _id: user._id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        role: user.role,
-        createdAt: user.createdAt
-      })));
+  // Recent activity from last 7 days
+  const lastWeek = new Date();
+  lastWeek.setDate(lastWeek.getDate() - 7);
 
-  const recentCourses = await db.find({ selector: { type: 'course' } })
-    .then(result => result.docs
-      .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .slice(0, 5)
-      .map((course: any) => ({
-        _id: course._id,
-        title: course.title,
-        category: course.category,
-        isActive: course.isActive,
-        createdAt: course.createdAt
-      })));
+  // Get all recent activity from last week
+  const allDocs = await db.allDocs({ include_docs: true });
+  const recentActivities: any[] = [];
 
-  const recentJobs = await db.find({ selector: { type: 'job' } })
-    .then(result => result.docs
-      .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .slice(0, 5)
-      .map((job: any) => ({
-        _id: job._id,
-        title: job.title,
-        company: job.company,
-        createdAt: job.createdAt
-      })));
+  // Helper function to get user details
+  const getUserDetails = async (userId: string) => {
+    try {
+      const user: any = await db.get(userId);
+      return `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown User';
+    } catch {
+      return 'Unknown User';
+    }
+  };
+
+  // Helper function to get course details
+  const getCourseDetails = async (courseId: string) => {
+    try {
+      const course: any = await db.get(courseId);
+      return course.title || 'Unknown Course';
+    } catch {
+      return 'Unknown Course';
+    }
+  };
+
+  // Process all documents for recent activity
+  for (const row of allDocs.rows) {
+    const doc: any = row.doc;
+    if (!doc || !doc.createdAt) continue;
+    
+    const createdDate = new Date(doc.createdAt);
+    if (createdDate < lastWeek) continue; // Only last week
+    
+    let userName = 'Unknown User';
+    let courseTitle = '';
+    
+    switch (doc.type) {
+      case 'course':
+        if (doc.instructor) {
+          userName = await getUserDetails(doc.instructor);
+        }
+        recentActivities.push({
+          type: 'course_created',
+          title: `Course "${doc.title}" created`,
+          description: `${userName} created a new course in ${doc.category || 'General'}`,
+          timestamp: doc.createdAt,
+          user: userName,
+          icon: '📚'
+        });
+        break;
+        
+      case 'job':
+        if (doc.employer) {
+          userName = await getUserDetails(doc.employer);
+        }
+        recentActivities.push({
+          type: 'job_posted',
+          title: `Job "${doc.title}" posted`,
+          description: `${userName} posted a new position at ${doc.company || 'Unknown Company'}`,
+          timestamp: doc.createdAt,
+          user: userName,
+          icon: '💼'
+        });
+        break;
+        
+      case 'assessment':
+        if (doc.instructor) {
+          userName = await getUserDetails(doc.instructor);
+        }
+        if (doc.courseId) {
+          courseTitle = await getCourseDetails(doc.courseId);
+        }
+        recentActivities.push({
+          type: 'assessment_created',
+          title: `Assessment "${doc.title}" created`,
+          description: `${userName} created assessment "${doc.title}"${courseTitle ? ` in course "${courseTitle}"` : ''}`,
+          timestamp: doc.createdAt,
+          user: userName,
+          icon: '📝'
+        });
+        break;
+        
+      case 'quiz':
+        if (doc.instructorId) {
+          userName = await getUserDetails(doc.instructorId);
+        }
+        if (doc.courseId) {
+          courseTitle = await getCourseDetails(doc.courseId);
+        }
+        recentActivities.push({
+          type: 'quiz_created',
+          title: `Quiz "${doc.title}" created`,
+          description: `${userName} created quiz "${doc.title}"${courseTitle ? ` in course "${courseTitle}"` : ''}`,
+          timestamp: doc.createdAt,
+          user: userName,
+          icon: '❓'
+        });
+        break;
+        
+      case 'certificate':
+        if (doc.userId) {
+          userName = await getUserDetails(doc.userId);
+        }
+        if (doc.courseId) {
+          courseTitle = await getCourseDetails(doc.courseId);
+        }
+        recentActivities.push({
+          type: 'certificate_issued',
+          title: `Certificate issued`,
+          description: `${userName} received a certificate${courseTitle ? ` for course "${courseTitle}"` : ''}`,
+          timestamp: doc.createdAt,
+          user: userName,
+          icon: '🏆'
+        });
+        break;
+        
+      case 'help':
+        if (doc.userId) {
+          userName = await getUserDetails(doc.userId);
+        }
+        recentActivities.push({
+          type: 'help_ticket',
+          title: `Help ticket created`,
+          description: `${userName} created support request: ${doc.subject || 'No subject'}`,
+          timestamp: doc.createdAt,
+          user: userName,
+          icon: '🆘'
+        });
+        break;
+    }
+    
+    // Check for course enrollments (stored in course documents)
+    if (doc.type === 'course' && doc.enrolledStudents && Array.isArray(doc.enrolledStudents)) {
+      for (const enrollment of doc.enrolledStudents) {
+        if (enrollment.enrolledAt) {
+          const enrollDate = new Date(enrollment.enrolledAt);
+          if (enrollDate >= lastWeek) {
+            const studentName = enrollment.userId ? await getUserDetails(enrollment.userId) : 'Unknown Student';
+            recentActivities.push({
+              type: 'course_enrollment',
+              title: `Student enrolled in "${doc.title}"`,
+              description: `${studentName} enrolled in course "${doc.title}" (${doc.category || 'General'})`,
+              timestamp: enrollment.enrolledAt,
+              user: studentName,
+              icon: '✅'
+            });
+          }
+        }
+      }
+    }
+    
+    // Check for job applications (stored in job documents)
+    if (doc.type === 'job' && doc.applications && Array.isArray(doc.applications)) {
+      for (const application of doc.applications) {
+        if (application.appliedAt) {
+          const appDate = new Date(application.appliedAt);
+          if (appDate >= lastWeek) {
+            const applicantName = application.applicant ? await getUserDetails(application.applicant) : 'Unknown Applicant';
+            recentActivities.push({
+              type: 'job_application',
+              title: `Application for "${doc.title}"`,
+              description: `${applicantName} applied for "${doc.title}" at ${doc.company || 'Unknown Company'}`,
+              timestamp: application.appliedAt,
+              user: applicantName,
+              icon: '📄'
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Sort by timestamp and get most recent 15 activities
+  const sortedActivities = recentActivities
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, 15);
 
   // Monthly user growth (real data)
   const users = await db.find({ selector: { type: 'user' } }).then(result => result.docs);
@@ -926,15 +1070,379 @@ router.get('/dashboard', authenticateToken, authorizeRoles('admin'), asyncHandle
         courses: { total: totalCourses, published: publishedCourses },
         jobs: { total: totalJobs, active: activeJobs }
       },
-      recentActivity: {
-        users: recentUsers,
-        courses: recentCourses,
-        jobs: recentJobs
-      },
+      recentActivity: sortedActivities,
       monthlyUserGrowth,
       platformActivity
     }
   });
+}));
+
+// Get pending approvals for admin
+router.get('/pending-approvals', authenticateToken, authorizeRoles('admin'), asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  console.log('🔍 Fetching pending approvals...');
+  
+  // Debug: Check all courses in database
+  const allCourses = await db.find({ selector: { type: 'course' } }).then(result => result.docs);
+  console.log('📚 Total courses in database:', allCourses.length);
+  console.log('📚 Course isPublished values:', allCourses.map((c: any) => ({ title: c.title, isPublished: c.isPublished, isActive: c.isActive })));
+  
+  // Debug: Check all jobs in database
+  const allJobs = await db.find({ selector: { type: 'job' } }).then(result => result.docs);
+  console.log('💼 Total jobs in database:', allJobs.length);
+  console.log('💼 Job approval statuses:', allJobs.map((j: any) => ({ title: j.title, approvalStatus: j.approvalStatus, isActive: j.isActive })));
+  
+  // Debug: Check all scholarships in database
+  const allScholarships = await db.find({ selector: { type: 'scholarship' } }).then(result => result.docs);
+  console.log('🎓 Total scholarships in database:', allScholarships.length);
+  console.log('🎓 Scholarship approval statuses:', allScholarships.map((s: any) => ({ title: s.title, approvalStatus: s.approvalStatus, isActive: s.isActive })));
+  
+  // Get pending courses (unpublished, missing isPublished field, or pending approval)
+  const pendingCourses = await db.find({ 
+    selector: { 
+      type: 'course', 
+      $or: [
+        { isPublished: false },
+        { isPublished: { $exists: false } },
+        { approvalStatus: 'pending' }
+      ]
+    } 
+  }).then(result => result.docs);
+  console.log('📚 Pending courses found:', pendingCourses.length);
+  console.log('📚 Pending course details:', pendingCourses.map((c: any) => ({
+    id: c._id,
+    title: c.title,
+    isPublished: c.isPublished,
+    approvalStatus: c.approvalStatus,
+    instructor: c.instructor
+  })));
+  
+  // Get pending jobs (pending status or missing approvalStatus field)
+  // First get all jobs, then filter in JavaScript since CouchDB $or and $exists might not work as expected
+  const allJobsResult = await db.find({ selector: { type: 'job' } });
+  const pendingJobs = allJobsResult.docs.filter((job: any) => 
+    !job.approvalStatus || job.approvalStatus === 'pending'
+  );
+  console.log('💼 Pending jobs found:', pendingJobs.length);
+  
+  // Debug: Check all jobs in database
+  console.log('🔍 Total jobs in database:', allJobsResult.docs.length);
+  console.log('🔍 Job details:', allJobsResult.docs.map((job: any) => ({
+    id: job._id,
+    title: job.title,
+    approvalStatus: job.approvalStatus,
+    is_active: job.is_active,
+    isActive: job.isActive,
+    employer: job.employer
+  })));
+  
+  // Get pending scholarships (pending status or missing approvalStatus field)
+  const allScholarshipsResult = await db.find({ selector: { type: 'scholarship' } });
+  const pendingScholarships = allScholarshipsResult.docs.filter((scholarship: any) => 
+    !scholarship.approvalStatus || scholarship.approvalStatus === 'pending'
+  );
+  console.log('🎓 Pending scholarships found:', pendingScholarships.length);
+  
+  res.json({
+    success: true,
+    data: {
+      courses: pendingCourses,
+      jobs: pendingJobs,
+      scholarships: pendingScholarships,
+      total: pendingCourses.length + pendingJobs.length + pendingScholarships.length
+    }
+  });
+}));
+
+// Approve/Reject Course
+router.put('/courses/:courseId/approval', authenticateToken, authorizeRoles('admin'), [
+  body('action').isIn(['approve', 'reject']).withMessage('Action must be approve or reject'),
+  body('reason').optional().trim()
+], validate([]), asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  const { courseId } = req.params;
+  const { action, reason } = req.body;
+  
+  const course = await db.get(courseId) as any;
+  if (!course || course.type !== 'course') {
+    res.status(404).json({ success: false, message: 'Course not found' });
+    return;
+  }
+  
+  course.isPublished = action === 'approve';
+  course.approvalStatus = action === 'approve' ? 'approved' : 'rejected';
+  course.approvedAt = new Date();
+  course.approvalReason = reason || '';
+  course.updatedAt = new Date();
+  
+  await db.put(course);
+  
+  // Create notification for the instructor
+  try {
+    console.log('🔔 Attempting to create notification for course approval/rejection...');
+    console.log('📋 Course details:', {
+      id: course._id,
+      title: course.title,
+      instructor: course.instructor,
+      action: action
+    });
+    
+    const notificationData = {
+      recipient: course.instructor,
+      title: `Course ${action === 'approve' ? 'Approved' : 'Rejected'}`,
+      message: `Your course "${course.title}" has been ${action}d${reason ? `: ${reason}` : ''}.`,
+      category: (action === 'approve' ? 'course_approval' : 'course_rejection') as 'course_approval' | 'course_rejection',
+      relatedItem: {
+        type: 'course' as const,
+        id: course._id,
+        title: course.title
+      }
+    };
+    
+    console.log('📝 Notification data:', JSON.stringify(notificationData, null, 2));
+    
+    const notificationResult = await createNotification(notificationData);
+    console.log('✅ Notification created successfully:', notificationResult);
+  } catch (notificationError: any) {
+    console.error('❌ Failed to create notification:', notificationError);
+    console.error('❌ Error details:', {
+      message: notificationError?.message || 'Unknown error',
+      stack: notificationError?.stack || 'No stack trace',
+      name: notificationError?.name || 'Unknown error type'
+    });
+    // Don't fail the approval process if notification fails
+  }
+  
+  res.json({
+    success: true,
+    message: `Course ${action}d successfully`,
+    data: { course }
+  });
+}));
+
+// Approve/Reject Job
+router.put('/jobs/:jobId/approval', authenticateToken, authorizeRoles('admin'), [
+  body('action').isIn(['approve', 'reject']).withMessage('Action must be approve or reject'),
+  body('reason').optional().trim()
+], validate([]), asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  const { jobId } = req.params;
+  const { action, reason } = req.body;
+  
+  const job = await db.get(jobId) as any;
+  if (!job || job.type !== 'job') {
+    res.status(404).json({ success: false, message: 'Job not found' });
+    return;
+  }
+  
+  job.isActive = action === 'approve';
+  job.is_active = action === 'approve'; // Also update is_active field for consistency
+  job.approvalStatus = action === 'approve' ? 'approved' : 'rejected';
+  job.approvedAt = new Date();
+  job.approvalReason = reason || '';
+  job.updatedAt = new Date();
+  
+  await db.put(job);
+  
+  // Create notification for the employer
+  try {
+    console.log('🔔 Attempting to create notification for job approval/rejection...');
+    console.log('📋 Job details:', {
+      id: job._id,
+      title: job.title,
+      employer: job.employer,
+      action: action
+    });
+    
+    const notificationData = {
+      recipient: job.employer,
+      title: `Job ${action === 'approve' ? 'Approved' : 'Rejected'}`,
+      message: `Your job "${job.title}" has been ${action}d${reason ? `: ${reason}` : ''}.`,
+      category: (action === 'approve' ? 'job_approval' : 'job_rejection') as 'job_approval' | 'job_rejection',
+      relatedItem: {
+        type: 'job' as const,
+        id: job._id,
+        title: job.title
+      }
+    };
+    
+    console.log('📝 Notification data:', JSON.stringify(notificationData, null, 2));
+    
+    const notificationResult = await createNotification(notificationData);
+    console.log('✅ Notification created successfully:', notificationResult);
+  } catch (notificationError: any) {
+    console.error('❌ Failed to create notification:', notificationError);
+    console.error('❌ Error details:', {
+      message: notificationError?.message || 'Unknown error',
+      stack: notificationError?.stack || 'No stack trace',
+      name: notificationError?.name || 'Unknown error type'
+    });
+    // Don't fail the approval process if notification fails
+  }
+  
+  res.json({
+    success: true,
+    message: `Job ${action}d successfully`,
+    data: { job }
+  });
+}));
+
+// Approve/Reject Scholarship
+router.put('/scholarships/:scholarshipId/approval', authenticateToken, authorizeRoles('admin'), [
+  body('action').isIn(['approve', 'reject']).withMessage('Action must be approve or reject'),
+  body('reason').optional().trim()
+], validate([]), asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  const { scholarshipId } = req.params;
+  const { action, reason } = req.body;
+  
+  const scholarship = await db.get(scholarshipId) as any;
+  if (!scholarship || scholarship.type !== 'scholarship') {
+    res.status(404).json({ success: false, message: 'Scholarship not found' });
+    return;
+  }
+  
+  scholarship.isActive = action === 'approve';
+  scholarship.approvalStatus = action === 'approve' ? 'approved' : 'rejected';
+  scholarship.approvedAt = new Date();
+  scholarship.approvalReason = reason || '';
+  scholarship.updatedAt = new Date();
+  
+  await db.put(scholarship);
+  
+  // Create notification for the employer
+  try {
+    console.log('🔔 Attempting to create notification for scholarship approval/rejection...');
+    console.log('📋 Scholarship details:', {
+      id: scholarship._id,
+      title: scholarship.title,
+      employer: scholarship.employer,
+      action: action
+    });
+    
+    const notificationData = {
+      recipient: scholarship.employer,
+      title: `Scholarship ${action === 'approve' ? 'Approved' : 'Rejected'}`,
+      message: `Your scholarship "${scholarship.title}" has been ${action}d${reason ? `: ${reason}` : ''}.`,
+      category: (action === 'approve' ? 'scholarship_approval' : 'scholarship_rejection') as 'scholarship_approval' | 'scholarship_rejection',
+      relatedItem: {
+        type: 'scholarship' as const,
+        id: scholarship._id,
+        title: scholarship.title
+      }
+    };
+    
+    console.log('📝 Notification data:', JSON.stringify(notificationData, null, 2));
+    
+    const notificationResult = await createNotification(notificationData);
+    console.log('✅ Notification created successfully:', notificationResult);
+  } catch (notificationError: any) {
+    console.error('❌ Failed to create notification:', notificationError);
+    console.error('❌ Error details:', {
+      message: notificationError?.message || 'Unknown error',
+      stack: notificationError?.stack || 'No stack trace',
+      name: notificationError?.name || 'Unknown error type'
+    });
+    // Don't fail the approval process if notification fails
+  }
+  
+  res.json({
+    success: true,
+    message: `Scholarship ${action}d successfully`,
+    data: { scholarship }
+  });
+}));
+
+// Admin - Get all help tickets with user information
+router.get('/help-tickets', authenticateToken, authorizeRoles('admin'), asyncHandler(async (req: Request, res: Response): Promise<void> => {
+      console.log('🎫 Admin fetching help tickets...');
+    console.log('🔄 Cache-busting request received');
+  
+  try {
+    // Get help tickets - use flexible query to find tickets regardless of exact type field
+    const result = await db.find({ 
+      selector: {
+        $or: [
+          { type: 'help-ticket' },
+          { type: 'helpTicket' }, 
+          { type: 'ticket' },
+          { category: { $exists: true }, description: { $exists: true } },
+          { subject: { $exists: true } }
+        ]
+      }
+    });
+    
+    let tickets = result.docs;
+    console.log(`📋 Found ${tickets.length} help tickets`);
+    console.log('🔍 Sample ticket structure:', tickets[0]);
+    
+    // Sort tickets by createdAt (newest first) in JavaScript since we can't use database sort without index
+    tickets = tickets.sort((a: any, b: any) => {
+      const dateA = new Date(a.createdAt || 0).getTime();
+      const dateB = new Date(b.createdAt || 0).getTime();
+      return dateB - dateA; // Descending order (newest first)
+    });
+    
+    // Get user information for each ticket
+    const ticketsWithUsers = await Promise.all(
+      tickets.map(async (ticket: any) => {
+        let userInfo = null;
+        
+        // Try different possible user ID field names - help tickets use 'user' field
+        const userId = ticket.user || ticket.userId || ticket.author || ticket.createdBy;
+        
+        if (userId) {
+          try {
+            console.log(`🔍 Looking up user for ticket ${ticket._id}, userId: ${userId}`);
+            
+            // First try to get user by _id
+            let userResult = await db.find({
+              selector: { type: 'user', _id: userId }
+            });
+            
+            // If not found, try to get by email (in case userId is actually an email)
+            if (userResult.docs.length === 0) {
+              userResult = await db.find({
+                selector: { type: 'user', email: userId }
+              });
+            }
+            
+            if (userResult.docs.length > 0) {
+              const user = userResult.docs[0] as any;
+              userInfo = {
+                firstName: user.firstName || 'Unknown',
+                lastName: user.lastName || '',
+                email: user.email || '',
+                role: user.role || ''
+              };
+              console.log(`✅ Found user: ${userInfo.firstName} ${userInfo.lastName}`);
+            } else {
+              console.log(`❌ User not found for userId: ${userId}`);
+            }
+          } catch (userError) {
+            console.log(`⚠️ Could not fetch user info for ticket ${ticket._id}:`, userError);
+          }
+        } else {
+          console.log(`⚠️ No userId found in ticket ${ticket._id}`);
+        }
+        
+        return {
+          ...ticket,
+          user: userInfo
+        };
+      })
+    );
+    
+    console.log('✅ Help tickets with user info prepared for admin');
+    
+    res.json({
+      success: true,
+      data: ticketsWithUsers
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fetching help tickets for admin:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch help tickets'
+    });
+  }
 }));
 
 export default router; 

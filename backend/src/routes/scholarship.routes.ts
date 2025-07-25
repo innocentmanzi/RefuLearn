@@ -76,7 +76,7 @@ router.get('/', [
 ], validate([]), asyncHandler(async (req: Request, res: Response) => {
   const { deadline, search, page = 1, limit = 10 } = req.query;
   
-  const selector: any = { type: 'scholarship', isActive: true };
+  const selector: any = { type: 'scholarship', isActive: true, approvalStatus: 'approved' };
   
   if (deadline) {
     selector.deadline = { $gte: new Date(deadline as string) };
@@ -342,6 +342,8 @@ router.post('/', authenticateToken, authorizeRoles('employer', 'admin'), [
     type: 'scholarship',
     employer: userId,
     applications: [],
+    isActive: false, // Set to false until approved
+    approvalStatus: 'pending', // Add approval status
     createdAt: new Date(),
     updatedAt: new Date()
   };

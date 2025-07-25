@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import offlineIntegrationService from '../../services/offlineIntegrationService';
 import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 const Container = styled.div`
   padding: 2rem;
@@ -306,19 +307,21 @@ const LoadingState = styled.div`
 `;
 
 const Jobs = () => {
-  const [search, setSearch] = useState('');
+  const { t } = useTranslation();
   const [jobs, setJobs] = useState([]);
   const [scholarships, setScholarships] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
   const [filteredJobs, setFilteredJobs] = useState([]);
   const [filteredScholarships, setFilteredScholarships] = useState([]);
   const [selectedJob, setSelectedJob] = useState(null);
   const [selectedScholarship, setSelectedScholarship] = useState(null);
   const [jobDropdownOpen, setJobDropdownOpen] = useState(false);
   const [scholarshipDropdownOpen, setScholarshipDropdownOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
+  // Fetch jobs and scholarships on component mount
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -326,14 +329,8 @@ const Jobs = () => {
         const token = localStorage.getItem('token');
         const isOnline = navigator.onLine;
 
-        let jobsData = [];
-        let scholarshipsData = [];
-
         if (isOnline) {
           try {
-            // Try online API calls first (preserving existing behavior)
-            console.log('🌐 Online mode: Fetching jobs and scholarships from API...');
-            
             // Fetch jobs
             const jobsResponse = await fetch('/api/jobs', {
               headers: {
@@ -343,20 +340,10 @@ const Jobs = () => {
             });
 
             if (jobsResponse.ok) {
-              const jobsApiData = await jobsResponse.json();
-              console.log('✅ Jobs API Response:', jobsApiData);
-              // Backend returns: { success: true, data: { jobs: [...], pagination: {...} } }
-              jobsData = jobsApiData.data?.jobs || [];
-              console.log('✅ Jobs data received:', jobsData.length);
-              
-              // Store jobs for offline use
-              try {
-                await offlineIntegrationService.storeJobs(jobsData);
-              } catch (storeError) {
-                console.warn('⚠️ Failed to store jobs offline:', storeError);
-              }
-            } else {
-              console.error('❌ Jobs API failed:', jobsResponse.status);
+              const jobsData = await jobsResponse.json();
+              const fetchedJobs = jobsData.data?.jobs || [];
+              setJobs(fetchedJobs);
+              setFilteredJobs(fetchedJobs);
             }
 
             // Fetch scholarships
@@ -368,119 +355,76 @@ const Jobs = () => {
             });
 
             if (scholarshipsResponse.ok) {
-              const scholarshipsApiData = await scholarshipsResponse.json();
-              console.log('✅ Scholarships API Response:', scholarshipsApiData);
-              // Backend returns: { success: true, data: { scholarships: [...], pagination: {...} } }
-              scholarshipsData = scholarshipsApiData.data?.scholarships || [];
-              console.log('✅ Scholarships data received:', scholarshipsData.length);
-              
-              // Store scholarships for offline use
-              try {
-                await offlineIntegrationService.storeScholarships(scholarshipsData);
-              } catch (storeError) {
-                console.warn('⚠️ Failed to store scholarships offline:', storeError);
-              }
-            } else {
-              console.error('❌ Scholarships API failed:', scholarshipsResponse.status);
+              const scholarshipsData = await scholarshipsResponse.json();
+              const fetchedScholarships = scholarshipsData.data?.scholarships || [];
+              setScholarships(fetchedScholarships);
+              setFilteredScholarships(fetchedScholarships);
             }
 
-          } catch (onlineError) {
-            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
-            // Fall back to offline data if online fails
-            const offlineData = await fetchOfflineData();
-            jobsData = offlineData.jobs;
-            scholarshipsData = offlineData.scholarships;
+          } catch (error) {
+            console.error('Error fetching data:', error);
+            setError('Failed to load jobs and scholarships');
           }
         } else {
-          // Offline mode: use offline services
-          console.log('📴 Offline mode: Using offline data...');
-          const offlineData = await fetchOfflineData();
-          jobsData = offlineData.jobs;
-          scholarshipsData = offlineData.scholarships;
+          // Offline mode - load from cache
+          console.log('📱 Offline mode - loading cached data');
+          const cachedJobs = localStorage.getItem('jobs_cache');
+          const cachedScholarships = localStorage.getItem('scholarships_cache');
+
+          if (cachedJobs) {
+            const parsedJobs = JSON.parse(cachedJobs);
+            setJobs(parsedJobs);
+            setFilteredJobs(parsedJobs);
+          }
+          if (cachedScholarships) {
+            const parsedScholarships = JSON.parse(cachedScholarships);
+            setScholarships(parsedScholarships);
+            setFilteredScholarships(parsedScholarships);
+          }
         }
-
-        // Update state with fetched data
-        setJobs(jobsData);
-        setFilteredJobs(jobsData);
-        setScholarships(scholarshipsData);
-        setFilteredScholarships(scholarshipsData);
-
-      } catch (err) {
-        console.error('Error fetching data:', err);
-        setError('Failed to load opportunities');
+      } catch (error) {
+        console.error('Error in fetchData:', error);
+        setError('Failed to load data');
       } finally {
         setLoading(false);
-      }
-    };
-
-    // Helper function to fetch offline data
-    const fetchOfflineData = async () => {
-      try {
-        let jobs = [];
-        let scholarships = [];
-        
-        // Try to get jobs with error handling
-        try {
-          jobs = await offlineIntegrationService.getJobs() || [];
-        } catch (jobsError) {
-          console.warn('⚠️ Failed to get offline jobs:', jobsError);
-          jobs = [];
-        }
-        
-        // Try to get scholarships with error handling
-        try {
-          scholarships = await offlineIntegrationService.getScholarships() || [];
-        } catch (scholarshipsError) {
-          console.warn('⚠️ Failed to get offline scholarships:', scholarshipsError);
-          scholarships = [];
-        }
-        
-        console.log('📱 Offline data loaded:', {
-          jobs: jobs.length,
-          scholarships: scholarships.length
-        });
-        
-        return { jobs, scholarships };
-      } catch (error) {
-        console.error('❌ Failed to load offline data:', error);
-        return { jobs: [], scholarships: [] };
       }
     };
 
     fetchData();
   }, []);
 
+  // Filter jobs and scholarships when search changes
   useEffect(() => {
-    if (search.trim() === '') {
+    if (searchTerm.trim() === '') {
       setFilteredJobs(jobs);
       setFilteredScholarships(scholarships);
     } else {
-      const searchTerm = search.toLowerCase();
+      const searchLower = searchTerm.toLowerCase();
       setFilteredJobs(jobs.filter(item => 
-        item.title?.toLowerCase().includes(searchTerm) ||
-        item.company?.toLowerCase().includes(searchTerm) ||
-        item.location?.toLowerCase().includes(searchTerm)
+        item.title?.toLowerCase().includes(searchLower) ||
+        item.company?.toLowerCase().includes(searchLower) ||
+        item.location?.toLowerCase().includes(searchLower)
       ));
       setFilteredScholarships(scholarships.filter(item => 
-        item.title?.toLowerCase().includes(searchTerm) ||
-        item.provider?.toLowerCase().includes(searchTerm) ||
-        item.location?.toLowerCase().includes(searchTerm)
+        item.title?.toLowerCase().includes(searchLower) ||
+        item.provider?.toLowerCase().includes(searchLower) ||
+        item.location?.toLowerCase().includes(searchLower)
       ));
     }
-  }, [search, jobs, scholarships]);
+  }, [searchTerm, jobs, scholarships]);
 
   const formatDeadline = (deadline) => {
-    if (!deadline) return { text: 'No deadline', urgent: false };
+    if (!deadline) return null;
+    
     const deadlineDate = new Date(deadline);
     const today = new Date();
-    const timeDiff = deadlineDate.getTime() - today.getTime();
-    const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24));
+    const daysDiff = Math.ceil((deadlineDate - today) / (1000 * 60 * 60 * 24));
     
-    if (daysDiff < 0) return { text: 'Expired', urgent: true };
-    if (daysDiff === 0) return { text: 'Today', urgent: true };
-    if (daysDiff === 1) return { text: '1 day left', urgent: true };
-    if (daysDiff <= 7) return { text: `${daysDiff} days left`, urgent: true };
-    return { text: `${daysDiff} days left`, urgent: false };
+    if (daysDiff < 0) return { text: t('jobs.deadlinePassed', 'Deadline passed'), urgent: false };
+    if (daysDiff === 0) return { text: t('jobs.deadlineToday', 'Deadline today'), urgent: true };
+    if (daysDiff === 1) return { text: t('jobs.deadlineTomorrow', 'Deadline tomorrow'), urgent: true };
+    if (daysDiff <= 7) return { text: t('jobs.daysLeft', '{{days}} days left', { days: daysDiff }), urgent: true };
+    return { text: t('jobs.daysLeft', '{{days}} days left', { days: daysDiff }), urgent: false };
   };
 
   const handleJobSelect = (job) => {
@@ -560,8 +504,8 @@ const Jobs = () => {
     return (
       <Container>
         <Header>
-          <Title>Job & Scholarship Opportunities</Title>
-          <Subtitle>Find your next opportunity</Subtitle>
+          <Title>{t('jobs.opportunities', 'Job & Scholarship Opportunities')}</Title>
+          <Subtitle>{t('jobs.findOpportunity', 'Find your next opportunity')}</Subtitle>
         </Header>
         <LoadingState>
           <div className="spinner" />
@@ -575,8 +519,8 @@ const Jobs = () => {
     return (
       <Container>
         <Header>
-          <Title>Job & Scholarship Opportunities</Title>
-          <Subtitle>Find your next opportunity</Subtitle>
+          <Title>{t('jobs.opportunities', 'Job & Scholarship Opportunities')}</Title>
+          <Subtitle>{t('jobs.findOpportunity', 'Find your next opportunity')}</Subtitle>
         </Header>
         <EmptyState>
           <div className="icon">⚠️</div>
@@ -590,26 +534,26 @@ const Jobs = () => {
   return (
     <Container>
       <Header>
-        <Title>Job & Scholarship Opportunities</Title>
-        <Subtitle>Find your next opportunity</Subtitle>
+        <Title>{t('jobs.opportunities', 'Job & Scholarship Opportunities')}</Title>
+        <Subtitle>{t('jobs.findOpportunity', 'Find your next opportunity')}</Subtitle>
         <SearchBar
           type="text"
-          placeholder="Search for jobs, scholarships, companies, or locations..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          placeholder={t('jobs.searchPlaceholder', 'Search for jobs, scholarships, companies, or locations...')}
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
         />
       </Header>
 
       {/* Job Listings */}
       <Section>
-        <SectionTitle>Job Listings</SectionTitle>
+        <SectionTitle>{t('jobs.jobListings', 'Job Listings')}</SectionTitle>
         <DropdownContainer>
           <DropdownButton
             onClick={() => setJobDropdownOpen(!jobDropdownOpen)}
             isOpen={jobDropdownOpen}
           >
             <span className={selectedJob ? '' : 'placeholder'}>
-              {selectedJob ? selectedJob.title : 'Select a job opportunity...'}
+              {selectedJob ? selectedJob.title : t('jobs.selectJobOpportunity', 'Select a job opportunity...')}
             </span>
             <span className="arrow">▼</span>
           </DropdownButton>
@@ -666,18 +610,82 @@ const Jobs = () => {
             </button>
           </SelectedItemDisplay>
         )}
+
+        {/* Display all available jobs as cards */}
+        <div style={{ marginTop: '2rem' }}>
+          <h3 style={{ color: '#333', marginBottom: '1rem', fontSize: '1.3rem', fontWeight: '600' }}>{t('jobs.allAvailableJobs', 'All Available Jobs')}</h3>
+          {filteredJobs.length > 0 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.5rem' }}>
+              {filteredJobs.map((job, idx) => {
+                const deadline = formatDeadline(job.application_deadline);
+                return (
+                  <div key={job._id || idx} style={{
+                    background: 'white',
+                    padding: '1.5rem',
+                    borderRadius: '12px',
+                    border: '1px solid #e2e8f0',
+                    boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                    transition: 'all 0.3s ease',
+                    cursor: 'pointer',
+                    position: 'relative'
+                  }}
+                  onClick={() => handleJobSelect(job)}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-4px)';
+                    e.currentTarget.style.boxShadow = '0 8px 25px rgba(0,0,0,0.1)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = '0 4px 6px rgba(0,0,0,0.05)';
+                  }}
+                  >
+                    <div style={{ marginBottom: '1rem' }}>
+                      <h4 style={{ color: '#1e293b', margin: '0 0 0.5rem 0', fontSize: '1.2rem', fontWeight: '600' }}>
+                        {job.title}
+                      </h4>
+                      <div style={{ color: '#64748b', margin: '0 0 0.75rem 0', fontSize: '0.95rem' }}>
+                        🏢 {job.company}
+                      </div>
+                      <div style={{ color: '#64748b', margin: '0 0 0.75rem 0', fontSize: '0.95rem' }}>
+                        📍 {job.location}
+                      </div>
+                    </div>
+                    <div style={{ 
+                      display: 'inline-block',
+                      padding: '0.4rem 0.8rem',
+                      borderRadius: '20px',
+                      fontSize: '0.85rem',
+                      fontWeight: '500',
+                      backgroundColor: deadline.urgent ? '#fef2f2' : '#f0f9ff',
+                      color: deadline.urgent ? '#dc2626' : '#0369a1',
+                      border: `1px solid ${deadline.urgent ? '#fecaca' : '#bae6fd'}`
+                    }}>
+                      {deadline.text}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+              <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>💼</div>
+              <h4 style={{ color: '#333', marginBottom: '0.5rem' }}>No Jobs Available</h4>
+              <p>Check back later for new opportunities</p>
+            </div>
+          )}
+        </div>
       </Section>
 
       {/* Scholarship Opportunities */}
       <Section>
-        <SectionTitle>Scholarship Opportunities</SectionTitle>
+        <SectionTitle>{t('jobs.scholarshipOpportunities', 'Scholarship Opportunities')}</SectionTitle>
         <DropdownContainer>
           <DropdownButton
             onClick={() => setScholarshipDropdownOpen(!scholarshipDropdownOpen)}
             isOpen={scholarshipDropdownOpen}
           >
             <span className={selectedScholarship ? '' : 'placeholder'}>
-              {selectedScholarship ? selectedScholarship.title : 'Select a scholarship opportunity...'}
+              {selectedScholarship ? selectedScholarship.title : t('jobs.selectScholarshipOpportunity', 'Select a scholarship opportunity...')}
             </span>
             <span className="arrow">▼</span>
           </DropdownButton>
@@ -737,6 +745,70 @@ const Jobs = () => {
             </button>
           </SelectedItemDisplay>
         )}
+
+        {/* Display all available scholarships as cards */}
+        <div style={{ marginTop: '2rem' }}>
+          <h3 style={{ color: '#333', marginBottom: '1rem', fontSize: '1.3rem', fontWeight: '600' }}>{t('jobs.allAvailableScholarships', 'All Available Scholarships')}</h3>
+          {filteredScholarships.length > 0 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.5rem' }}>
+              {filteredScholarships.map((scholarship, idx) => {
+                const deadline = formatDeadline(scholarship.deadline);
+                return (
+                  <div key={scholarship._id || idx} style={{
+                    background: 'white',
+                    padding: '1.5rem',
+                    borderRadius: '12px',
+                    border: '1px solid #e2e8f0',
+                    boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                    transition: 'all 0.3s ease',
+                    cursor: 'pointer',
+                    position: 'relative'
+                  }}
+                  onClick={() => handleScholarshipSelect(scholarship)}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-4px)';
+                    e.currentTarget.style.boxShadow = '0 8px 25px rgba(0,0,0,0.1)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = '0 4px 6px rgba(0,0,0,0.05)';
+                  }}
+                  >
+                    <div style={{ marginBottom: '1rem' }}>
+                      <h4 style={{ color: '#1e293b', margin: '0 0 0.5rem 0', fontSize: '1.2rem', fontWeight: '600' }}>
+                        {scholarship.title}
+                      </h4>
+                      <div style={{ color: '#64748b', margin: '0 0 0.75rem 0', fontSize: '0.95rem' }}>
+                        🏛️ {scholarship.provider}
+                      </div>
+                      <div style={{ color: '#64748b', margin: '0 0 0.75rem 0', fontSize: '0.95rem' }}>
+                        📍 {scholarship.location}
+                      </div>
+                    </div>
+                    <div style={{ 
+                      display: 'inline-block',
+                      padding: '0.4rem 0.8rem',
+                      borderRadius: '20px',
+                      fontSize: '0.85rem',
+                      fontWeight: '500',
+                      backgroundColor: deadline.urgent ? '#fef2f2' : '#f0fdf4',
+                      color: deadline.urgent ? '#dc2626' : '#16a34a',
+                      border: `1px solid ${deadline.urgent ? '#fecaca' : '#bbf7d0'}`
+                    }}>
+                      {deadline.text}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+              <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🎓</div>
+              <h4 style={{ color: '#333', marginBottom: '0.5rem' }}>No Scholarships Available</h4>
+              <p>Check back later for new opportunities</p>
+            </div>
+          )}
+        </div>
       </Section>
     </Container>
   );

@@ -292,9 +292,26 @@ router.get('/dashboard', authenticateToken, authorizeRoles('employer', 'admin'),
     };
   });
 
+  // Enhanced scholarship posting trends for charts - last 6 months of real data
+  const monthlyScholarshipPostings = last6Months.map(monthKey => {
+    const scholarshipsInMonth = totalScholarshipsResult.docs.filter((scholarship: any) => {
+      if (!scholarship.createdAt) return false;
+      const scholarshipDate = new Date(scholarship.createdAt);
+      const scholarshipMonthKey = `${scholarshipDate.getFullYear()}-${(scholarshipDate.getMonth() + 1).toString().padStart(2, '0')}`;
+      return scholarshipMonthKey === monthKey;
+    }).length;
+    
+    return {
+      month: monthKey,
+      scholarships: scholarshipsInMonth,
+      monthLabel: new Date(monthKey + '-01').toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+    };
+  });
+
   console.log('📊 Chart data generated from database:');
   console.log('  Monthly Job Postings:', monthlyJobPostings);
   console.log('  Application Trends:', applicationTrends);
+  console.log('  Monthly Scholarship Postings:', monthlyScholarshipPostings);
 
   // Top performing jobs with status breakdown
   const topJobs = allJobsResult.docs
@@ -429,6 +446,7 @@ router.get('/dashboard', authenticateToken, authorizeRoles('employer', 'admin'),
       },
       charts: {
         monthlyJobPostings: monthlyJobPostings,
+        monthlyScholarshipPostings: monthlyScholarshipPostings,
         applicationTrends: applicationTrends,
         applicationStatusDistribution: Object.entries(applicationStatusDistribution).map(([status, count]) => ({
           status,
@@ -558,13 +576,29 @@ router.get('/jobs/employer', authenticateToken, authorizeRoles('employer'), [
   const { userId } = ensureAuth(req);
   const { status, page = 1, limit = 10 } = req.query;
   
+  console.log('🔍 Employer jobs endpoint called by user:', userId);
+  
   const selector: any = { type: 'job', employer: userId };
-  if (status) {
-    selector.status = status;
-  }
+  console.log('🔍 Selector:', selector);
+  
+  // Debug: Check all jobs in database
+  const allJobsResult = await db.find({ selector: { type: 'job' } });
+  console.log('📊 Total jobs in database:', allJobsResult.docs.length);
+  allJobsResult.docs.forEach((job: any, index) => {
+    console.log(`  Job ${index + 1}:`, {
+      id: job._id,
+      title: job.title,
+      employer: job.employer,
+      employerType: typeof job.employer,
+      matches: job.employer === userId,
+      isActive: job.isActive,
+      approvalStatus: job.approvalStatus
+    });
+  });
 
   const result = await db.find({ selector });
   const jobs = result.docs;
+  console.log('📊 Jobs found for this employer:', jobs.length);
 
   // Pagination
   const total = jobs.length;
@@ -937,15 +971,31 @@ router.get('/analytics', authenticateToken, authorizeRoles('employer'), asyncHan
   // Recent activity
   const recentJobsResult = await db.find({ selector: { type: 'job', employer: userId } });
   const recentJobs = recentJobsResult.docs
-    .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .sort((a: any, b: any) => {
+      const aDate = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bDate = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return bDate - aDate;
+    })
     .slice(0, 5)
-    .map((job: any) => ({ title: job.title, isActive: job.isActive, createdAt: job.createdAt }));
+    .map((job: any) => ({ 
+      title: job.title || 'Untitled Job', 
+      isActive: job.isActive || false, 
+      createdAt: job.createdAt || new Date() 
+    }));
 
   const recentScholarshipsResult = await db.find({ selector: { type: 'scholarship', employer: userId } });
   const recentScholarships = recentScholarshipsResult.docs
-    .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .sort((a: any, b: any) => {
+      const aDate = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bDate = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return bDate - aDate;
+    })
     .slice(0, 5)
-    .map((scholarship: any) => ({ title: scholarship.title, isActive: scholarship.isActive, createdAt: scholarship.createdAt }));
+    .map((scholarship: any) => ({ 
+      title: scholarship.title || 'Untitled Scholarship', 
+      isActive: scholarship.isActive || false, 
+      createdAt: scholarship.createdAt || new Date() 
+    }));
 
   res.json({
     success: true,
@@ -1006,22 +1056,32 @@ router.post('/jobs', authenticateToken, authorizeRoles('employer'), [
   body('isActive').isBoolean().withMessage('isActive must be a boolean')
 ], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { userId } = ensureAuth(req);
+  
+  console.log('🔧 Job creation request received');
+  console.log('👤 User ID:', userId);
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+  
   const jobData = {
     _id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
     ...req.body,
     type: 'job',
     employer: userId,
     applications: [],
+    isActive: false, // Set to false until approved
+    approvalStatus: 'pending', // Add approval status
     createdAt: new Date(),
     updatedAt: new Date()
   };
 
+  console.log('🔧 Job data to be created:', JSON.stringify(jobData, null, 2));
+
   const job = await db.put(jobData);
+  console.log('✅ Job created successfully:', jobData._id);
 
   res.status(201).json({
     success: true,
     message: 'Job posted successfully',
-    data: { job }
+    data: { job: jobData }
   });
 }));
 
@@ -1121,6 +1181,8 @@ router.post('/scholarships', authenticateToken, authorizeRoles('employer'), [
     type: 'scholarship',
     employer: userId,
     applications: [],
+    isActive: false, // Set to false until approved
+    approvalStatus: 'pending', // Add approval status
     createdAt: new Date(),
     updatedAt: new Date()
   };

@@ -1355,15 +1355,15 @@ router.get('/dashboard', authenticateToken, authorizeRoles('instructor'), asyncH
     const totalCourses = courses.length;
     const publishedCourses = courses.filter(c => c.isPublished).length;
 
-    // Assessment statistics
-    const assessments = allDocsResult.rows
+    // Quiz statistics (only quizzes, not all assessments)
+    const quizzes = allDocsResult.rows
       .map((row: any) => row.doc)
       .filter((doc: any) => doc && 
-        ['assessment', 'quiz', 'assignment', 'exam'].includes(doc.type) && 
-        doc.instructor === userId) as AssessmentDoc[];
+        doc.type === 'quiz' && 
+        (doc.instructor === userId || doc.instructorId === userId)) as AssessmentDoc[];
 
-    const totalAssessments = assessments.length;
-    const publishedAssessments = assessments.filter(a => a.status === 'published').length;
+    const totalQuizzes = quizzes.length;
+    const publishedQuizzes = quizzes.filter(q => q.status === 'published').length;
 
     // Get all users for activity tracking
     const users = allDocsResult.rows
@@ -1381,29 +1381,105 @@ router.get('/dashboard', authenticateToken, authorizeRoles('instructor'), asyncH
     const totalStudents = allStudentIds.size;
 
     // Calculate student progress data with REAL completion logic
-    const studentProgress = courses.map(course => {
+    const studentProgress = await Promise.all(courses.map(async (course) => {
+      // Get enrolled students count - ensure it's valid
       const enrolledCount = course.enrolledStudents?.length || 0;
       
-      // Count only students who have ACTUALLY completed (not just made progress)
+      // Get all modules for this course to calculate total items
+      const moduleIds = course.modules || [];
+      let totalItemsInCourse = 0;
+      
+      // Calculate total items across all modules
+      for (const moduleId of moduleIds) {
+        try {
+          const moduleDoc = await database.get(moduleId);
+          if (moduleDoc) {
+            if (moduleDoc.description) totalItemsInCourse++;
+            if (moduleDoc.content) totalItemsInCourse++;
+            if (moduleDoc.videoUrl) totalItemsInCourse++;
+            if (moduleDoc.resources) totalItemsInCourse += moduleDoc.resources.length;
+            if (moduleDoc.assessments) totalItemsInCourse += moduleDoc.assessments.length;
+            if (moduleDoc.quizzes) totalItemsInCourse += moduleDoc.quizzes.length;
+            if (moduleDoc.discussions) totalItemsInCourse += moduleDoc.discussions.length;
+            if (moduleDoc.contentItems) totalItemsInCourse += moduleDoc.contentItems.length;
+          }
+        } catch (moduleError) {
+          console.warn('⚠️ Could not fetch module for progress calculation:', moduleError);
+        }
+      }
+      
+      // Count students who have completed the course
       let completedCount = 0;
+      const studentsWhoCompleted = new Set<string>();
+      
       if (course.studentProgress && course.studentProgress.length > 0) {
-        const studentsWhoCompleted = new Set<string>();
+        // Group progress by student to calculate completion
+        const studentProgressMap = new Map();
         
         course.studentProgress.forEach((progress: any) => {
-          // Only count if progress.completed is explicitly true
-          if (progress.completed === true && progress.student) {
-            studentsWhoCompleted.add(progress.student);
+          // Only process progress for students who are actually enrolled
+          if (!course.enrolledStudents?.includes(progress.student)) {
+            console.warn(`⚠️ Student ${progress.student} has progress but is not enrolled in course ${course.title}`);
+            return;
+          }
+          
+          if (!studentProgressMap.has(progress.student)) {
+            studentProgressMap.set(progress.student, {
+              completedItems: new Set(),
+              modules: new Set(),
+              totalProgress: 0
+            });
+          }
+          
+          const studentData = studentProgressMap.get(progress.student);
+          
+          // Add completed items
+          if (progress.completedItems) {
+            progress.completedItems.forEach((item: string) => {
+              studentData.completedItems.add(item);
+            });
+          }
+          
+          // Add completed modules
+          if (progress.completed === true) {
+            studentData.modules.add(progress.moduleId);
+          }
+        });
+        
+        // Count students who have completed the course
+        studentProgressMap.forEach((studentData, studentId) => {
+          // More flexible completion criteria:
+          // 1. Completed all modules (if course has modules)
+          // 2. Completed 80% of all items (if course has items)
+          // 3. Has made significant progress (at least 1 module or 3 items)
+          
+          const hasCompletedAllModules = moduleIds.length > 0 && studentData.modules.size >= moduleIds.length;
+          const hasCompletedMostItems = totalItemsInCourse > 0 && studentData.completedItems.size >= Math.max(1, totalItemsInCourse * 0.8);
+          const hasMadeSignificantProgress = studentData.modules.size > 0 || studentData.completedItems.size >= 3;
+          
+          // For courses with no content, consider enrolled students as "completed" if they have any progress
+          const hasNoContent = totalItemsInCourse === 0 && moduleIds.length === 0;
+          const hasAnyProgress = studentData.modules.size > 0 || studentData.completedItems.size > 0;
+          
+          if (hasCompletedAllModules || hasCompletedMostItems || (hasNoContent && hasAnyProgress) || hasMadeSignificantProgress) {
+            studentsWhoCompleted.add(studentId);
           }
         });
         
         completedCount = studentsWhoCompleted.size;
       }
       
+      // Safety checks for data consistency
+      if (completedCount > enrolledCount) {
+        console.warn(`⚠️ Course "${course.title}": More completed students (${completedCount}) than enrolled (${enrolledCount}) - fixing data`);
+        completedCount = enrolledCount;
+      }
+      
       // Calculate realistic completion percentage
       const completionPercentage = enrolledCount > 0 ? 
         Math.round((completedCount / enrolledCount) * 100) : 0;
       
-      console.log(`📊 Course "${course.title}": ${enrolledCount} enrolled, ${completedCount} actually completed, ${completionPercentage}% completion`);
+      console.log(`📊 Course "${course.title}": ${enrolledCount} enrolled, ${completedCount} completed, ${totalItemsInCourse} total items, ${completionPercentage}% completion`);
       
       return {
         courseName: course.title,
@@ -1413,15 +1489,15 @@ router.get('/dashboard', authenticateToken, authorizeRoles('instructor'), asyncH
         completionPercentage,
         lastActivity: course.updatedAt || course.createdAt
       };
-    });
+    }));
 
-    // Calculate all types of submissions (assessments + assignments)
+    // Calculate all types of submissions (quizzes + assignments)
     let pendingSubmissions = 0;
     
-    // Count assessment submissions
-    assessments.forEach(assessment => {
-      if (assessment.submissions) {
-        pendingSubmissions += assessment.submissions.filter((sub: any) => sub.status === 'submitted').length;
+    // Count quiz submissions
+    quizzes.forEach(quiz => {
+      if (quiz.submissions) {
+        pendingSubmissions += quiz.submissions.filter((sub: any) => sub.status === 'submitted').length;
       }
     });
     
@@ -1516,8 +1592,8 @@ router.get('/dashboard', authenticateToken, authorizeRoles('instructor'), asyncH
         overview: {
           totalCourses,
           publishedCourses,
-          totalAssessments,
-          publishedAssessments,
+          totalQuizzes,
+          publishedQuizzes,
           totalStudents,
           pendingSubmissions,
           totalSubmissions: pendingSubmissions,
@@ -1526,7 +1602,7 @@ router.get('/dashboard', authenticateToken, authorizeRoles('instructor'), asyncH
         },
         studentProgress,
         recentCourses: courses.slice(0, 5),
-        recentAssessments: assessments.slice(0, 5)
+        recentQuizzes: quizzes.slice(0, 5)
       }
     });
   } catch (error: any) {
@@ -1942,6 +2018,30 @@ router.get('/student-activity', authenticateToken, authorizeRoles('instructor'),
 }));
 
 // Add validation function for quiz questions
+// Helper function to safely log quiz data
+const logQuizData = (quiz: any, prefix: string) => {
+  try {
+    console.log(`${prefix} Quiz:`, {
+      id: quiz._id,
+      title: quiz.title,
+      questionCount: quiz.questions?.length || 0
+    });
+    
+    if (quiz.questions && quiz.questions.length > 0) {
+      quiz.questions.forEach((q: any, i: number) => {
+        console.log(`${prefix} Question ${i + 1}:`, {
+          question: q.question?.substring(0, 50) + '...',
+          type: q.type,
+          correctAnswer: q.correctAnswer,
+          correctAnswerType: typeof q.correctAnswer
+        });
+      });
+    }
+  } catch (error) {
+    console.log(`${prefix} Error logging quiz data:`, error);
+  }
+};
+
 const validateQuizQuestion = (question: any) => {
   if (!question || !question.question) return { valid: false, error: 'Question text is required' };
   
@@ -1988,25 +2088,37 @@ const validateQuizQuestion = (question: any) => {
 };
 
 // Quiz routes
+// Get all quizzes for instructor
 router.get('/quizzes', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { userId, user } = ensureAuth(req);
-    console.log('🔍 Fetching quizzes for user:', user._id); // Debug log
+    const { courseId } = req.query; // Optional course filter
+    console.log('🔍 Fetching quizzes for user:', user._id, courseId ? `(filtered by course: ${courseId})` : '(all courses)');
     
     const database = await ensureDb();
     const result = await database.list({ include_docs: true });
     
     // Filter for quizzes belonging to this instructor
-    const quizzes = result.rows
+    let quizzes = result.rows
       .map((row: any) => row.doc)
       .filter((doc: any) => doc && doc.type === 'quiz' && (doc.instructorId === user._id || doc.instructor === user._id));
     
-    console.log('📚 Found quizzes for instructor:', quizzes.length); // Debug log
+    // Apply course filter if provided
+    if (courseId) {
+      const beforeCount = quizzes.length;
+      quizzes = quizzes.filter((quiz: any) => {
+        const quizCourseId = quiz.courseId || quiz.course;
+        return quizCourseId === courseId;
+      });
+      console.log(`📚 Course filter applied: ${beforeCount} -> ${quizzes.length} quizzes`);
+    }
     
     // Sort by creation date (newest first)
     const sortedQuizzes = quizzes.sort((a: any, b: any) => {
       return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
     });
+    
+    console.log(`✅ Returning ${sortedQuizzes.length} quizzes for instructor`);
     
     res.json({
       success: true,
@@ -2017,6 +2129,80 @@ router.get('/quizzes', authenticateToken, authorizeRoles('instructor'), asyncHan
     res.status(500).json({
       success: false,
       message: 'Failed to fetch quizzes'
+    });
+  }
+}));
+
+// Get specific quiz by ID
+router.get('/quizzes/:quizId', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { userId, user } = ensureAuth(req);
+    const { quizId } = req.params;
+    
+    console.log('🔍 Fetching quiz by ID:', quizId);
+    
+    const database = await ensureDb();
+    const quiz = await database.get(quizId);
+    
+    if (!quiz || quiz.type !== 'quiz') {
+      return res.status(404).json({
+        success: false,
+        message: 'Quiz not found'
+      });
+    }
+    
+    // Check if instructor owns this quiz
+    if (quiz.instructorId !== user._id && quiz.instructor !== user._id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to access this quiz'
+      });
+    }
+    
+    console.log('✅ Quiz found:', quiz.title, 'Questions:', quiz.questions?.length || 0);
+    
+    res.json({
+      success: true,
+      data: { quiz }
+    });
+  } catch (error: any) {
+    console.error('Error fetching quiz:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch quiz'
+    });
+  }
+}));
+
+// Get quiz by ID (for students/refugees)
+router.get('/quizzes/:quizId/student', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { userId, user } = ensureAuth(req);
+    const { quizId } = req.params;
+    
+    console.log('🔍 Student fetching quiz by ID:', quizId);
+    
+    const database = await ensureDb();
+    const quiz = await database.get(quizId);
+    
+    if (!quiz || quiz.type !== 'quiz') {
+      return res.status(404).json({
+        success: false,
+        message: 'Quiz not found'
+      });
+    }
+    
+    console.log('✅ Quiz found for student:', quiz.title, 'Questions:', quiz.questions?.length || 0);
+    
+    res.json({
+      success: true,
+      data: { quiz }
+    });
+  } catch (error: any) {
+    console.error('Error fetching quiz for student:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch quiz'
     });
   }
 }));
@@ -2089,9 +2275,49 @@ router.post('/quizzes', authenticateToken, authorizeRoles('instructor'), [
     };
 
     console.log('📤 Quiz object being saved to database:', { _id: quiz._id, title: quiz.title, courseId: quiz.courseId, moduleId: quiz.moduleId }); // Debug log
+    console.log('📝 Questions being saved:', quiz.questions?.length || 0, 'questions');
+    
+    // Log question details safely
+    if (quiz.questions && quiz.questions.length > 0) {
+      quiz.questions.forEach((q: any, qIndex: number) => {
+        console.log(`📝 Question ${qIndex + 1} being saved:`, {
+          question: q.question?.substring(0, 50) + '...',
+          type: q.type,
+          correctAnswer: q.correctAnswer,
+          correctAnswerType: typeof q.correctAnswer
+        });
+      });
+    } else {
+      console.log('⚠️ WARNING: No questions found in quiz data!');
+      console.log('⚠️ Quiz data received:', JSON.stringify(req.body, null, 2));
+    }
 
     const database = await ensureDb();
     await database.insert(quiz);
+
+    // Update the module to include this quiz
+    if (moduleId) {
+      try {
+        const module = await database.get(moduleId);
+        if (module) {
+          // Initialize quizzes array if it doesn't exist
+          if (!module.quizzes) {
+            module.quizzes = [];
+          }
+          
+          // Add quiz ID to module's quizzes array if not already present
+          if (!module.quizzes.includes(quiz._id)) {
+            module.quizzes.push(quiz._id);
+            module.updatedAt = new Date();
+            await database.insert(module);
+            console.log('✅ Quiz added to module:', moduleId, 'Quiz count:', module.quizzes.length);
+          }
+        }
+      } catch (moduleError) {
+        console.error('⚠️ Failed to update module with quiz:', moduleError);
+        // Don't fail the quiz creation if module update fails
+      }
+    }
 
     console.log('✅ Quiz saved successfully with moduleId:', quiz.moduleId); // Debug log
 
@@ -2118,12 +2344,13 @@ router.put('/quizzes/:quizId', authenticateToken, authorizeRoles('instructor'), 
   body('totalPoints').optional().isInt({ min: 0 }).withMessage('Total points must be a non-negative integer'),
   body('passingScore').optional().isInt({ min: 0, max: 100 }).withMessage('Passing score must be between 0 and 100'),
   body('dueDate').optional().isISO8601().withMessage('Due date must be a valid ISO 8601 date'),
-  body('questions').optional().isArray().withMessage('Questions must be an array')
+  body('questions').optional().isArray().withMessage('Questions must be an array'),
+  body('status').optional().isIn(['published', 'draft']).withMessage('Status must be either published or draft')
 ], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { userId, user } = ensureAuth(req);
     const { quizId } = req.params;
-    const { title, description, courseId, moduleId, duration, totalPoints, passingScore, dueDate, questions } = req.body;
+    const { title, description, courseId, moduleId, duration, totalPoints, passingScore, dueDate, questions, status } = req.body;
 
     const database = await ensureDb();
     const quiz = await database.get(quizId);
@@ -2158,10 +2385,41 @@ router.put('/quizzes/:quizId', authenticateToken, authorizeRoles('instructor'), 
       passingScore: passingScore || quiz.passingScore,
       dueDate: dueDate || quiz.dueDate,
       questions: questions || quiz.questions,
+      status: status !== undefined ? status : quiz.status,
       updatedAt: new Date().toISOString()
     };
 
     await database.insert(updatedQuiz);
+
+    // Update module if moduleId changed
+    if (moduleId && moduleId !== quiz.moduleId) {
+      try {
+        // Remove from old module if it exists
+        if (quiz.moduleId) {
+          const oldModule = await database.get(quiz.moduleId);
+          if (oldModule && oldModule.quizzes) {
+            oldModule.quizzes = oldModule.quizzes.filter((id: string) => id !== quiz._id);
+            oldModule.updatedAt = new Date();
+            await database.insert(oldModule);
+          }
+        }
+        
+        // Add to new module
+        const newModule = await database.get(moduleId);
+        if (newModule) {
+          if (!newModule.quizzes) {
+            newModule.quizzes = [];
+          }
+          if (!newModule.quizzes.includes(quiz._id)) {
+            newModule.quizzes.push(quiz._id);
+            newModule.updatedAt = new Date();
+            await database.insert(newModule);
+          }
+        }
+      } catch (moduleError) {
+        console.error('⚠️ Failed to update module assignment:', moduleError);
+      }
+    }
 
     res.json({
       success: true,
@@ -2237,12 +2495,13 @@ router.post('/discussions', authenticateToken, authorizeRoles('instructor'), [
   body('title').notEmpty().withMessage('Discussion title is required'),
   body('content').notEmpty().withMessage('Discussion content is required'),
   body('courseId').notEmpty().withMessage('Course selection is required'),
+  body('moduleId').optional().isString().withMessage('Module ID must be a string'),
   body('category').optional().isIn(['general', 'question', 'announcement']).withMessage('Invalid category'),
   body('questions').optional().isArray().withMessage('Questions must be an array')
 ], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { userId, user } = ensureAuth(req);
-    const { title, content, courseId, category, questions } = req.body;
+    const { title, content, courseId, moduleId, category, questions } = req.body;
 
     if (!title || !content || !courseId) {
       return res.status(400).json({
@@ -2265,12 +2524,21 @@ router.post('/discussions', authenticateToken, authorizeRoles('instructor'), [
       });
     }
 
+    console.log('💬 DISCUSSION CREATE - Creating discussion with:', {
+      title,
+      content: content ? content.substring(0, 50) + '...' : 'No content',
+      courseId,
+      moduleId,
+      courseName
+    });
+
     const discussion = {
       _id: `discussion_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       type: 'discussion',
       title,
       content,
       courseId,
+      moduleId: moduleId || null,
       courseName,
       category: category || 'general',
       instructorId: user._id,
@@ -2280,6 +2548,13 @@ router.post('/discussions', authenticateToken, authorizeRoles('instructor'), [
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
+
+    console.log('💬 DISCUSSION CREATE - Discussion object to save:', {
+      _id: discussion._id,
+      title: discussion.title,
+      moduleId: discussion.moduleId,
+      courseId: discussion.courseId
+    });
 
     const database2 = await ensureDb();
     await database2.insert(discussion);
@@ -2305,13 +2580,25 @@ router.put('/discussions/:discussionId', authenticateToken, authorizeRoles('inst
   body('category').optional().isIn(['general', 'question', 'announcement']).withMessage('Invalid category'),
   body('questions').optional().isArray().withMessage('Questions must be an array')
 ], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  try {
     const { userId, user } = ensureAuth(req);
     const { discussionId } = req.params;
     const { title, content, courseId, category, questions } = req.body;
+  
+  try {
+
+    console.log('🔄 DISCUSSION UPDATE - Request received for discussion:', discussionId);
+    console.log('🔄 DISCUSSION UPDATE - Request body:', { title, content, courseId, category });
+    console.log('🔄 DISCUSSION UPDATE - User ID:', user._id);
 
     const database = await ensureDb();
     const discussion = await database.get(discussionId);
+    
+    console.log('🔄 DISCUSSION UPDATE - Found discussion:', {
+      id: discussion._id,
+      title: discussion.title,
+      instructorId: discussion.instructorId,
+      userId: user._id
+    });
     
     if (discussion.instructorId !== user._id) {
       return res.status(403).json({
@@ -2341,7 +2628,28 @@ router.put('/discussions/:discussionId', authenticateToken, authorizeRoles('inst
       updatedAt: new Date().toISOString()
     };
 
+    console.log('🔄 DISCUSSION UPDATE - About to save updated discussion:', {
+      _id: updatedDiscussion._id,
+      _rev: updatedDiscussion._rev,
+      title: updatedDiscussion.title,
+      contentLength: updatedDiscussion.content?.length || 0
+    });
+
+    try {
     await database.insert(updatedDiscussion);
+      console.log('✅ DISCUSSION UPDATE - Database insert successful');
+    } catch (dbError: any) {
+      console.error('❌ DISCUSSION UPDATE - Database insert failed:', dbError);
+      console.error('❌ Database error details:', {
+        error: dbError?.error || 'Unknown error',
+        reason: dbError?.reason || 'Unknown reason',
+        id: dbError?.id || 'Unknown id',
+        rev: dbError?.rev || 'Unknown rev'
+      });
+      throw dbError;
+    }
+
+    console.log('✅ DISCUSSION UPDATE - Discussion updated successfully:', updatedDiscussion._id);
 
     res.json({
       success: true,
@@ -2349,10 +2657,18 @@ router.put('/discussions/:discussionId', authenticateToken, authorizeRoles('inst
       data: { discussion: updatedDiscussion }
     });
   } catch (error: any) {
-    console.error('Error updating discussion:', error);
+    console.error('❌ DISCUSSION UPDATE ERROR:', error);
+    console.error('❌ Error message:', error?.message || 'Unknown error message');
+    console.error('❌ Error stack:', error?.stack || 'No stack trace available');
+    console.error('❌ Error details:', {
+      discussionId: discussionId || 'Unknown',
+      userId: user?._id || 'Unknown',
+      requestBody: req.body || {}
+    });
     res.status(500).json({
       success: false,
-      message: 'Failed to update discussion'
+      message: 'Failed to update discussion',
+      error: error?.message || 'Unknown error'
     });
   }
 }));
@@ -2569,6 +2885,152 @@ router.delete('/groups/:groupId', authenticateToken, authorizeRoles('instructor'
     res.status(500).json({
       success: false,
       message: 'Failed to delete group'
+    });
+  }
+}));
+
+// Get instructor notifications (admin messages about course approvals/rejections)
+router.get('/notifications', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { userId } = ensureAuth(req);
+    const { page = 1, limit = 10 } = req.query;
+    
+    const database = await ensureDb();
+    
+    // Get notifications for this instructor
+    const result = await database.find({
+      selector: {
+        type: 'notification',
+        recipient: userId,
+        category: { $in: ['course_approval', 'course_rejection'] }
+      }
+    });
+    
+    // Sort by creation date (newest first)
+    const notifications = result.docs.sort((a: any, b: any) => 
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    
+    // Pagination
+    const total = notifications.length;
+    const pageNum = Number(page);
+    const limitNum = Number(limit);
+    const pagedNotifications = notifications.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+    
+    res.json({
+      success: true,
+      data: {
+        notifications: pagedNotifications,
+        pagination: {
+          currentPage: pageNum,
+          totalPages: Math.ceil(total / limitNum),
+          totalNotifications: total
+        }
+      }
+    });
+  } catch (error: any) {
+    console.error('Error fetching instructor notifications:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Internal server error while fetching notifications'
+    });
+  }
+}));
+
+// Mark notification as read
+router.put('/notifications/:notificationId/read', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { userId } = ensureAuth(req);
+    const { notificationId } = req.params;
+    
+    const database = await ensureDb();
+    const notification = await database.get(notificationId);
+    
+    if (!notification) {
+      return res.status(404).json({
+        success: false,
+        message: 'Notification not found'
+      });
+    }
+    
+    // Check if notification belongs to this instructor
+    if (notification.recipient !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to update this notification'
+      });
+    }
+    
+    notification.isRead = true;
+    notification.updatedAt = new Date();
+    
+    const latest = await database.get(notification._id);
+    notification._rev = latest._rev;
+    await database.insert(notification);
+    
+    res.json({
+      success: true,
+      message: 'Notification marked as read'
+    });
+  } catch (error: any) {
+    console.error('Error marking notification as read:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Internal server error'
+    });
+  }
+}));
+
+// Debug endpoint to check quiz data
+router.get('/debug/quiz/:quizId', authenticateToken, authorizeRoles('instructor', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { quizId } = req.params;
+    const { userId } = ensureAuth(req);
+    
+    console.log('🔍 DEBUG: Checking quiz data for:', quizId);
+    
+    const database = await ensureDb();
+    const quiz = await database.get(quizId);
+    
+    if (!quiz) {
+      return res.status(404).json({
+        success: false,
+        message: 'Quiz not found'
+      });
+    }
+    
+    if (quiz.type !== 'quiz') {
+      return res.status(404).json({
+        success: false,
+        message: 'Document is not a quiz'
+      });
+    }
+    
+    // Check if instructor owns this quiz
+    if (quiz.instructorId !== userId && quiz.instructor !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to access this quiz'
+      });
+    }
+    
+    console.log('✅ Quiz found:', quiz.title);
+    console.log('✅ Questions count:', quiz.questions?.length || 0);
+    console.log('✅ Quiz data:', JSON.stringify(quiz, null, 2));
+    
+    res.json({
+      success: true,
+      data: { 
+        quiz,
+        questionsCount: quiz.questions?.length || 0,
+        hasQuestions: !!(quiz.questions && quiz.questions.length > 0)
+      }
+    });
+  } catch (error: any) {
+    console.error('Error in quiz debug endpoint:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to debug quiz'
     });
   }
 }));

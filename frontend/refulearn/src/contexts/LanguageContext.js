@@ -1,5 +1,5 @@
-// DEPRECATED: This file is no longer used. The app now uses react-i18next for i18n. You can safely delete this file.
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 
 const LanguageContext = createContext();
 
@@ -11,255 +11,142 @@ export const useLanguage = () => {
   return context;
 };
 
-const translations = {
-  en: {
-    welcome: 'Welcome to RefuLearn',
-    empowering: 'Empowering refugees through education',
-    continue: 'Continue',
-    loading: 'Loading...',
-    error: 'Error',
-    success: 'Success',
-    save: 'Save',
-    cancel: 'Cancel',
-    delete: 'Delete',
-    edit: 'Edit',
-    view: 'View',
-    search: 'Search',
-    filter: 'Filter',
-    sort: 'Sort',
-    next: 'Next',
-    previous: 'Previous',
-    submit: 'Submit',
-    back: 'Back',
-    close: 'Close',
-    open: 'Open',
-    yes: 'Yes',
-    no: 'No',
-    ok: 'OK',
-    confirm: 'Confirm',
-    dashboard: 'Dashboard',
-    profile: 'Profile',
-    settings: 'Settings',
-    logout: 'Logout',
-    login: 'Login',
-    register: 'Register',
-    courses: 'Courses',
-    jobs: 'Jobs',
-    assessments: 'Assessments',
-    certificates: 'Certificates',
-    help: 'Help',
-    scholarships: 'Scholarships',
-    peerLearning: 'Peer Learning',
-    notifications: 'Notifications',
-    messages: 'Messages',
-    language: 'Language',
-    english: 'English',
-    kinyarwanda: 'Kinyarwanda',
-    french: 'French',
-    swahili: 'Swahili'
-  },
-  rw: {
-    welcome: 'Murakaza neza kuri RefuLearn',
-    empowering: 'Gufasha abimukira binyuze mu masomo',
-    continue: 'Komeza',
-    loading: 'Birakora...',
-    error: 'Ikibazo',
-    success: 'Intsinzi',
-    save: 'Bika',
-    cancel: 'Hagarika',
-    delete: 'Siba',
-    edit: 'Hindura',
-    view: 'Reba',
-    search: 'Shakisha',
-    filter: 'Shungura',
-    sort: 'Shungura',
-    next: 'Ibikurikira',
-    previous: 'Ibanza',
-    submit: 'Ohereza',
-    back: 'Subira inyuma',
-    close: 'Funga',
-    open: 'Fungura',
-    yes: 'Yego',
-    no: 'Oya',
-    ok: 'Sawa',
-    confirm: 'Emeza',
-    dashboard: 'Ikibaho',
-    profile: 'Imyirondoro',
-    settings: 'Igenamiterere',
-    logout: 'Sohoka',
-    login: 'Injira',
-    register: 'Iyandikishe',
-    courses: 'Amasomo',
-    jobs: 'Akazi',
-    assessments: 'Ibizamini',
-    certificates: 'Impamyabumenyi',
-    help: 'Ubufasha',
-    scholarships: 'Ubwishingizi',
-    peerLearning: 'Kwiga hamwe',
-    notifications: 'Imenyesha',
-    messages: 'Ubutumwa',
-    language: 'Ururimi',
-    english: 'Icyongereza',
-    kinyarwanda: 'Ikinyarwanda',
-    french: 'Igifaransa',
-    swahili: 'Igiswahili'
-  },
-  fr: {
-    welcome: 'Bienvenue sur RefuLearn',
-    empowering: 'Autonomiser les réfugiés par l\'éducation',
-    continue: 'Continuer',
-    loading: 'Chargement...',
-    error: 'Erreur',
-    success: 'Succès',
-    save: 'Enregistrer',
-    cancel: 'Annuler',
-    delete: 'Supprimer',
-    edit: 'Modifier',
-    view: 'Voir',
-    search: 'Rechercher',
-    filter: 'Filtrer',
-    sort: 'Trier',
-    next: 'Suivant',
-    previous: 'Précédent',
-    submit: 'Soumettre',
-    back: 'Retour',
-    close: 'Fermer',
-    open: 'Ouvrir',
-    yes: 'Oui',
-    no: 'Non',
-    ok: 'OK',
-    confirm: 'Confirmer',
-    dashboard: 'Tableau de bord',
-    profile: 'Profil',
-    settings: 'Paramètres',
-    logout: 'Déconnexion',
-    login: 'Connexion',
-    register: 'S\'inscrire',
-    courses: 'Cours',
-    jobs: 'Emplois',
-    assessments: 'Évaluations',
-    certificates: 'Certificats',
-    help: 'Aide',
-    scholarships: 'Bourses',
-    peerLearning: 'Apprentissage par les pairs',
-    notifications: 'Notifications',
-    messages: 'Messages',
-    language: 'Langue',
-    english: 'Anglais',
-    kinyarwanda: 'Kinyarwanda',
-    french: 'Français',
-    swahili: 'Swahili'
-  },
-  sw: {
-    welcome: 'Karibu kwenye RefuLearn',
-    empowering: 'Kuwawezesha wakimbizi kupitia elimu',
-    continue: 'Endelea',
-    loading: 'Inapakia...',
-    error: 'Hitilafu',
-    success: 'Mafanikio',
-    save: 'Hifadhi',
-    cancel: 'Ghairi',
-    delete: 'Futa',
-    edit: 'Hariri',
-    view: 'Tazama',
-    search: 'Tafuta',
-    filter: 'Chuja',
-    sort: 'Panga',
-    next: 'Ifuatayo',
-    previous: 'Iliyotangulia',
-    submit: 'Wasilisha',
-    back: 'Rudi nyuma',
-    close: 'Funga',
-    open: 'Fungua',
-    yes: 'Ndiyo',
-    no: 'Hapana',
-    ok: 'Sawa',
-    confirm: 'Thibitisha',
-    dashboard: 'Jopo la udhibiti',
-    profile: 'Wasifu',
-    settings: 'Mipangilio',
-    logout: 'Ondoka',
-    login: 'Ingia',
-    register: 'Jisajili',
-    courses: 'Kozi',
-    jobs: 'Kazi',
-    assessments: 'Tathmini',
-    certificates: 'Vyeti',
-    help: 'Msaada',
-    scholarships: 'Mikopo',
-    peerLearning: 'Kujifunza na wenzake',
-    notifications: 'Arifa',
-    messages: 'Ujumbe',
-    language: 'Lugha',
-    english: 'Kiingereza',
-    kinyarwanda: 'Kinyarwanda',
-    french: 'Kifaransa',
-    swahili: 'Kiswahili'
-  }
-};
-
-const supportedLanguages = [
-  { code: 'en', name: 'English', nativeName: 'English' },
-  { code: 'rw', name: 'Kinyarwanda', nativeName: 'Ikinyarwanda' },
-  { code: 'fr', name: 'French', nativeName: 'Français' },
-  { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili' }
-];
-
 export const LanguageProvider = ({ children }) => {
+  const { i18n } = useTranslation();
   const [currentLanguage, setCurrentLanguage] = useState(() => {
-    return localStorage.getItem('language') || 'en';
+    // Get language from localStorage or default to 'en'
+    const savedLanguage = localStorage.getItem('selectedLanguage');
+    const defaultLanguage = 'en';
+    return savedLanguage || defaultLanguage;
   });
 
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  // Function to fetch user's language preference from backend
+  const fetchUserLanguagePreference = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
 
-  useEffect(() => {
-    // Save language preference
-    localStorage.setItem('language', currentLanguage);
+      // Add a small delay to ensure backend is ready
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Update document language
-    document.documentElement.lang = currentLanguage;
+      const response = await fetch('/api/auth/settings', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
 
-    // Listen for online/offline events
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, [currentLanguage]);
-
-  const t = (key, params = {}) => {
-    let translation = translations[currentLanguage]?.[key] || translations.en[key] || key;
-    
-    // Replace parameters
-    Object.keys(params).forEach(param => {
-      translation = translation.replace(`{{${param}}}`, params[param]);
-    });
-    
-    return translation;
-  };
-
-  const changeLanguage = (languageCode) => {
-    if (translations[languageCode]) {
-      setCurrentLanguage(languageCode);
+      if (response.ok) {
+        const data = await response.json();
+        const userLanguage = data.data.settings.language;
+        
+        if (userLanguage && userLanguage !== currentLanguage) {
+          console.log(`🌍 Found user language preference: ${userLanguage}`);
+          changeLanguage(userLanguage);
+        }
+      }
+    } catch (error) {
+      console.warn('⚠️ Could not fetch user language preference:', error);
     }
   };
 
-  const getCurrentLanguage = () => {
-    return supportedLanguages.find(lang => lang.code === currentLanguage);
+  // Available languages
+  const availableLanguages = [
+    { code: 'en', name: 'English', flag: '🇺🇸' },
+    { code: 'fr', name: 'Français', flag: '🇫🇷' },
+    { code: 'rw', name: 'Kinyarwanda', flag: '🇷🇼' },
+    { code: 'sw', name: 'Kiswahili', flag: '🇹🇿' }
+  ];
+
+  // Change language function
+  const changeLanguage = (languageCode) => {
+    try {
+      // Change i18n language
+      i18n.changeLanguage(languageCode);
+      
+      // Update state
+      setCurrentLanguage(languageCode);
+      
+      // Save to localStorage for persistence
+      localStorage.setItem('selectedLanguage', languageCode);
+      
+      // Update document direction for RTL languages if needed
+      document.documentElement.lang = languageCode;
+      
+      // Force a small re-render to ensure all components update
+      setTimeout(() => {
+        window.dispatchEvent(new Event('languageChanged'));
+      }, 100);
+      
+      console.log(`🌍 Language changed to: ${languageCode}`);
+    } catch (error) {
+      console.error('Error changing language:', error);
+    }
+  };
+
+  // Initialize language on mount
+  useEffect(() => {
+    // Force set the language on app start
+    const languageToUse = currentLanguage || 'en';
+    
+    // Always set i18n language
+    i18n.changeLanguage(languageToUse);
+    
+    // Set document language
+    document.documentElement.lang = languageToUse;
+    
+    // Save to localStorage if not already saved
+    if (!localStorage.getItem('selectedLanguage')) {
+      localStorage.setItem('selectedLanguage', languageToUse);
+    }
+    
+    console.log(`🌍 Language initialized: ${languageToUse}, i18n language: ${i18n.language}`);
+    
+    // Fetch user's language preference from backend if authenticated
+    fetchUserLanguagePreference();
+  }, []); // Only run once on mount
+
+  // Handle language changes
+  useEffect(() => {
+    if (currentLanguage && i18n.language !== currentLanguage) {
+      i18n.changeLanguage(currentLanguage);
+      document.documentElement.lang = currentLanguage;
+      console.log(`🌍 Language updated to: ${currentLanguage}`);
+    }
+  }, [currentLanguage, i18n]);
+
+  // Watch for authentication changes to fetch user language preference
+  useEffect(() => {
+    const handleUserLogin = () => {
+      console.log('🌍 User logged in, fetching language preference...');
+      fetchUserLanguagePreference();
+    };
+
+    // Listen for user login events
+    window.addEventListener('userLogin', handleUserLogin);
+
+    // Also check immediately if user is already authenticated
+    const token = localStorage.getItem('token');
+    if (token) {
+      fetchUserLanguagePreference();
+    }
+
+    return () => {
+      window.removeEventListener('userLogin', handleUserLogin);
+    };
+  }, []);
+
+  // Get current language info
+  const getCurrentLanguageInfo = () => {
+    return availableLanguages.find(lang => lang.code === currentLanguage) || availableLanguages[0];
   };
 
   const value = {
     currentLanguage,
     changeLanguage,
-    t,
-    isOnline,
-    supportedLanguages,
-    getCurrentLanguage
+    availableLanguages,
+    getCurrentLanguageInfo,
+    isLanguageLoaded: i18n.isInitialized
   };
 
   return (

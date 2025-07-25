@@ -1,8 +1,8 @@
 /**
- * 🔥 INSTRUCTOR DASHBOARD v4.0 - REAL DASHBOARD OFFLINE
- * Cache buster: v4.0 - 2025-01-15-17:00 - REAL DATA + OFFLINE SUPPORT
- * REAL DASHBOARD FUNCTIONALITY - WORKS OFFLINE WITH CACHED DATA
- * SHOWS ACTUAL INSTRUCTOR DATA WHEN AVAILABLE - FALLBACK WHEN NEEDED
+ * 🔥 INSTRUCTOR DASHBOARD v5.0 - ONLINE ONLY
+ * Cache buster: v5.0 - 2025-01-15-18:00 - REAL DATA ONLY
+ * REAL DASHBOARD FUNCTIONALITY - ONLINE ONLY
+ * SHOWS ACTUAL INSTRUCTOR DATA FROM API
  */
 
 import React, { useState, useEffect } from 'react';
@@ -12,7 +12,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import PageContainer from '../../components/PageContainer';
 import ContentWrapper from '../../components/ContentWrapper';
 import { useUser } from '../../contexts/UserContext';
-import offlineIntegrationService from '../../services/offlineIntegrationService';
+import { useTranslation } from 'react-i18next';
 
 // const Container = styled.div`
 //   padding: 2rem;
@@ -65,7 +65,7 @@ const SectionTitle = styled.h2`
 
 const DashboardGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(250px, 300px));
   gap: 1.5rem;
   margin-top: 1.5rem;
 `;
@@ -225,49 +225,31 @@ const SuccessMessage = styled.div`
 `;
 
 const InstructorDashboard = () => {
-  console.log('🔥 REAL DASHBOARD v4.0 - OFFLINE CAPABLE - 2025-01-15-17:00');
+  const { t } = useTranslation();
+  console.log('🔥 INSTRUCTOR DASHBOARD v5.0 - ONLINE ONLY - 2025-01-15-18:00');
   
   const navigate = useNavigate();
   const { user, token } = useUser();
   
-  // Always start with false so dashboard renders immediately
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   
-  // Initialize with smart defaults that will be replaced with real data when available
-  const getInitialDashboardData = () => {
-    // Try to get real cached data first
-    try {
-      const cachedData = localStorage.getItem('instructor_dashboard_cache');
-      if (cachedData) {
-        console.log('📊 Found real cached instructor data');
-        return JSON.parse(cachedData);
-      }
-    } catch (e) {
-      console.log('⚠️ No cached data available, using defaults');
-    }
-    
-    // Fallback to default data that looks realistic
-    return {
-      overview: {
-        totalCourses: 0,
-        totalStudents: 0,
-        totalAssessments: 0,
-        totalSubmissions: 0
-      },
-      studentProgress: []
-    };
-  };
+  const [dashboardData, setDashboardData] = useState({
+    overview: {
+      totalCourses: 0,
+      totalStudents: 0,
+      totalQuizzes: 0,
+      totalSubmissions: 0
+    },
+    studentProgress: []
+  });
   
-  const [dashboardData, setDashboardData] = useState(getInitialDashboardData());
-  
-  console.log('🔥 REAL DASHBOARD v4.0 STARTING');
-  console.log('📊 Initial dashboard data loaded:', !!dashboardData.overview);
+  console.log('🔥 INSTRUCTOR DASHBOARD v5.0 STARTING');
   console.log('🔐 User available:', !!user);
   console.log('🎫 Token available:', !!token);
   const [studentSubmissions, setStudentSubmissions] = useState([]);
-  const [messages, setMessages] = useState([]);
+  const [adminNotifications, setAdminNotifications] = useState([]);
   const [studentActivity, setStudentActivity] = useState(null);
   const [reply, setReply] = useState('');
   const [grade, setGrade] = useState('');
@@ -277,8 +259,8 @@ const InstructorDashboard = () => {
   const [isTyping, setIsTyping] = useState(true);
   const [showSubmissionsList, setShowSubmissionsList] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
-  const [showMessagesList, setShowMessagesList] = useState(false);
-  const [selectedMessage, setSelectedMessage] = useState(null);
+  const [showNotificationsList, setShowNotificationsList] = useState(false);
+  const [selectedNotification, setSelectedNotification] = useState(null);
   const [showCoursesModal, setShowCoursesModal] = useState(false);
   const [showStudentsModal, setShowStudentsModal] = useState(false);
   const [showAssessmentsModal, setShowAssessmentsModal] = useState(false);
@@ -297,227 +279,105 @@ const InstructorDashboard = () => {
   // Track user activity
   const trackActivity = async (activityType, details = '') => {
     try {
-      const isOnline = navigator.onLine;
-      
-      if (isOnline) {
-        try {
-          // Try online activity tracking first (preserving existing behavior)
-          await fetch('/api/user/track-activity', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({
-              activity_type: activityType,
-              details: details
-            })
-          });
-          console.log('✅ Activity tracked online:', activityType);
-        } catch (onlineError) {
-          console.warn('⚠️ Online activity tracking failed, using offline queue:', onlineError);
-          // Fall back to offline activity tracking
-          await offlineIntegrationService.trackActivityOffline({
-            activity_type: activityType,
-            details: details,
-            timestamp: new Date().toISOString()
-          });
-        }
-      } else {
-        // Offline activity tracking
-        console.log('📴 Offline mode: Queueing activity for sync when online...');
-        await offlineIntegrationService.trackActivityOffline({
+      await fetch('/api/user/track-activity', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
           activity_type: activityType,
-          details: details,
-          timestamp: new Date().toISOString()
-        });
-      }
+          details: details
+        })
+      });
+      console.log('✅ Activity tracked:', activityType);
     } catch (err) {
       console.error('❌ Failed to track activity:', err);
     }
   };
 
-  // Fetch dashboard data - BACKGROUND UPDATE ONLY
+  // Fetch dashboard data
   const fetchDashboardData = async () => {
     try {
-      console.log('🔄 Background: Attempting to fetch fresh dashboard data...');
+      setLoading(true);
+      console.log('🔄 Fetching instructor dashboard data...');
       
-      // Try to load better data without affecting UI
-      try {
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Data fetch timeout')), 2000)
-        );
-        
-        const freshData = await Promise.race([
-          fetchOfflineData(),
-          timeoutPromise
-        ]);
-        
-        if (freshData && freshData.overview) {
-          console.log('✅ Background: Updated with fresh dashboard data');
-          setDashboardData(freshData);
+      const response = await fetch('/api/instructor/dashboard', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         }
-      } catch (fetchError) {
-        console.warn('⚠️ Background fetch failed, keeping default data:', fetchError);
-        // Default data is already set, so dashboard continues working
-      }
-      
-      // Background API update (optional, non-blocking)
-      if (navigator.onLine) {
-        console.log('🔄 Attempting optional background API update...');
-        try {
-          const response = await Promise.race([
-            fetch('/api/instructor/dashboard', {
-              method: 'GET',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-              }
-            }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('API timeout')), 2000))
-          ]);
+      });
 
-          if (response.ok) {
-            const data = await response.json();
-            console.log('✅ Background API update successful, updating data');
-            setDashboardData(data.data);
-            await offlineIntegrationService.storeInstructorDashboard(data.data);
-          }
-        } catch (bgError) {
-          console.log('📱 Background update failed (this is normal offline):', bgError.message);
-        }
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Dashboard data loaded successfully');
+        setDashboardData(data.data);
+      } else {
+        throw new Error('Failed to fetch dashboard data');
       }
     } catch (err) {
-      console.error('❌ Background dashboard fetch failed (no impact on UI):', err);
-      // Default data is already set, dashboard continues working normally
+      console.error('❌ Failed to fetch dashboard data:', err);
+      setError('Failed to load dashboard data');
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Get emergency fallback data (synchronous, no database calls)
-  const getEmergencyFallbackData = () => {
-    console.log('🔄 Using emergency fallback instructor data...');
-    return {
-      overview: {
-        totalCourses: 3,
-        totalStudents: 25,
-        totalAssessments: 8,
-        totalSubmissions: 12
-      },
-      studentProgress: [
-        {
-          courseName: 'JavaScript Fundamentals',
-          completionPercentage: 78,
-          enrolledStudents: 8,
-          completedStudents: 6
-        },
-        {
-          courseName: 'React Development',
-          completionPercentage: 65,
-          enrolledStudents: 10,
-          completedStudents: 7
-        },
-        {
-          courseName: 'Web Design Basics',
-          completionPercentage: 85,
-          enrolledStudents: 7,
-          completedStudents: 6
-        }
-      ]
-    };
-  };
 
-  // Helper function to fetch offline data - ALWAYS returns data
-  const fetchOfflineData = async () => {
-    console.log('📱 Attempting to get instructor dashboard from offline service...');
-    
-    // Debug: Check service status
-    try {
-      const serviceStatus = offlineIntegrationService.getServiceStatus?.();
-      console.log('🔍 Offline service status:', serviceStatus);
-    } catch (statusError) {
-      console.warn('⚠️ Could not get service status:', statusError);
-    }
-    
-    // First, try to get data from localStorage (fastest)
-    try {
-      const localStorageData = localStorage.getItem('instructor_dashboard_cache');
-      if (localStorageData) {
-        console.log('✅ Found instructor dashboard in localStorage cache');
-        return JSON.parse(localStorageData);
-      }
-    } catch (localError) {
-      console.warn('⚠️ localStorage cache failed:', localError);
-    }
-    
-    // Then try the offline service with a very short timeout
-    try {
-      const dataPromise = offlineIntegrationService.getInstructorDashboard();
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Offline service timeout')), 1000) // Reduced to 1 second
-      );
-      
-      const dashboard = await Promise.race([dataPromise, timeoutPromise]);
-      
-      console.log('📱 Offline instructor dashboard data loaded:', dashboard);
-      
-      // Store in localStorage for faster access next time
-      try {
-        localStorage.setItem('instructor_dashboard_cache', JSON.stringify(dashboard));
-      } catch (cacheError) {
-        console.warn('⚠️ Failed to cache dashboard data:', cacheError);
-      }
-      
-      return dashboard;
-    } catch (error) {
-      console.error('❌ Failed to load offline instructor dashboard data:', error);
-      // Return fallback data if everything fails
-      return getEmergencyFallbackData();
-    }
-  };
 
   // Fetch student activity for dynamic graph
   const fetchStudentActivity = async () => {
     try {
-      const isOnline = navigator.onLine;
-      let activityData = [];
-
-      if (isOnline) {
-        try {
-          // Try online API calls first (preserving existing behavior)
-          console.log('🌐 Online mode: Fetching student activity from API...');
-          
-          const response = await fetch('/api/instructor/student-activity?period=7', {
-            method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            }
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            activityData = data.data;
-            console.log('✅ Student activity data received');
-            
-            // Store activity data for offline use
-            await offlineIntegrationService.storeStudentActivity(activityData);
-          } else {
-            throw new Error('Failed to fetch student activity');
-          }
-        } catch (onlineError) {
-          console.warn('⚠️ Online student activity fetch failed, using offline:', onlineError);
-          // Fall back to offline data if online fails
-          activityData = await offlineIntegrationService.getStudentActivity();
+      console.log('🔄 Fetching student activity...');
+      
+      const response = await fetch('/api/instructor/student-activity?period=7', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         }
-      } else {
-        // Offline mode: use offline services
-        console.log('📴 Offline mode: Using offline student activity data...');
-        activityData = await offlineIntegrationService.getStudentActivity();
-      }
+      });
 
-      setStudentActivity(activityData);
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Student activity data received');
+        setStudentActivity(data.data);
+      } else {
+        throw new Error('Failed to fetch student activity');
+      }
     } catch (err) {
       console.error('❌ Failed to fetch student activity:', err);
+    }
+  };
+
+  // Fetch admin notifications
+  const fetchAdminNotifications = async () => {
+    console.log('🔔 Fetching admin notifications...');
+    
+    try {
+      const response = await fetch('/api/instructor/notifications', {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      console.log('🔔 Notifications response status:', response.status);
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('🔔 Notifications data received:', data);
+        
+        if (data.data && data.data.notifications) {
+          setAdminNotifications(data.data.notifications);
+        }
+      } else {
+        console.warn('⚠️ Failed to fetch notifications:', response.status);
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to fetch notifications:', error);
     }
   };
 
@@ -525,78 +385,59 @@ const InstructorDashboard = () => {
   const fetchStudentSubmissions = async () => {
     try {
       console.log('🔍 Starting to fetch student submissions...');
-      const isOnline = navigator.onLine;
       let allSubmissions = [];
 
-      if (isOnline) {
-        try {
-          // Try online API calls first (preserving existing behavior)
-          console.log('🌐 Online mode: Fetching student submissions from API...');
+      // Get all courses for this instructor
+      const coursesResponse = await fetch('/api/instructor/courses', {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      console.log('📚 Courses response status:', coursesResponse.status);
+
+      if (coursesResponse.ok) {
+        const coursesData = await coursesResponse.json();
+        console.log('📚 Courses data received:', coursesData);
+        
+        // For each course, fetch submissions
+        for (const course of coursesData.data.courses) {
+          console.log(`🔍 Fetching submissions for course: ${course.title} (${course._id})`);
           
-          // First get all courses for this instructor
-          const coursesResponse = await fetch('/api/instructor/courses', {
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            }
-          });
-
-          console.log('📚 Courses response status:', coursesResponse.status);
-
-          if (coursesResponse.ok) {
-            const coursesData = await coursesResponse.json();
-            console.log('📚 Courses data received:', coursesData);
-            
-            // For each course, fetch submissions
-            for (const course of coursesData.data.courses) {
-              console.log(`🔍 Fetching submissions for course: ${course.title} (${course._id})`);
-              
-              try {
-                const submissionsResponse = await fetch(`/api/courses/${course._id}/submissions`, {
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                  }
-                });
-
-                console.log(`📋 Submissions response for ${course.title}:`, submissionsResponse.status);
-
-                if (submissionsResponse.ok) {
-                  const submissionsData = await submissionsResponse.json();
-                  console.log(`📋 Submissions data for ${course.title}:`, submissionsData);
-                  
-                  // Add course info to each submission
-                  for (const submission of submissionsData.data.submissions) {
-                    console.log('📝 Adding submission:', submission);
-                    allSubmissions.push({
-                      ...submission,
-                      courseName: course.title,
-                      courseId: course._id
-                    });
-                  }
-                } else {
-                  const errorText = await submissionsResponse.text();
-                  console.error(`❌ Error response for ${course.title}:`, errorText);
-                }
-              } catch (submissionError) {
-                console.error(`❌ Error fetching submissions for course ${course._id}:`, submissionError);
+          try {
+            const submissionsResponse = await fetch(`/api/courses/${course._id}/submissions`, {
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
               }
+            });
+
+            console.log(`📋 Submissions response for ${course.title}:`, submissionsResponse.status);
+
+            if (submissionsResponse.ok) {
+              const submissionsData = await submissionsResponse.json();
+              console.log(`📋 Submissions data for ${course.title}:`, submissionsData);
+              
+              // Add course info to each submission
+              for (const submission of submissionsData.data.submissions) {
+                console.log('📝 Adding submission:', submission);
+                allSubmissions.push({
+                  ...submission,
+                  courseName: course.title,
+                  courseId: course._id
+                });
+              }
+            } else {
+              const errorText = await submissionsResponse.text();
+              console.error(`❌ Error response for ${course.title}:`, errorText);
             }
-            
-            // Store submissions for offline use
-            await offlineIntegrationService.storeStudentSubmissions(allSubmissions);
-          } else {
-            throw new Error('Failed to fetch courses');
+          } catch (submissionError) {
+            console.error(`❌ Error fetching submissions for course ${course._id}:`, submissionError);
           }
-        } catch (onlineError) {
-          console.warn('⚠️ Online submissions fetch failed, using offline:', onlineError);
-          // Fall back to offline data if online fails
-          allSubmissions = await offlineIntegrationService.getStudentSubmissions();
         }
       } else {
-        // Offline mode: use offline services
-        console.log('📴 Offline mode: Using offline student submissions data...');
-        allSubmissions = await offlineIntegrationService.getStudentSubmissions();
+        throw new Error('Failed to fetch courses');
       }
       
       console.log('📋 All submissions fetched:', allSubmissions);
@@ -610,44 +451,21 @@ const InstructorDashboard = () => {
   // Fetch instructor profile
   const fetchProfile = async () => {
     try {
-      const isOnline = navigator.onLine;
-      let profileData = null;
-
-      if (isOnline) {
-        try {
-          // Try online API calls first (preserving existing behavior)
-          console.log('🌐 Online mode: Fetching instructor profile from API...');
-          
-          const response = await fetch('/api/instructor/profile', {
-            method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            }
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            profileData = data.data.user;
-            console.log('✅ Instructor profile data received');
-            
-            // Store profile data for offline use
-            await offlineIntegrationService.storeInstructorProfile(profileData);
-          } else {
-            throw new Error('Failed to fetch profile');
-          }
-        } catch (onlineError) {
-          console.warn('⚠️ Online profile fetch failed, using offline:', onlineError);
-          // Fall back to offline data if online fails
-          profileData = await offlineIntegrationService.getInstructorProfile();
+      console.log('🔄 Fetching instructor profile...');
+      
+      const response = await fetch('/api/instructor/profile', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         }
-      } else {
-        // Offline mode: use offline services
-        console.log('📴 Offline mode: Using offline instructor profile data...');
-        profileData = await offlineIntegrationService.getInstructorProfile();
-      }
+      });
 
-      if (profileData) {
+      if (response.ok) {
+        const data = await response.json();
+        const profileData = data.data.user;
+        console.log('✅ Instructor profile data received');
+        
         // Set profile data for editing
         setProfileData({
           firstName: profileData.firstName || '',
@@ -656,6 +474,8 @@ const InstructorDashboard = () => {
           phone_number: profileData.phone_number || '',
           language_preference: profileData.language_preference || ''
         });
+      } else {
+        throw new Error('Failed to fetch profile');
       }
     } catch (err) {
       console.error('❌ Failed to fetch profile:', err);
@@ -666,71 +486,62 @@ const InstructorDashboard = () => {
   const updateProfile = async () => {
     try {
       setProfileLoading(true);
-      const isOnline = navigator.onLine;
-      let success = false;
+      
+      console.log('🔄 Updating instructor profile...');
+      
+      const response = await fetch('/api/instructor/profile', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(profileData)
+      });
 
-      if (isOnline) {
-        try {
-          // Try online API calls first (preserving existing behavior)
-          console.log('🌐 Online mode: Updating instructor profile...');
-          
-          const response = await fetch('/api/instructor/profile', {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify(profileData)
-          });
-
-          if (response.ok) {
-            success = true;
-            console.log('✅ Online profile update successful');
-            setSuccess('Profile updated successfully');
-            setShowProfileModal(false);
-            
-            // Update stored profile data
-            await offlineIntegrationService.storeInstructorProfile(profileData);
-          } else {
-            throw new Error('Failed to update profile');
-          }
-        } catch (onlineError) {
-          console.warn('⚠️ Online profile update failed, using offline:', onlineError);
-          // Fall back to offline profile update
-          const result = await offlineIntegrationService.updateInstructorProfileOffline(profileData);
-          
-          if (result.success) {
-            success = true;
-            console.log('✅ Offline profile update successful');
-            setSuccess('Profile updated offline! Changes will sync when online.');
-            setShowProfileModal(false);
-          } else {
-            throw new Error('Failed to update profile offline');
-          }
-        }
-      } else {
-        // Offline profile update
-        console.log('📴 Offline mode: Updating instructor profile offline...');
-        const result = await offlineIntegrationService.updateInstructorProfileOffline(profileData);
+      if (response.ok) {
+        console.log('✅ Profile update successful');
+        setSuccess('Profile updated successfully');
+        setShowProfileModal(false);
         
-        if (result.success) {
-          success = true;
-          console.log('✅ Offline profile update successful');
-          setSuccess('Profile updated offline! Changes will sync when online.');
-          setShowProfileModal(false);
-        } else {
-          throw new Error('Failed to update profile offline');
-        }
-      }
-
-      if (success) {
+        // Update stored profile data
         setTimeout(() => setSuccess(''), 3000);
+      } else {
+        throw new Error('Failed to update profile');
       }
     } catch (err) {
       setError(err.message || 'Failed to update profile');
       setTimeout(() => setError(''), 3000);
     } finally {
       setProfileLoading(false);
+    }
+  };
+
+  // Mark notification as read
+  const markNotificationAsRead = async (notificationId) => {
+    try {
+      const response = await fetch(`/api/instructor/notifications/${notificationId}/read`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        // Update local state
+        setAdminNotifications(prev => 
+          prev.map(notification => 
+            notification._id === notificationId 
+              ? { ...notification, isRead: true }
+              : notification
+          )
+        );
+        console.log('✅ Notification marked as read');
+      } else {
+        throw new Error('Failed to mark notification as read');
+      }
+    } catch (err) {
+      console.error('❌ Failed to mark notification as read:', err);
     }
   };
 
@@ -767,71 +578,17 @@ const InstructorDashboard = () => {
     }
   };
 
-  // SMART DATA LOADING - REAL DATA WITH OFFLINE SUPPORT
+  // Load dashboard data
   useEffect(() => {
-    console.log('🔥 v4.0 SMART LOADING - REAL DATA PREFERRED');
+    console.log('🔥 INSTRUCTOR DASHBOARD v5.0 - ONLINE ONLY');
     
-    // Dashboard already rendered with initial data, now try to get better data
-    const loadRealData = async () => {
-      try {
-        // First priority: Try to get fresh data if online and authenticated
-        if (navigator.onLine && (token || user)) {
-          console.log('🌐 Online: Attempting to fetch real instructor data...');
-          try {
-            const response = await fetch('/api/instructor/dashboard', {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-              }
-            });
-            
-            if (response.ok) {
-              const data = await response.json();
-              if (data.success && data.data) {
-                console.log('✅ Real instructor data loaded from API');
-                setDashboardData(data.data);
-                // Cache for offline use
-                localStorage.setItem('instructor_dashboard_cache', JSON.stringify(data.data));
-                return;
-              }
-            }
-          } catch (apiError) {
-            console.log('⚠️ API failed, trying offline service:', apiError.message);
-          }
-        }
-        
-        // Second priority: Try offline service for real cached data
-        try {
-          const offlineData = await offlineIntegrationService.getInstructorDashboard();
-          if (offlineData && offlineData.overview && offlineData.overview.totalCourses > 0) {
-            console.log('✅ Real cached data loaded from offline service');
-            setDashboardData(offlineData);
-            return;
-          }
-        } catch (offlineError) {
-          console.log('⚠️ Offline service failed:', offlineError.message);
-        }
-        
-        // If we get here, we're using the initial default data (which is fine)
-        console.log('📊 Using initial dashboard data (cached or defaults)');
-        
-      } catch (error) {
-        console.log('⚠️ Data loading failed, dashboard still works with initial data:', error.message);
-      }
-    };
-    
-    // Load real data in background without blocking UI
-    setTimeout(loadRealData, 100);
-    
-    // Also try to load other dashboard components
-    setTimeout(() => {
-      if (navigator.onLine && token) {
-        fetchStudentActivity();
-        fetchStudentSubmissions();
-        fetchProfile();
-      }
-    }, 200);
-    
+    if (token) {
+      fetchDashboardData();
+      fetchStudentActivity();
+      fetchStudentSubmissions();
+      fetchAdminNotifications();
+      fetchProfile();
+    }
   }, [user, token]); // Re-run when user or token changes
 
   // Typing animation effect for welcome message
@@ -853,10 +610,8 @@ const InstructorDashboard = () => {
     return () => clearInterval(typeInterval);
   }, [welcomeMessage]);
 
-  // SMART RENDER v4.0 - REAL DASHBOARD WITH OFFLINE SUPPORT
-  console.log('🔥 v4.0 REAL DASHBOARD RENDERING NOW');
-
-  // DASHBOARD ALWAYS RENDERS - REAL DATA WHEN AVAILABLE, DEFAULTS WHEN NEEDED
+  // INSTRUCTOR DASHBOARD v5.0 - ONLINE ONLY
+  console.log('🔥 INSTRUCTOR DASHBOARD v5.0 RENDERING NOW');
 
   // Use real-time student activity data for the graph (now in percentages)
   const progressData = studentActivity?.dailyActivity?.map(day => ({
@@ -883,26 +638,12 @@ const InstructorDashboard = () => {
         
         <Title>
           <span>
-            {welcomeText || `Welcome ${user?.firstName || 'Instructor'}!`}
+            {welcomeText || `${t('instructor.dashboard')} ${user?.firstName || 'Instructor'}!`}
             {isTyping && <span style={{ animation: 'blink 1s infinite' }}>|</span>}
           </span>
         </Title>
         
-        {!navigator.onLine && (
-          <div style={{ 
-            background: '#fff3cd', 
-            color: '#856404', 
-            padding: '1rem', 
-            borderRadius: '8px', 
-            marginBottom: '1rem',
-            textAlign: 'center',
-            border: '1px solid #ffeaa7'
-          }}>
-            📴 Offline Mode - Showing {dashboardData?.overview?.totalCourses > 0 ? 'cached' : 'default'} data
-          </div>
-        )}
-        
-        {navigator.onLine && !token && (
+        {loading && (
           <div style={{ 
             background: '#d1ecf1', 
             color: '#0c5460', 
@@ -912,30 +653,26 @@ const InstructorDashboard = () => {
             textAlign: 'center',
             border: '1px solid #bee5eb'
           }}>
-            🔄 Loading your instructor data...
+            🔄 {t('loading')} {t('instructor.dashboard').toLowerCase()}...
           </div>
         )}
 
         <OverviewGrid>
           <OverviewCard onClick={() => { setShowCoursesModal(true); trackActivity('courses_view', 'Viewed courses overview'); }} style={{ cursor: 'pointer' }}>
             <Stat>{dashboardData?.overview?.totalCourses || 0}</Stat>
-            <StatLabel>Courses</StatLabel>
+            <StatLabel>{t('instructor.totalCourses')}</StatLabel>
           </OverviewCard>
           <OverviewCard onClick={() => { setShowStudentsModal(true); trackActivity('students_view', 'Viewed students overview'); }} style={{ cursor: 'pointer' }}>
             <Stat>{dashboardData?.overview?.totalStudents || 0}</Stat>
-            <StatLabel>Students</StatLabel>
+            <StatLabel>{t('instructor.totalStudents')}</StatLabel>
           </OverviewCard>
-          <OverviewCard onClick={() => { setShowAssessmentsModal(true); trackActivity('assessments_view', 'Viewed assessments overview'); }} style={{ cursor: 'pointer' }}>
-            <Stat>{dashboardData?.overview?.totalAssessments || 0}</Stat>
-            <StatLabel>Assessments</StatLabel>
-          </OverviewCard>
-          <OverviewCard onClick={() => { setShowSubmissionsList(true); trackActivity('submissions_view', 'Viewed submissions'); }} style={{ cursor: 'pointer' }}>
-            <Stat>{dashboardData?.overview?.totalSubmissions || studentSubmissions.length}</Stat>
-            <StatLabel>Submissions</StatLabel>
+                        <OverviewCard onClick={() => { setShowAssessmentsModal(true); trackActivity('quizzes_view', 'Viewed quizzes overview'); }} style={{ cursor: 'pointer' }}>
+                <Stat>{dashboardData?.overview?.totalQuizzes || 0}</Stat>
+                <StatLabel>Total Quizzes</StatLabel>
           </OverviewCard>
         </OverviewGrid>
         
-        {dashboardData?.overview?.totalCourses === 0 && (
+        {dashboardData?.overview?.totalCourses === 0 && !loading && (
           <div style={{ 
             background: '#f8f9fa', 
             padding: '1.5rem', 
@@ -944,20 +681,17 @@ const InstructorDashboard = () => {
             marginBottom: '1rem',
             border: '1px solid #dee2e6'
           }}>
-            <h4 style={{ color: '#6c757d', marginTop: 0 }}>Getting Started</h4>
+            <h4 style={{ color: '#6c757d', marginTop: 0 }}>{t('instructor.dashboard')}</h4>
             <p style={{ color: '#6c757d', marginBottom: '1rem' }}>
-              {navigator.onLine 
-                ? "Your instructor data is loading. If you're new, create your first course to get started!"
-                : "No cached data available. Connect to the internet to load your instructor data."
-              }
+              {t('instructor.dashboard')} {t('loading')}. {t('instructor.dashboard')}!
             </p>
             <QuickAction onClick={() => navigate('/manage-courses')}>
-              Create Your First Course
+              {t('instructor.dashboard')}
             </QuickAction>
           </div>
         )}
 
-        <SectionTitle>Daily Student Activity & Progress</SectionTitle>
+        <SectionTitle>{t('instructor.studentActivity')}</SectionTitle>
         <ResponsiveContainer width="100%" height={350}>
           <BarChart data={progressData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
@@ -991,7 +725,7 @@ const InstructorDashboard = () => {
           </BarChart>
         </ResponsiveContainer>
         
-        <SectionTitle>Course Progress Overview</SectionTitle>
+        <SectionTitle>{t('instructor.coursePerformance')}</SectionTitle>
         {studentProgress.length > 0 ? (
           <StudentList>
             {studentProgress.map((course, idx) => (
@@ -1015,39 +749,23 @@ const InstructorDashboard = () => {
           }}>
             <p>No course progress data available</p>
             <p style={{ fontSize: '0.9rem' }}>
-              {navigator.onLine 
-                ? "Data is loading or you haven't created any courses yet"
-                : "Connect to the internet to load your course data"
-              }
+              Data is loading or you haven't created any courses yet
             </p>
           </div>
         )}
         
         <SectionTitle>Quick Actions</SectionTitle>
                   <QuickAction onClick={() => { trackActivity('create_course_click', 'Clicked create course'); navigate('/instructor/courses/create'); }}>Create Course</QuickAction>
-          <QuickAction onClick={() => { trackActivity('create_assessment_click', 'Clicked create assessment'); navigate('/instructor/assessments/create'); }}>Create Assessment</QuickAction>
+                      <QuickAction onClick={() => { trackActivity('create_quiz_click', 'Clicked create quiz'); navigate('/instructor/quizzes'); }}>Create Quiz</QuickAction>
         
         <SectionTitle>Recent Activity</SectionTitle>
         <DashboardGrid>
-          <Card onClick={() => {
-            console.log('🎯 Opening submissions modal, current submissions:', studentSubmissions);
-            console.log('📊 Submissions count:', studentSubmissions.length);
-            setShowSubmissionsList(true);
-          }} style={{ cursor: 'pointer' }}>
-            <CardTitle>New Submissions</CardTitle>
-                            <p>{dashboardData?.overview?.totalSubmissions || studentSubmissions.length} submissions to review.</p>
-            {studentActivity?.summary && (
-              <p style={{ color: '#28a745', fontSize: '0.9rem', marginTop: '0.5rem' }}>
-                Total progress made this week: {studentActivity.summary.totalProgressMade}
-              </p>
-            )}
-          </Card>
-          <Card onClick={() => setShowMessagesList(true)} style={{ cursor: 'pointer' }}>
-            <CardTitle>Active Students</CardTitle>
-            <p>{studentActivity?.summary?.totalActiveUsers || 0} active students this week.</p>
-            {studentActivity?.summary && (
+          <Card onClick={() => setShowNotificationsList(true)} style={{ cursor: 'pointer' }}>
+            <CardTitle>New Messages</CardTitle>
+            <p>{adminNotifications.filter(n => !n.isRead).length} unread messages from admin.</p>
+            {adminNotifications.length > 0 && (
               <p style={{ color: '#007BFF', fontSize: '0.9rem', marginTop: '0.5rem' }}>
-                Average progress: {Math.round(studentActivity.summary.averageProgress || 0)}%
+                Latest: {adminNotifications[0]?.title || 'No messages'}
               </p>
             )}
           </Card>
@@ -1188,41 +906,53 @@ const InstructorDashboard = () => {
           </ModalOverlay>
         )}
 
-        {showMessagesList && (
+        {showNotificationsList && (
           <ModalOverlay>
             <ModalContent>
-              <ModalTitle>All Student Messages</ModalTitle>
+              <ModalTitle>Admin Messages</ModalTitle>
               <ul style={{ listStyle: 'none', padding: 0 }}>
-                {messages.map((msg, idx) => (
-                  <li key={idx} style={{ marginBottom: 12, borderBottom: '1px solid #eee', paddingBottom: 8 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span><b>{msg.from}</b>: {msg.message}</span>
-                      <ActionButton onClick={() => { setSelectedMessage(msg); setShowMessagesList(false); }}>Reply</ActionButton>
-                    </div>
-                    <div style={{ fontSize: '0.95rem', color: '#888' }}>Sent: {msg.sentAt}</div>
+                {adminNotifications.length > 0 ? (
+                  adminNotifications.map((notification, idx) => (
+                    <li key={idx} style={{ 
+                      marginBottom: 12, 
+                      borderBottom: '1px solid #eee', 
+                      paddingBottom: 8,
+                      backgroundColor: notification.isRead ? '#f8f9fa' : '#fff',
+                      padding: '12px',
+                      borderRadius: '8px',
+                      border: notification.isRead ? '1px solid #e9ecef' : '1px solid #007bff'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 'bold', color: notification.isRead ? '#6c757d' : '#007bff' }}>
+                            {notification.title}
+                          </div>
+                          <div style={{ marginTop: '4px', color: '#495057' }}>
+                            {notification.message}
+                          </div>
+                          <div style={{ fontSize: '0.85rem', color: '#6c757d', marginTop: '4px' }}>
+                            {new Date(notification.createdAt).toLocaleString()}
+                          </div>
+                        </div>
+                        {!notification.isRead && (
+                          <ActionButton 
+                            onClick={() => markNotificationAsRead(notification._id)}
+                            style={{ marginLeft: '12px' }}
+                          >
+                            Mark Read
+                          </ActionButton>
+                        )}
+                      </div>
+                    </li>
+                  ))
+                ) : (
+                  <li style={{ textAlign: 'center', color: '#6c757d', padding: '20px' }}>
+                    No messages from admin yet.
                   </li>
-                ))}
+                )}
               </ul>
               <StickyFooter>
-                <ActionButton color="#888" onClick={() => setShowMessagesList(false)}>Close</ActionButton>
-              </StickyFooter>
-            </ModalContent>
-          </ModalOverlay>
-        )}
-
-        {selectedMessage && (
-          <ModalOverlay>
-            <ModalContent>
-              <ModalTitle>Message from {selectedMessage.from}</ModalTitle>
-              <div style={{ marginBottom: '1rem' }}>{selectedMessage.message}</div>
-              <Input
-                placeholder="Type your reply..."
-                value={reply}
-                onChange={e => setReply(e.target.value)}
-              />
-              <StickyFooter>
-                <ActionButton onClick={() => { setReply(''); setSelectedMessage(null); }}>Send Reply</ActionButton>
-                <ActionButton color="#888" onClick={() => setSelectedMessage(null)}>Close</ActionButton>
+                <ActionButton color="#888" onClick={() => setShowNotificationsList(false)}>Close</ActionButton>
               </StickyFooter>
             </ModalContent>
           </ModalOverlay>
@@ -1263,10 +993,9 @@ const InstructorDashboard = () => {
         {showAssessmentsModal && (
           <ModalOverlay>
             <ModalContent>
-              <ModalTitle>Assessment Statistics</ModalTitle>
-              <div><b>Total Assessments:</b> {dashboardData?.overview?.totalAssessments || 0}</div>
-              <div><b>Published Assessments:</b> {dashboardData?.overview?.publishedAssessments || 0}</div>
-              <div><b>Submissions:</b> {dashboardData?.overview?.totalSubmissions || studentSubmissions.length}</div>
+              <ModalTitle>Quiz Statistics</ModalTitle>
+              <div><b>Total Quizzes:</b> {dashboardData?.overview?.totalQuizzes || 0}</div>
+              <div><b>Published Quizzes:</b> {dashboardData?.overview?.publishedQuizzes || 0}</div>
               <StickyFooter>
                 <ActionButton color="#888" onClick={() => setShowAssessmentsModal(false)}>Close</ActionButton>
               </StickyFooter>

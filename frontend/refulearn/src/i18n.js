@@ -14,19 +14,18 @@ const resources = {
 };
 
 i18n
-  .use(LanguageDetector)
   .use(initReactI18next)
   .init({
     resources,
     fallbackLng: 'en',
+    lng: 'en', // Set default language
     ns: ['common'],
     defaultNS: 'common',
     interpolation: {
       escapeValue: false,
     },
-    detection: {
-      order: ['localStorage', 'navigator'],
-      caches: ['localStorage'],
+    react: {
+      useSuspense: false,
     },
   });
 

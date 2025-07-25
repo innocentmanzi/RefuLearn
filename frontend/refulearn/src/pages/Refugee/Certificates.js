@@ -2,8 +2,11 @@ import React, { useState, useRef, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import styled from 'styled-components';
 import { FaLinkedin, FaFacebook, FaTwitter, FaInstagram } from 'react-icons/fa';
+import { useTranslation } from 'react-i18next';
+
 import ContentWrapper from '../../components/ContentWrapper';
 import offlineIntegrationService from '../../services/offlineIntegrationService';
+import preloader from '../../utils/preloader';
 
 const Container = styled.div`
   padding: 2rem;
@@ -125,6 +128,7 @@ const shareOptions = [
 ];
 
 const Certificates = () => {
+  const { t } = useTranslation();
   const [certificates, setCertificates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -133,7 +137,7 @@ const Certificates = () => {
   const buttonRefs = useRef({});
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
 
-  // Fetch user certificates on component mount
+  // Fetch user certificates on component mount with caching
   useEffect(() => {
     const fetchCertificates = async () => {
       try {
@@ -152,55 +156,85 @@ const Certificates = () => {
           return;
         }
         
+        // Check for preloaded data first (fastest)
+        const preloadedData = preloader.getPreloadedData('certificates');
+        if (preloadedData && preloadedData.timestamp) {
+          const now = Date.now();
+          if ((now - preloadedData.timestamp) < 2 * 60 * 1000) {
+            console.log('🚀 Using preloaded certificates data');
+            if (preloadedData.certificates) {
+              setCertificates(preloadedData.certificates.data?.certificates || []);
+              setLoading(false);
+              return;
+            }
+          }
+        }
+        
+        // Check for cached data (5 minutes cache)
+        const cachedCertificates = localStorage.getItem('certificates_cache');
+        const cacheTime = localStorage.getItem('certificates_cache_time');
+        const now = Date.now();
+        
+        if (cachedCertificates && cacheTime && (now - parseInt(cacheTime)) < 5 * 60 * 1000) {
+          console.log('📱 Using cached certificates data');
+          const parsedCertificates = JSON.parse(cachedCertificates);
+          setCertificates(parsedCertificates);
+          setLoading(false);
+          return;
+        }
+        
         let certificatesData = [];
 
-        // Step 1: Get user's enrolled courses to check completion status
-        console.log('🔄 === STEP 1: FETCHING ENROLLED COURSES ===');
+        // Step 1: Get user's enrolled courses and certificates in parallel
+        console.log('🔄 === STEP 1: FETCHING DATA IN PARALLEL ===');
         let enrolledCourses = [];
+        
         try {
-          console.log('📡 Making API call to /api/courses/enrolled/courses...');
-          const coursesResponse = await fetch('/api/courses/enrolled/courses', {
+          // Fetch enrolled courses and certificates simultaneously
+          const [coursesResponse, certificatesResponse] = await Promise.all([
+            fetch('/api/courses/enrolled/courses', {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            }),
+            fetch('/api/certificates/user?limit=100', {
             headers: {
               'Authorization': `Bearer ${token}`,
               'Content-Type': 'application/json'
             }
-          });
+            })
+          ]);
 
-          console.log('📡 Enrolled courses API response status:', coursesResponse.status);
+          console.log('📡 Parallel API responses status:', {
+            courses: coursesResponse.status,
+            certificates: certificatesResponse.status
+          });
           
+          // Process enrolled courses
           if (coursesResponse.ok) {
             const coursesData = await coursesResponse.json();
-            console.log('📚 Enrolled courses API response:', coursesData);
-            
             if (coursesData.success && coursesData.data && coursesData.data.courses) {
               enrolledCourses = coursesData.data.courses;
               console.log('📚 Found enrolled courses:', enrolledCourses.length);
-              console.log('📋 Enrolled courses list:');
-              enrolledCourses.forEach((course, index) => {
-                console.log(`  ${index + 1}. "${course.title}" (ID: ${course._id})`);
-              });
-            } else {
-              console.warn('⚠️ Invalid enrolled courses response structure:', coursesData);
             }
-          } else {
-            console.error('❌ Failed to fetch enrolled courses, status:', coursesResponse.status);
-            const errorText = await coursesResponse.text();
-            console.error('❌ Error response:', errorText);
           }
         } catch (error) {
-          console.error('❌ Exception while fetching enrolled courses:', error);
+          console.error('❌ Error fetching enrolled courses and certificates:', error);
+          setError('Failed to fetch course data');
+          setLoading(false);
+          return;
         }
 
-        // Step 2: Check completion status for each enrolled course
-        console.log('🔄 === STEP 2: CHECKING COURSE COMPLETION STATUS ===');
+        // Step 2: Check completion status for all enrolled courses in parallel
+        console.log('🔄 === STEP 2: CHECKING COURSE COMPLETION STATUS IN PARALLEL ===');
         const completedCourses = [];
         
         if (enrolledCourses.length === 0) {
           console.warn('⚠️ No enrolled courses found - cannot check completion status');
-        }
-        
-        for (const course of enrolledCourses) {
-                          console.log(`🔍 Checking completion for course: "${course.title}" (ID: ${course._id})`);
+        } else {
+          // Fetch progress for all courses in parallel
+          const progressPromises = enrolledCourses.map(async (course) => {
           try {
             const progressResponse = await fetch(`/api/courses/${course._id}/progress`, {
               headers: {
@@ -209,66 +243,34 @@ const Certificates = () => {
               }
             });
 
-            console.log(`📡 Progress API response for "${course.title}": status ${progressResponse.status}`);
-
             if (progressResponse.ok) {
               const progressData = await progressResponse.json();
-              console.log(`📊 Progress data for "${course.title}":`, progressData);
-              
               if (progressData.success && progressData.data) {
                 const progressPercentage = progressData.data.progressPercentage || 0;
-                console.log(`📈 Course "${course.title}": ${progressPercentage}% completed`);
-                
-                // SPECIAL CASE: JavaScript course should be 100% completed
-                const isJavaScriptCourse = course.title.toLowerCase().includes('javascript');
-                console.log(`🔍 Is JavaScript course: ${isJavaScriptCourse}`);
-                
-                if (isJavaScriptCourse) {
-                  console.log(`🎯 JavaScript course detected - forcing completion status`);
-                  completedCourses.push({
-                    _id: course._id,
-                    title: course.title,
-                    progressPercentage: 100,
-                    moduleCompletionRate: 100
-                  });
-                  console.log(`✅ JAVASCRIPT COURSE FORCED COMPLETED: "${course.title}"`);
-                } else {
-                  // For other courses, check normal completion
-                  console.log(`🔍 Checking completion for non-JavaScript course "${course.title}":`, {
-                    progressPercentage,
-                    completedModules: progressData.data.completedModules,
-                    totalModules: progressData.data.totalModules,
-                    hasModuleData: !!(progressData.data.completedModules && progressData.data.totalModules)
-                  });
+                  const isCompleted = progressPercentage >= 90;
                   
-                  if (progressPercentage >= 100 && progressData.data.completedModules && progressData.data.totalModules) {
-                    const moduleCompletionRate = (progressData.data.completedModules / progressData.data.totalModules) * 100;
-                    console.log(`📊 "${course.title}" module completion rate: ${moduleCompletionRate}%`);
-                    
-                    if (moduleCompletionRate >= 100) {
-                      completedCourses.push({
+                  if (isCompleted) {
+                    return {
                         _id: course._id,
                         title: course.title,
                         progressPercentage,
-                        moduleCompletionRate
-                      });
-                      console.log(`✅ COURSE COMPLETED: "${course.title}" is genuinely 100% completed!`);
-                    } else {
-                      console.log(`❌ COURSE INCOMPLETE: "${course.title}" modules not fully completed`);
-                    }
-                  } else {
-                    console.log(`❌ COURSE INCOMPLETE: "${course.title}" is still in progress (${progressPercentage}%)`);
+                      moduleCompletionRate: progressPercentage
+                    };
                   }
                 }
-              } else {
-                console.warn(`⚠️ Invalid progress data for "${course.title}":`, progressData);
               }
-            } else {
-              console.error(`❌ Failed to fetch progress for "${course.title}": status ${progressResponse.status}`);
+              return null;
+            } catch (error) {
+              console.error(`❌ Error checking progress for ${course.title}:`, error);
+              return null;
             }
-          } catch (error) {
-            console.error(`❌ Exception while checking progress for ${course.title}:`, error);
-          }
+          });
+
+          // Wait for all progress checks to complete
+          const progressResults = await Promise.all(progressPromises);
+          completedCourses.push(...progressResults.filter(course => course !== null));
+          
+          console.log(`✅ Found ${completedCourses.length} completed courses out of ${enrolledCourses.length} enrolled`);
         }
 
         console.log(`🎯 Found ${completedCourses.length} completed courses out of ${enrolledCourses.length} enrolled`);
@@ -281,7 +283,7 @@ const Certificates = () => {
         console.log('🔄 === STEP 3: FETCHING CERTIFICATES FROM BACKEND ===');
         try {
           console.log('📡 Making API call to /api/certificates/user...');
-          const certificatesResponse = await fetch('/api/certificates/user', {
+          const certificatesResponse = await fetch('/api/certificates/user?limit=100', {
             headers: {
               'Authorization': `Bearer ${token}`,
               'Content-Type': 'application/json'
@@ -300,6 +302,22 @@ const Certificates = () => {
               console.log(`🔍 Found ${backendCertificates.length} certificates in backend`);
               console.log('📋 Raw certificates from backend:', backendCertificates);
               
+              // Debug: Show detailed certificate information
+              console.log('🔍 === DETAILED CERTIFICATE ANALYSIS ===');
+              backendCertificates.forEach((cert, index) => {
+                console.log(`Certificate ${index + 1}:`, {
+                  id: cert._id,
+                  courseTitle: cert.courseTitle,
+                  courseId: cert.course,
+                  userId: cert.user,
+                  issuedAt: cert.issuedAt,
+                  certificateNumber: cert.certificateNumber,
+                  grade: cert.grade,
+                  isVerified: cert.isVerified,
+                  issuedBy: cert.issuedBy
+                });
+              });
+              
               if (backendCertificates.length === 0) {
                 console.warn('⚠️ No certificates found in backend database');
               }
@@ -316,61 +334,24 @@ const Certificates = () => {
                  });
                });
 
-               // STRICT VALIDATION: Only show certificates for 100% completed courses
-               console.log('🔒 STRICT VALIDATION MODE: Only showing certificates for 100% completed courses');
-               console.log('📊 Completed courses (100% modules):', completedCourses.map(c => ({ 
-                 id: c._id, 
-                 title: c.title, 
-                 progress: c.progressPercentage,
-                 moduleRate: c.moduleCompletionRate 
-               })));
+               // SHOW ALL CERTIFICATES: Display all certificates from database
+               console.log('🎓 SHOWING ALL CERTIFICATES: Displaying all certificates from database');
+               console.log('📊 Backend certificates found:', backendCertificates.length);
                
-               // Log all certificates for comparison
+               // Log all certificates for debugging
                console.log('📋 All backend certificates:');
                backendCertificates.forEach((cert, index) => {
                  console.log(`  ${index + 1}. Certificate: "${cert.courseTitle}" (courseId: ${cert.course})`);
                });
                
-               const validCertificates = [];
+               // Show all certificates without strict validation
+               certificatesData = backendCertificates.map(certificate => ({
+                 ...certificate,
+                 courseTitle: certificate.courseTitle || 'Unknown Course',
+                 courseName: certificate.courseTitle || 'Unknown Course'
+               }));
                
-               // ULTRA-STRICT VALIDATION: Only allow JavaScript certificates for now
-               console.log('🔒 ULTRA-STRICT MODE: Only allowing JavaScript course certificates');
-               
-               for (const certificate of backendCertificates) {
-                 console.log(`🔍 Examining certificate: "${certificate.courseTitle}" (courseId: ${certificate.course})`);
-                 
-                 // Check 1: Must be for a genuinely completed course
-                 const correspondingCompletedCourse = completedCourses.find(course => {
-                   const idMatch = course._id === certificate.course;
-                   console.log(`  🔍 ID Match check: "${course._id}" === "${certificate.course}": ${idMatch}`);
-                   return idMatch;
-                 });
-                 
-                                   // Check 2: Must be for JavaScript course specifically (since that's the only one truly completed)
-                  const isJavaScriptCourse = certificate.courseTitle && 
-                    certificate.courseTitle.toLowerCase().includes('javascript');
-                  
-                  console.log(`  📝 Certificate title check: "${certificate.courseTitle}" contains 'javascript': ${isJavaScriptCourse}`);
-                  console.log(`  ✅ Has corresponding completed course: ${!!correspondingCompletedCourse}`);
-                  
-                  // STRICT: Only allow JavaScript certificates from completed courses
-                  if (correspondingCompletedCourse && isJavaScriptCourse) {
-                   validCertificates.push({
-                     ...certificate,
-                     courseTitle: certificate.courseTitle || correspondingCompletedCourse.title,
-                     courseName: certificate.courseTitle || correspondingCompletedCourse.title
-                   });
-                   console.log(`✅ VALID: Certificate "${certificate.courseTitle}" ACCEPTED (JavaScript course, 100% completed)`);
-                 } else {
-                   console.log(`❌ REJECTED: Certificate "${certificate.courseTitle}" BLOCKED`);
-                   console.log(`  - Reason: ${!correspondingCompletedCourse ? 'Course not 100% completed' : 'Not JavaScript course'}`);
-                   console.log(`  - Course completed: ${!!correspondingCompletedCourse}`);
-                   console.log(`  - Is JavaScript: ${isJavaScriptCourse}`);
-                 }
-               }
-               
-               certificatesData = validCertificates;
-               console.log(`🎯 FINAL RESULT: ${validCertificates.length} valid certificates after strict filtering`);
+               console.log(`🎯 FINAL RESULT: ${certificatesData.length} certificates to display`);
               
             } else {
               console.log('ℹ️ No certificates found in backend response');
@@ -405,104 +386,13 @@ const Certificates = () => {
           certificatesData = [];
         }
 
-        // If no real certificates found but we have completed courses, auto-generate them
-        if (certificatesData.length === 0 && completedCourses.length > 0) {
-          console.log('🔧 No certificates in backend yet - attempting to generate certificates for completed courses...');
-          
-          for (const completedCourse of completedCourses) {
-            try {
-              console.log(`📜 Auto-generating certificate for "${completedCourse.title}"...`);
-              
-              const generateResponse = await fetch('/api/certificates/generate', {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${token}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  courseId: completedCourse._id,
-                  courseTitle: completedCourse.title
-                })
-              });
-              
-              const generateResult = await generateResponse.json();
-              
-                             console.log(`📡 Generate response status: ${generateResponse.status}`);
-               console.log(`📡 Generate response body:`, generateResult);
-               
-               if (generateResponse.ok && generateResult.success) {
-                 console.log(`✅ Auto-generated certificate for "${completedCourse.title}"`);
-                 
-                 // Add the generated certificate to our list
-                 certificatesData.push({
-                   _id: generateResult.data.certificate._id,
-                   courseTitle: completedCourse.title,
-                   courseName: completedCourse.title,
-                   course: completedCourse._id,
-                   user: 'string_string',
-                   issuedAt: new Date().toISOString(),
-                   certificateNumber: generateResult.data.certificate.certificateNumber || `CERT-${Date.now()}`,
-                   isVerified: true,
-                   issuedBy: 'RefuLearn Platform'
-                 });
-               } else if (generateResponse.status === 400 && generateResult.message && generateResult.message.includes('already exists')) {
-                 console.log(`ℹ️ Certificate already exists for "${completedCourse.title}" - that's OK, will try to fetch it`);
-                 
-                 // If certificate already exists, we should fetch it instead
-                 try {
-                   console.log('🔄 Re-fetching certificates since one already exists...');
-                   const refetchResponse = await fetch('/api/certificates/user', {
-                     headers: {
-                       'Authorization': `Bearer ${token}`,
-                       'Content-Type': 'application/json'
-                     }
-                   });
-                   
-                   if (refetchResponse.ok) {
-                     const refetchData = await refetchResponse.json();
-                     if (refetchData.success && refetchData.data && refetchData.data.certificates) {
-                       const existingCerts = refetchData.data.certificates;
-                       console.log('📜 Refetched certificates:', existingCerts);
-                       
-                       // Add any certificates that match our completed courses
-                       for (const cert of existingCerts) {
-                         const matchingCourse = completedCourses.find(course => 
-                           course._id === cert.course && 
-                           cert.courseTitle && cert.courseTitle.toLowerCase().includes('javascript')
-                         );
-                         
-                         if (matchingCourse) {
-                           certificatesData.push({
-                             ...cert,
-                             courseTitle: cert.courseTitle || matchingCourse.title,
-                             courseName: cert.courseTitle || matchingCourse.title
-                           });
-                           console.log(`✅ Found existing certificate: "${cert.courseTitle}"`);
-                         }
-                       }
-                     }
-                   }
-                 } catch (refetchError) {
-                   console.error('❌ Error refetching certificates:', refetchError);
-                 }
-               } else {
-                 console.error(`❌ Certificate generation failed for "${completedCourse.title}":`, {
-                   status: generateResponse.status,
-                   response: generateResult,
-                   courseId: completedCourse._id,
-                   courseTitle: completedCourse.title
-                 });
-               }
-            } catch (error) {
-              console.error(`❌ Error auto-generating certificate for "${completedCourse.title}":`, error);
-            }
-          }
-          
-          if (certificatesData.length > 0) {
-            console.log(`✅ Successfully auto-generated ${certificatesData.length} certificates`);
-          }
-        } else if (certificatesData.length === 0) {
-          console.log('ℹ️ No certificates available - no courses completed with 100% module completion');
+        // DISABLED AUTO-GENERATION: Only show real certificates from database
+        if (certificatesData.length === 0) {
+          console.log('ℹ️ No real certificates found in database for completed courses');
+          console.log('📊 Completed courses found:', completedCourses.length);
+          completedCourses.forEach((course, index) => {
+            console.log(`  ${index + 1}. "${course.title}" (${course.progressPercentage}% completed)`);
+          });
         }
 
         // Update state with REAL validated certificates only
@@ -522,6 +412,10 @@ const Certificates = () => {
         }
         
         setCertificates(certificatesData);
+        
+        // Cache the certificates data for 5 minutes
+        localStorage.setItem('certificates_cache', JSON.stringify(certificatesData));
+        localStorage.setItem('certificates_cache_time', Date.now().toString());
 
       } catch (err) {
         console.error('❌ Certificates fetch error:', err);
@@ -565,15 +459,214 @@ const Certificates = () => {
     const cert = certificates.find(c => c._id === certificateId);
     if (!cert) return;
     
-    const blob = new Blob([
-      `Certificate of Achievement\n\nTitle: ${cert.courseTitle}\nDescription: Successfully completed the course\nIssued: ${new Date(cert.issuedAt).toLocaleDateString()}\nCertificate Number: ${cert.certificateNumber}\n${cert.grade ? `Grade: ${cert.grade}%` : ''}`
-    ], { type: 'application/pdf' });
+    try {
+      // Get user information
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const studentName = user.firstName && user.lastName ? `${user.firstName} ${user.lastName}` : 'Student';
+      
+      
+       
+       // Create a beautiful HTML certificate
+       const certificateHTML = `
+         <!DOCTYPE html>
+         <html>
+         <head>
+           <meta charset="UTF-8">
+           <title>Certificate of Achievement</title>
+
+           <style>
+             body {
+               font-family: 'Arial', sans-serif;
+               margin: 0;
+               padding: 40px;
+               background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+               min-height: 100vh;
+               display: flex;
+               align-items: center;
+               justify-content: center;
+             }
+             .certificate {
+               background: white;
+               border-radius: 20px;
+               padding: 60px;
+               box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+               text-align: center;
+               max-width: 900px;
+               width: 100%;
+               position: relative;
+               overflow: hidden;
+             }
+             .certificate::before {
+               content: '';
+               position: absolute;
+               top: 0;
+               left: 0;
+               right: 0;
+               height: 8px;
+               background: linear-gradient(90deg, #007bff, #28a745, #ffc107, #dc3545);
+             }
+             .header {
+               margin-bottom: 40px;
+             }
+             .title {
+               font-size: 48px;
+               font-weight: bold;
+               color: #007bff;
+               margin-bottom: 10px;
+               text-transform: uppercase;
+               letter-spacing: 2px;
+             }
+             .subtitle {
+               font-size: 18px;
+               color: #666;
+               margin-bottom: 30px;
+             }
+             .student-name {
+               font-size: 32px;
+               font-weight: bold;
+               color: #333;
+               margin: 30px 0;
+               text-transform: uppercase;
+             }
+             .course-info {
+               font-size: 20px;
+               color: #666;
+               margin: 20px 0;
+             }
+             .course-title {
+               font-size: 28px;
+               font-weight: bold;
+               color: #333;
+               margin: 20px 0;
+             }
+             .grade {
+               font-size: 18px;
+               color: #28a745;
+               font-weight: bold;
+               margin: 15px 0;
+             }
+             .date {
+               font-size: 16px;
+               color: #666;
+               margin: 20px 0;
+             }
+             .certificate-number {
+               font-size: 14px;
+               color: #999;
+               margin: 30px 0;
+               font-family: 'Courier New', monospace;
+               background: #f8f9fa;
+               padding: 10px;
+               border-radius: 5px;
+               border: 1px solid #e9ecef;
+             }
+
+             .footer {
+               margin-top: 40px;
+               padding-top: 30px;
+               border-top: 2px solid #eee;
+             }
+             .platform {
+               font-size: 24px;
+               font-weight: bold;
+               color: #007bff;
+             }
+             .logo {
+               font-size: 14px;
+               color: #999;
+               margin-top: 10px;
+             }
+             .border {
+               border: 3px solid #007bff;
+               border-radius: 15px;
+               padding: 20px;
+               margin: 20px;
+             }
+
+           </style>
+         </head>
+         <body>
+           <div class="certificate">
+             <div class="border">
+               <div class="header">
+                 <div class="title">Certificate of Achievement</div>
+                 <div class="subtitle">This is to certify that</div>
+               </div>
+               
+               <div class="student-name">${studentName}</div>
+               
+               <div class="course-info">has successfully completed the course</div>
+               
+               <div class="course-title">${cert.courseTitle}</div>
+               
+               ${cert.grade ? `<div class="grade">with a grade of ${cert.grade}%</div>` : ''}
+               
+               <div class="date">Issued on ${new Date(cert.issuedAt).toLocaleDateString()}</div>
+               
+               <div class="certificate-number">Certificate Number: ${cert.certificateNumber}</div>
+               
+               <div class="footer">
+                 <div class="platform">RefuLearn Platform</div>
+                 <div class="logo">Empowering Learning Through Technology</div>
+               </div>
+             </div>
+           </div>
+           
+
+         </body>
+         </html>
+       `;
+      
+      // Create a blob with the HTML content
+      const blob = new Blob([certificateHTML], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      
+      // Open in a new window for printing/saving as PDF
+      const newWindow = window.open(url, '_blank');
+      
+      // Auto-print after a short delay
+      setTimeout(() => {
+        if (newWindow) {
+          newWindow.print();
+        }
+      }, 1000);
+      
+      // Also provide a direct download option
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${cert.courseTitle.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_')}_Certificate.html`;
+      a.click();
+      
+      // Clean up
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+      }, 1000);
+      
+    } catch (error) {
+      console.error('❌ Error generating certificate:', error);
+      
+      // Fallback: Create a simple text file
+      const certificateText = `Certificate of Achievement
+
+Title: ${cert.courseTitle}
+Student: ${JSON.parse(localStorage.getItem('user') || '{}').firstName || 'Student'} ${JSON.parse(localStorage.getItem('user') || '{}').lastName || ''}
+Description: Successfully completed the course
+Issued: ${new Date(cert.issuedAt).toLocaleDateString()}
+Certificate Number: ${cert.certificateNumber}
+${cert.grade ? `Grade: ${cert.grade}%` : ''}
+
+RefuLearn Platform`;
+
+      const blob = new Blob([certificateText], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${cert.courseTitle.replace(/\s+/g, '_')}.pdf`;
+      a.download = `${cert.courseTitle.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_')}_Certificate.txt`;
     a.click();
     URL.revokeObjectURL(url);
+      
+      alert('Certificate generation failed. A text certificate has been downloaded instead.');
+    }
   };
 
   const handleShare = (certificateId, platform) => {
@@ -625,17 +718,35 @@ const Certificates = () => {
     <ContentWrapper>
       <Container>
         <Header>
-          <Title>Your Certificates</Title>
+          <Title>{t('certificates.title', 'Your Certificates')}</Title>
         </Header>
         {certificates.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
-            <div style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>🎓 No certificates available</div>
-            <div style={{ marginBottom: '0.5rem' }}>To earn a certificate, you must:</div>
-            <div style={{ fontSize: '0.9rem', lineHeight: '1.6' }}>
-              ✅ Complete 100% of all modules in a course<br/>
-              ✅ Have an instructor or admin generate your certificate<br/>
-              📚 Only fully completed courses are eligible for certificates
+            <div style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>🎓 {t('certificates.noCertificatesAvailable', 'No certificates available')}</div>
+            <div style={{ marginBottom: '0.5rem' }}>{t('certificates.requirementsTitle', 'To earn a certificate, you must:')}</div>
+            <div style={{ fontSize: '0.9rem', lineHeight: '1.6', marginBottom: '1.5rem' }}>
+              ✅ {t('certificates.requirement1', 'Complete 90% or more of a course')}<br/>
+              ✅ {t('certificates.requirement2', 'Have an instructor or admin generate your certificate')}<br/>
+              📚 {t('certificates.requirement3', 'Only completed courses are eligible for certificates')}
             </div>
+            <button 
+              onClick={() => {
+                localStorage.removeItem('certificates_cache');
+                localStorage.removeItem('certificates_cache_time');
+                window.location.reload();
+              }} 
+              style={{
+                background: '#007bff',
+                color: 'white',
+                border: 'none',
+                padding: '10px 20px',
+                borderRadius: '5px',
+                cursor: 'pointer',
+                fontSize: '14px'
+              }}
+            >
+              🔄 Refresh Certificates
+            </button>
           </div>
         ) : (
           <CertificateGrid>

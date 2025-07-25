@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import styled from 'styled-components';
 import { useNavigate, Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import Logo from '../../components/Logo';
 import offlineIntegrationService from '../../services/offlineIntegrationService';
 
@@ -138,6 +139,7 @@ const BackLink = styled.div`
 `;
 
 const ForgotPassword = () => {
+  const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');

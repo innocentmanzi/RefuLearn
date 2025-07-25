@@ -174,7 +174,30 @@ const ProfileDropdown = ({ user, onLogout, role, upwards }) => {
     <ProfileContainer ref={dropdownRef}>
       <ProfilePhoto onClick={handleProfileClick}>
         {user?.profilePic ? (
-          <img src={user.profilePic} alt="Profile" />
+          <img 
+            src={(() => {
+              if (user.profilePic) {
+                // Convert Windows backslashes to forward slashes
+                const normalizedPath = user.profilePic.replace(/\\/g, '/');
+                
+                if (normalizedPath.startsWith('http://') || normalizedPath.startsWith('https://')) {
+                  return normalizedPath;
+                } else if (normalizedPath.startsWith('/uploads/')) {
+                  return normalizedPath;
+                } else if (normalizedPath.startsWith('uploads/')) {
+                  return `/${normalizedPath}`;
+                } else {
+                  return `/uploads/${normalizedPath}`;
+                }
+              }
+              return user.profilePic;
+            })()} 
+            alt="Profile" 
+            onError={(e) => {
+              console.log('Profile image failed to load:', e.target.src);
+              e.target.style.display = 'none';
+            }}
+          />
         ) : (
           getInitials(user?.firstName + ' ' + user?.lastName)
         )}

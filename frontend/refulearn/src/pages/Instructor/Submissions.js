@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useUser } from '../../contexts/UserContext';
 import { useParams } from 'react-router-dom';
-import offlineIntegrationService from '../../services/offlineIntegrationService';
+
 
 const Container = styled.div`
   padding: 2rem;
@@ -148,45 +148,23 @@ const Submissions = () => {
     try {
       setLoading(true);
       setError('');
+      console.log('🔄 Fetching submissions...');
       
-      const isOnline = navigator.onLine;
-      
-      let submissionsData = [];
-
-      if (isOnline) {
-        try {
-          // Try online API calls first (preserving existing behavior)
-          console.log('🌐 Online mode: Fetching submissions from API...');
-          
-          const response = await fetch('/api/instructor/submissions', {
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('token')}`,
-              'Content-Type': 'application/json'
-            }
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            submissionsData = data.data.submissions || [];
-            console.log('✅ Submissions data received:', submissionsData.length);
-            
-            // Store submissions for offline use
-            await offlineIntegrationService.storeSubmissions(submissionsData);
-          } else {
-            throw new Error('Failed to fetch submissions');
-          }
-        } catch (onlineError) {
-          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
-          // Fall back to offline data if online fails
-          submissionsData = await offlineIntegrationService.getSubmissions();
+      const response = await fetch('/api/instructor/submissions', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
         }
-      } else {
-        // Offline mode: use offline services
-        console.log('📴 Offline mode: Using offline submissions data...');
-        submissionsData = await offlineIntegrationService.getSubmissions();
-      }
+      });
 
-      setSubmissions(submissionsData);
+      if (response.ok) {
+        const data = await response.json();
+        const submissionsData = data.data.submissions || [];
+        console.log('✅ Submissions data received:', submissionsData.length);
+        setSubmissions(submissionsData);
+      } else {
+        throw new Error('Failed to fetch submissions');
+      }
     } catch (err) {
       console.error('❌ Error fetching submissions:', err);
       setError('Failed to load submissions');

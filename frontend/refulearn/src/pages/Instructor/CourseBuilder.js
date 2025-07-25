@@ -5,7 +5,7 @@ import { ArrowBack, Add, Delete, Edit, DragIndicator } from '@mui/icons-material
 import Modal from '@mui/material/Modal';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import offlineIntegrationService from '../../services/offlineIntegrationService';
+
 
 const BLUE = '#007bff';
 const BLACK = '#000';
@@ -251,7 +251,8 @@ const ModalBox = styled(Box)`
 
 export default function CourseBuilder() {
   const navigate = useNavigate();
-  const { id: courseId } = useParams();
+  const { courseId } = useParams();
+  console.log('🎯 CourseBuilder - courseId from URL params:', courseId);
   const [activeTab, setActiveTab] = useState('details');
   const [modules, setModules] = useState([]);
   const [selectedModuleIdx, setSelectedModuleIdx] = useState(0);
@@ -306,94 +307,45 @@ export default function CourseBuilder() {
   const fetchCategoriesAndLevels = async () => {
     try {
       const token = localStorage.getItem('token');
-      const isOnline = navigator.onLine;
+      console.log('🔄 Fetching categories and levels...');
       
-      let categoriesData = [];
-      let levelsData = [];
-
-      if (isOnline) {
-        try {
-          // Try online API calls first (preserving existing behavior)
-          console.log('🌐 Online mode: Fetching categories and levels from API...');
-          
-          // Fetch categories
-          const categoriesResponse = await fetch('/api/courses/categories', {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
-          });
-          
-          if (categoriesResponse.ok) {
-            const categoriesApiData = await categoriesResponse.json();
-            if (categoriesApiData.success && categoriesApiData.data && categoriesApiData.data.categories) {
-              categoriesData = categoriesApiData.data.categories;
-              console.log('✅ Categories data received:', categoriesData.length);
-              
-              // Store categories for offline use
-              await offlineIntegrationService.storeCategories(categoriesData);
-            }
-          } else {
-            throw new Error('Failed to fetch categories');
-          }
-          
-          // Fetch levels
-          const levelsResponse = await fetch('/api/courses/levels', {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
-          });
-          
-          if (levelsResponse.ok) {
-            const levelsApiData = await levelsResponse.json();
-            if (levelsApiData.success && levelsApiData.data && levelsApiData.data.levels) {
-              levelsData = levelsApiData.data.levels;
-              console.log('✅ Levels data received:', levelsData.length);
-              
-              // Store levels for offline use
-              await offlineIntegrationService.storeLevels(levelsData);
-            }
-          } else {
-            throw new Error('Failed to fetch levels');
-          }
-
-        } catch (onlineError) {
-          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
-          // Fall back to offline data if online fails
-          const offlineData = await fetchOfflineData();
-          categoriesData = offlineData.categories;
-          levelsData = offlineData.levels;
+      // Fetch categories
+      const categoriesResponse = await fetch('/api/courses/categories', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (categoriesResponse.ok) {
+        const categoriesApiData = await categoriesResponse.json();
+        if (categoriesApiData.success && categoriesApiData.data && categoriesApiData.data.categories) {
+          const categoriesData = categoriesApiData.data.categories;
+          console.log('✅ Categories data received:', categoriesData.length);
+          setCategories(categoriesData);
         }
       } else {
-        // Offline mode: use offline services
-        console.log('📴 Offline mode: Using offline categories and levels data...');
-        const offlineData = await fetchOfflineData();
-        categoriesData = offlineData.categories;
-        levelsData = offlineData.levels;
+        throw new Error('Failed to fetch categories');
       }
-
-      // Helper function to fetch offline data
-      const fetchOfflineData = async () => {
-        try {
-          const categories = await offlineIntegrationService.getCategories();
-          const levels = await offlineIntegrationService.getLevels();
-          
-          console.log('📱 Offline categories and levels loaded:', {
-            categories: categories.length,
-            levels: levels.length
-          });
-          
-          return { categories, levels };
-        } catch (error) {
-          console.error('❌ Failed to load offline categories and levels:', error);
-          return { categories: [], levels: [] };
+      
+      // Fetch levels
+      const levelsResponse = await fetch('/api/courses/levels', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
-      };
-
-      // Update state with fetched data
-      setCategories(categoriesData);
-      setLevels(levelsData);
+      });
+      
+      if (levelsResponse.ok) {
+        const levelsApiData = await levelsResponse.json();
+        if (levelsApiData.success && levelsApiData.data && levelsApiData.data.levels) {
+          const levelsData = levelsApiData.data.levels;
+          console.log('✅ Levels data received:', levelsData.length);
+          setLevels(levelsData);
+        }
+      } else {
+        throw new Error('Failed to fetch levels');
+      }
       
     } catch (error) {
       console.error('❌ Error fetching categories and levels:', error);
@@ -410,6 +362,7 @@ export default function CourseBuilder() {
   // Fetch course data if editing
   useEffect(() => {
     if (courseId) {
+      console.log('🔄 Fetching course data for courseId:', courseId);
       setLoading(true);
       const fetchCourseData = async () => {
         try {
@@ -420,8 +373,10 @@ export default function CourseBuilder() {
           }
 
           const token = localStorage.getItem('token');
+          console.log('🔑 Token available:', !!token);
           
           // Fetch course details with modules
+          console.log('📡 Making API call to:', `/api/courses/${courseId}`);
           const courseResponse = await fetch(`/api/courses/${courseId}`, {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -437,8 +392,11 @@ export default function CourseBuilder() {
           
           if (courseResponse.ok) {
             const courseData = await courseResponse.json();
+            console.log('✅ Course data received:', courseData);
+            
             if (courseData.success && courseData.data && courseData.data.course) {
               const c = courseData.data.course;
+              console.log('📋 Course object:', c);
               
               // Check if this is fallback data (indicates database connection issues)
               if (c.title === 'Sample Course' && c.overview?.includes('database connection is not available')) {
@@ -446,7 +404,7 @@ export default function CourseBuilder() {
                 alert('Warning: Database connection unavailable. You are viewing sample data. Please check your backend connection.');
               }
               
-              setCourse({
+              const updatedCourse = {
                 title: c.title || '',
                 overview: c.overview || '',
                 learningOutcomes: c.learningOutcomes || '',
@@ -455,17 +413,30 @@ export default function CourseBuilder() {
                 level: c.level || 'Beginner',
                 isPublished: c.isPublished || false,
                 modules: c.modules || [],
-              });
+              };
+              
+              console.log('🔄 Setting course state to:', updatedCourse);
+              setCourse(updatedCourse);
               
               if (c.course_profile_picture) {
-                // Handle different possible path formats
+                // Handle Supabase storage URLs
                 let imagePath = c.course_profile_picture;
-                if (imagePath.startsWith('uploads/')) {
-                  imagePath = `/${imagePath}`;
+                
+                // If it's already a full URL (Supabase), use it directly
+                if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+                  setCourseImagePreview(imagePath);
+                } else if (imagePath.startsWith('uploads/')) {
+                  // For local uploads, construct the backend URL
+                  imagePath = `http://localhost:5001/${imagePath}`;
+                  setCourseImagePreview(imagePath);
                 } else if (!imagePath.startsWith('/')) {
-                  imagePath = `/uploads/${imagePath}`;
+                  // Fallback for other cases
+                  imagePath = `http://localhost:5001/uploads/${imagePath}`;
+                  setCourseImagePreview(imagePath);
+                } else {
+                  setCourseImagePreview(imagePath);
                 }
-                setCourseImagePreview(imagePath);
+                
                 console.log('Course image path:', imagePath);
               }
               
@@ -666,8 +637,8 @@ export default function CourseBuilder() {
   // Save or update course
   const handleSaveCourse = async () => {
     try {
-      if (!course.title) {
-        alert('Title is required');
+      if (!course.title || course.title.trim().length < 3) {
+        alert('Course title is required and must be at least 3 characters long');
         return;
       }
       if (!course.category) {
@@ -678,9 +649,50 @@ export default function CourseBuilder() {
         alert('Course profile picture is required');
         return;
       }
+      
+      // Ensure course has proper overview
+      if (!course.overview || course.overview.trim().length < 10) {
+        alert('Course overview is required and must be at least 10 characters long');
+        return;
+      }
+      
+      // Ensure course has learning outcomes
+      if (!course.learningOutcomes || course.learningOutcomes.trim().length < 10) {
+        alert('Learning outcomes are required and must be at least 10 characters long');
+        return;
+      }
+      
+      // Ensure course has duration
+      if (!course.duration || course.duration.trim().length < 3) {
+        alert('Course duration is required (e.g., "6 weeks", "8 hours")');
+        return;
+      }
+      
+      // Ensure course has at least one module
+      if (modules.length === 0) {
+        alert('Course must have at least one module');
+        return;
+      }
+      
+      // Validate each module has proper content
+      for (let i = 0; i < modules.length; i++) {
+        const module = modules[i];
+        if (!module.title || module.title.trim().length < 3) {
+          alert(`Module ${i + 1} must have a title (at least 3 characters)`);
+          return;
+        }
+        if (!module.description || module.description.trim().length < 10) {
+          alert(`Module ${i + 1} must have a description (at least 10 characters)`);
+          return;
+        }
+        if (!module.content || module.content.trim().length < 20) {
+          alert(`Module ${i + 1} must have content (at least 20 characters)`);
+          return;
+        }
+      }
       setLoading(true);
       
-      // Prepare course data for offline/online saving
+      // Prepare course data for saving
       const processedModules = modules.map((module, index) => ({
         _id: module._id || undefined,
         title: module.title || 'Untitled Module',
@@ -705,82 +717,47 @@ export default function CourseBuilder() {
         modules: processedModules
       };
       
-      const isOnline = navigator.onLine;
+      console.log('🔄 Saving course...');
       
-      if (isOnline) {
-        try {
-          console.log('🌐 Online mode: Saving course...');
-          
-          const formData = new FormData();
-          formData.append('title', course.title);
-          formData.append('overview', course.overview || '');
-          formData.append('learningOutcomes', course.learningOutcomes || '');
-          formData.append('duration', course.duration || '');
-          formData.append('category', course.category || '');
-          formData.append('level', course.level || 'Beginner');
-          formData.append('isPublished', course.isPublished || false);
-          formData.append('modules', JSON.stringify(processedModules));
-          
-          if (courseImage) {
-            formData.append('course_profile_picture', courseImage);
-          }
-          
-          const token = localStorage.getItem('token');
-          const url = courseId ? `/api/courses/${courseId}` : '/api/courses';
-          const method = courseId ? 'PUT' : 'POST';
-          const response = await fetch(url, {
-            method,
-            headers: {
-              'Authorization': `Bearer ${token}`
-            },
-            body: formData
-          });
-          
-          if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || 'Failed to save course');
-          }
-          
-          const result = await response.json();
-          const createdCourseId = courseId || result.data?.course?._id;
-          
-          // Store course data for offline use
-          await offlineIntegrationService.storeCourseBuilderData(courseData);
-          
-          alert(courseId ? 'Course updated successfully!' : 'Course created successfully!');
-          
-          // Navigate to course overview to show the new quick action buttons
-          if (createdCourseId) {
-            navigate(`/instructor/courses/${createdCourseId}/overview`);
-          } else {
-            navigate('/instructor/courses');
-          }
-        } catch (onlineError) {
-          console.warn('⚠️ Online save failed, queuing for offline sync:', onlineError);
-          
-          // Queue action for offline sync
-          await offlineIntegrationService.queueCourseBuilderAction({
-            action: courseId ? 'edit' : 'create',
-            courseId: courseId,
-            data: courseData,
-            courseImage: courseImage ? 'image_file' : null
-          });
-          
-          alert(`Course ${courseId ? 'update' : 'creation'} queued for sync when online`);
-          navigate('/instructor/courses');
-        }
+      const formData = new FormData();
+      formData.append('title', course.title);
+      formData.append('overview', course.overview || '');
+      formData.append('learningOutcomes', course.learningOutcomes || '');
+      formData.append('duration', course.duration || '');
+      formData.append('category', course.category || '');
+      formData.append('level', course.level || 'Beginner');
+      formData.append('isPublished', course.isPublished || false);
+      formData.append('modules', JSON.stringify(processedModules));
+      
+      if (courseImage) {
+        formData.append('course_profile_picture', courseImage);
+      }
+      
+      const token = localStorage.getItem('token');
+      const url = courseId ? `/api/courses/${courseId}` : '/api/courses';
+      const method = courseId ? 'PUT' : 'POST';
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to save course');
+      }
+      
+      const result = await response.json();
+      const createdCourseId = courseId || result.data?.course?._id;
+      
+      alert(courseId ? 'Course updated successfully!' : 'Course created successfully!');
+      
+      // Navigate to course overview to show the new quick action buttons
+      if (createdCourseId) {
+        navigate(`/instructor/courses/${createdCourseId}/overview`);
       } else {
-        // Offline mode: queue action for sync
-        console.log('📴 Offline mode: Queuing course action for sync...');
-        
-        await offlineIntegrationService.queueCourseBuilderAction({
-          action: courseId ? 'edit' : 'create',
-          courseId: courseId,
-          data: courseData,
-          courseImage: courseImage ? 'image_file' : null
-        });
-        
-        alert(`Course ${courseId ? 'update' : 'creation'} queued for sync when online`);
         navigate('/instructor/courses');
       }
     } catch (error) {
@@ -802,6 +779,9 @@ export default function CourseBuilder() {
       </Container>
     );
   }
+
+  // Debug logging for course state
+  console.log('🎯 CourseBuilder render - courseId:', courseId, 'course state:', course, 'loading:', loading);
 
   return (
     <Container>
@@ -865,7 +845,27 @@ export default function CourseBuilder() {
         </div>
         <Card>
           <Label style={{ color: BLUE, marginTop: 0 }}>Course Profile Picture *</Label>
-          {courseImagePreview && <ImagePreview src={courseImagePreview} alt="Course Cover" />}
+          {courseImagePreview ? (
+            <ImagePreview src={courseImagePreview} alt="Course Cover" />
+          ) : (
+            <div style={{
+              width: '120px',
+              height: '120px',
+              border: '2px dashed #007bff',
+              borderRadius: '12px',
+              marginBottom: '1rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: '#f8f9fa',
+              color: '#007bff',
+              fontSize: '0.9rem',
+              textAlign: 'center',
+              padding: '0.5rem'
+            }}>
+              Course Cover
+            </div>
+          )}
           <Input
             type="file"
             accept="image/*"

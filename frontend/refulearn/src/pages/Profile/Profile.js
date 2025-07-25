@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { FiEdit, FiPlus, FiMapPin, FiFile, FiMail, FiPhone, FiLinkedin, FiGithub, FiGlobe, FiUser, FiBriefcase, FiBookOpen, FiAward, FiStar, FiHeart } from 'react-icons/fi';
+import { useTranslation } from 'react-i18next';
 import { useUser } from '../../contexts/UserContext';
 import profileService from '../../services/profileService';
 
@@ -572,7 +573,8 @@ function normalizeCertificates(certs) {
 }
 
 const Profile = ({ userRole }) => {
-  const { user, setUser, updateUserProfile, fetchUserProfile } = useUser();
+  const { t } = useTranslation();
+  const { user, setUser, updateUserProfile, fetchUserProfile, loading } = useUser();
   // Editable state
   const [edit, setEdit] = useState({});
   const [form, setForm] = useState({});
@@ -605,11 +607,17 @@ const Profile = ({ userRole }) => {
     }
   }, [user]);
 
-  // Fetch user profile only once on mount
+  // Fetch user profile on mount and ensure fresh data
   useEffect(() => {
-    fetchUserProfile();
+    // Only fetch if we don't have complete user data
+    if (!user || !user._id || !user.firstName || !user.email) {
+      console.log('🔄 Fetching user profile data...');
+      fetchUserProfile(true); // Force refresh to get latest data
+    } else {
+      console.log('✅ User data already available, skipping fetch');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty dependency array - fetchUserProfile now has internal guards
+  }, []); // Empty dependency array - only run once on mount
 
   // Handlers
   const handleEdit = (section) => {
@@ -944,8 +952,8 @@ const Profile = ({ userRole }) => {
     }
   };
 
-  // Don't render until we have user data
-  if (!user || !form || Object.keys(form).length === 0) {
+  // Don't render until we have user data or if loading
+  if (loading || !user || !form || Object.keys(form).length === 0) {
     return (
       <Container>
         <GlassWrapper>
@@ -962,8 +970,8 @@ const Profile = ({ userRole }) => {
     <Container>
       <GlassWrapper>
         <ProfileHeader>
-          <Title>Profile</Title>
-          <Subtitle>Your personal information and achievements</Subtitle>
+          <Title>{t('profile.title', 'Profile')}</Title>
+          <Subtitle>{t('profile.subtitle', 'Your personal information and achievements')}</Subtitle>
         </ProfileHeader>
         <ContentArea>
           <FlexRow>
@@ -976,7 +984,14 @@ const Profile = ({ userRole }) => {
                   <>
                     <ProfilePicWrapper>
                       {form.profilePic ? (
-                        <ProfilePic src={form.profilePic} alt="Profile" />
+                        <ProfilePic 
+                          src={form.profilePic} 
+                          alt="Profile" 
+                          onError={(e) => {
+                            console.log('Profile image failed to load:', e.target.src);
+                            e.target.style.display = 'none';
+                          }}
+                        />
                       ) : (
                         // Just solid color background, no text
                         <div style={{ width: '100%', height: '100%' }}></div>
@@ -984,22 +999,45 @@ const Profile = ({ userRole }) => {
                     </ProfilePicWrapper>
                     <Input type="file" accept="image/*" onChange={handleProfilePicChange} />
                     <ActionButtons>
-                      <SaveButton onClick={handleProfilePicSave}>Save</SaveButton>
-                      <CancelButton onClick={handleProfilePicCancel}>Cancel</CancelButton>
+                      <SaveButton onClick={handleProfilePicSave}>{t('profile.save', 'Save')}</SaveButton>
+                      <CancelButton onClick={handleProfilePicCancel}>{t('profile.cancel', 'Cancel')}</CancelButton>
                     </ActionButtons>
                   </>
                 ) : (
                   <>
                     <ProfilePicWrapper>
                       {user.profilePic ? (
-                        <ProfilePic src={user.profilePic} alt="Profile" />
+                        <ProfilePic 
+                          src={(() => {
+                            if (user.profilePic) {
+                              // Convert Windows backslashes to forward slashes
+                              const normalizedPath = user.profilePic.replace(/\\/g, '/');
+                              
+                              if (normalizedPath.startsWith('http://') || normalizedPath.startsWith('https://')) {
+                                return normalizedPath;
+                              } else if (normalizedPath.startsWith('/uploads/')) {
+                                return normalizedPath;
+                              } else if (normalizedPath.startsWith('uploads/')) {
+                                return `/${normalizedPath}`;
+                              } else {
+                                return `/uploads/${normalizedPath}`;
+                              }
+                            }
+                            return user.profilePic;
+                          })()} 
+                          alt="Profile" 
+                          onError={(e) => {
+                            console.log('Profile image failed to load:', e.target.src);
+                            e.target.style.display = 'none';
+                          }}
+                        />
                       ) : (
                         // Just solid color background, no text
                         <div style={{ width: '100%', height: '100%' }}></div>
                       )}
                     </ProfilePicWrapper>
                     <UserName>{user.firstName} {user.lastName}</UserName>
-                    <UserRole>{userRole || user.role}</UserRole>
+                    <UserRole>{t(`roles.${userRole || user.role}`, userRole || user.role)}</UserRole>
                     <LocationInfo>
                       <FiMapPin />
                       <span>{user.country}, {user.city}</span>
@@ -1010,12 +1048,9 @@ const Profile = ({ userRole }) => {
 
               {/* Contact Information */}
               <Section>
-                <SectionHeader>
-                  <SectionIcon><FiMail /></SectionIcon>
-                  <SectionTitle>Contact Information</SectionTitle>
-                  <FloatingEditButton onClick={() => handleEdit('contact')} type="button" aria-label="Edit contact info"><FiEdit /></FloatingEditButton>
-                </SectionHeader>
-                {edit.contact ? (
+                <FloatingEditButton onClick={() => handleEdit('contactInfo')} type="button" aria-label="Edit contact information"><FiEdit /></FloatingEditButton>
+                <SectionTitle>{t('profile.contactInformation', 'Contact Information')}</SectionTitle>
+                {edit.contactInfo ? (
                   <>
                     <Input value={form.email} onChange={e => handleChange(e, 'email')} placeholder="Email" />
                     <Input value={form.phone} onChange={e => handleChange(e, 'phone')} placeholder="Phone" />
@@ -1040,11 +1075,8 @@ const Profile = ({ userRole }) => {
 
               {/* Social Platforms */}
               <Section>
-                <SectionHeader>
-                  <SectionIcon><FiGlobe /></SectionIcon>
-                  <SectionTitle>Social Platforms</SectionTitle>
-                  <FloatingEditButton onClick={() => handleEdit('social')} type="button" aria-label="Edit social platforms"><FiEdit /></FloatingEditButton>
-                </SectionHeader>
+                <FloatingEditButton onClick={() => handleEdit('social')} type="button" aria-label="Edit social platforms"><FiEdit /></FloatingEditButton>
+                <SectionTitle>{t('profile.socialPlatforms', 'Social Platforms')}</SectionTitle>
                 {edit.social ? (
                   <>
                     <Input value={form.social?.linkedin || ''} onChange={e => handleChange(e, 'social', null, 'linkedin')} placeholder="LinkedIn (URL or username)" />
@@ -1088,11 +1120,8 @@ const Profile = ({ userRole }) => {
 
               {/* Interests */}
               <Section>
-                <SectionHeader>
-                  <SectionIcon><FiHeart /></SectionIcon>
-                  <SectionTitle>Interests</SectionTitle>
-                  <FloatingEditButton onClick={() => handleEdit('interests')} type="button" aria-label="Edit interests"><FiEdit /></FloatingEditButton>
-                </SectionHeader>
+                <FloatingEditButton onClick={() => handleEdit('interests')} type="button" aria-label="Edit interests"><FiEdit /></FloatingEditButton>
+                <SectionTitle>{t('profile.interests', 'Interests')}</SectionTitle>
                 {edit.interests ? (
                   <>
                     {(form.interests || []).map((interest, idx) => (
@@ -1124,11 +1153,8 @@ const Profile = ({ userRole }) => {
             <RightColumn>
               {/* Work Experience */}
               <Section>
-                <SectionHeader>
-                  <SectionIcon><FiBriefcase /></SectionIcon>
-                  <SectionTitle>Work Experience</SectionTitle>
-                  <FloatingEditButton onClick={() => handleEdit('experiences')} type="button" aria-label="Edit experiences"><FiEdit /></FloatingEditButton>
-                </SectionHeader>
+                <FloatingEditButton onClick={() => handleEdit('experiences')} type="button" aria-label="Edit work experience"><FiEdit /></FloatingEditButton>
+                <SectionTitle>{t('profile.workExperience', 'Work Experience')}</SectionTitle>
                 {edit.experiences ? (
                   <>
                     {(form.experiences || []).map((exp, idx) => (
@@ -1189,11 +1215,8 @@ const Profile = ({ userRole }) => {
 
               {/* Education */}
               <Section>
-                <SectionHeader>
-                  <SectionIcon><FiBookOpen /></SectionIcon>
-                  <SectionTitle>Education</SectionTitle>
-                  <FloatingEditButton onClick={() => handleEdit('education')} type="button" aria-label="Edit education"><FiEdit /></FloatingEditButton>
-                </SectionHeader>
+                <FloatingEditButton onClick={() => handleEdit('education')} type="button" aria-label="Edit education"><FiEdit /></FloatingEditButton>
+                <SectionTitle>{t('profile.education', 'Education')}</SectionTitle>
                 {edit.education ? (
                   <>
                     {(form.education || []).map((edu, idx) => (
@@ -1264,11 +1287,8 @@ const Profile = ({ userRole }) => {
 
               {/* Skills */}
               <Section>
-                <SectionHeader>
-                  <SectionIcon><FiStar /></SectionIcon>
-                  <SectionTitle>Skills</SectionTitle>
-                  <FloatingEditButton onClick={() => handleEdit('skills')} type="button" aria-label="Edit skills"><FiEdit /></FloatingEditButton>
-                </SectionHeader>
+                <FloatingEditButton onClick={() => handleEdit('skills')} type="button" aria-label="Edit skills"><FiEdit /></FloatingEditButton>
+                <SectionTitle>{t('profile.skills', 'Skills')}</SectionTitle>
                 {edit.skills ? (
                   <>
                     {(form.skills || []).map((skill, idx) => (

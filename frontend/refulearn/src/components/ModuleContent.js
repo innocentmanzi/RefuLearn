@@ -1,9 +1,39 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import styled from 'styled-components';
-import { ArrowBack, ArrowForward, Description, VideoLibrary, Link, Assignment, Quiz, Forum, CheckCircle, RadioButtonUnchecked, Send, Person, ThumbUp, Reply, MoreVert } from '@mui/icons-material';
+import { ArrowBack, ArrowForward, Description, VideoLibrary, Link, Assignment, Quiz, Forum, CheckCircle, RadioButtonUnchecked, Send, Person, ThumbUp, Reply, MoreVert, Article, AudioFile, AttachFile } from '@mui/icons-material';
 import QuizTaker from './QuizTaker';
-import offlineIntegrationService from '../services/offlineIntegrationService';
+import { offlineIntegrationService } from '../services/offlineIntegrationService';
+
+// Global API call limiter to prevent infinite loops
+window.apiCallLimiter = window.apiCallLimiter || {
+  activeCalls: new Set(),
+  lastCallTime: {},
+  minInterval: 1000, // Minimum 1 second between calls to same endpoint
+};
+
+const isApiCallAllowed = (endpoint) => {
+  const now = Date.now();
+  const lastCall = window.apiCallLimiter.lastCallTime[endpoint] || 0;
+  
+  if (now - lastCall < window.apiCallLimiter.minInterval) {
+    console.log(`🚫 API call blocked to ${endpoint} - too frequent`);
+    return false;
+  }
+  
+  if (window.apiCallLimiter.activeCalls.has(endpoint)) {
+    console.log(`🚫 API call blocked to ${endpoint} - already in progress`);
+    return false;
+  }
+  
+  window.apiCallLimiter.lastCallTime[endpoint] = now;
+  window.apiCallLimiter.activeCalls.add(endpoint);
+  return true;
+};
+
+const releaseApiCall = (endpoint) => {
+  window.apiCallLimiter.activeCalls.delete(endpoint);
+};
 
 // Add CSS animation for spinner
 const SpinnerContainer = styled.div`
@@ -926,6 +956,9 @@ const EmptyState = styled.div`
 
 function DiscussionComponent({ discussion, courseId, moduleId, discussionIndex }) {
   console.log('DiscussionComponent received:', { discussion, courseId, moduleId, discussionIndex });
+  console.log('🔍 DISCUSSION DEBUG - Content type:', typeof discussion?.content);
+  console.log('🔍 DISCUSSION DEBUG - Content value:', discussion?.content);
+  console.log('🔍 DISCUSSION DEBUG - Full discussion object:', discussion);
   
   // Hooks must be called at the top level
   const [replies, setReplies] = useState([]);
@@ -942,6 +975,7 @@ function DiscussionComponent({ discussion, courseId, moduleId, discussionIndex }
       // Initial load - get all existing replies
       console.log('🚀 Initial load of discussion:', discussion._id);
       fetchReplies();
+      loadUserLikedPosts();
       
       // DISABLED: Auto-refresh to prevent replies from disappearing
       // We'll only fetch replies manually when needed
@@ -963,6 +997,43 @@ function DiscussionComponent({ discussion, courseId, moduleId, discussionIndex }
     );
   }
 
+  const loadUserLikedPosts = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const userId = user._id || user.id;
+      
+      if (!userId) {
+        console.log('⚠️ No user ID available for loading liked posts');
+        return;
+      }
+      
+      console.log('🔍 Loading user liked posts for discussion:', discussion._id);
+      
+      // Get the discussion with full reply data to check likedBy arrays
+      const response = await fetch(`/api/courses/${courseId}/discussions/${discussion._id}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data && data.data.discussion && data.data.discussion.replies) {
+          const likedPostIds = data.data.discussion.replies
+            .filter(reply => reply.likedBy && reply.likedBy.includes(userId))
+            .map(reply => reply._id);
+          
+          setLikedPosts(new Set(likedPostIds));
+          console.log('✅ Loaded liked posts:', likedPostIds);
+        }
+      }
+    } catch (error) {
+      console.log('⚠️ Error loading liked posts:', error.message);
+    }
+  };
+
   const fetchReplies = async () => {
     if (!discussion || !discussion._id) {
       console.log('No discussion ID available for fetching replies');
@@ -979,13 +1050,43 @@ function DiscussionComponent({ discussion, courseId, moduleId, discussionIndex }
       // Backup current replies to prevent loss
       const currentReplies = [...replies];
       
-      // Fetch replies from backend
-      const response = await fetch(`/api/courses/discussions/${discussion._id}/replies`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+      // Try multiple endpoints to get replies
+      let response;
+      let repliesData = [];
+      
+      // Try course-specific endpoint first
+      try {
+        response = await fetch(`/api/courses/${courseId}/discussions/${discussion._id}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.data && data.data.discussion && data.data.discussion.replies) {
+            repliesData = data.data.discussion.replies;
+            console.log('✅ Got replies from course-specific endpoint:', repliesData.length);
+          }
         }
-      });
+      } catch (error) {
+        console.log('⚠️ Course-specific endpoint failed, trying general endpoint...');
+      }
+      
+      // Fallback to general endpoint if needed
+      if (repliesData.length === 0) {
+        try {
+          response = await fetch(`/api/courses/discussions/${discussion._id}/replies`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+        } catch (error) {
+          console.error('❌ Both endpoints failed:', error);
+        }
+      }
       
       console.log('📡 Fetch replies response status:', response.status);
       
@@ -1022,6 +1123,9 @@ function DiscussionComponent({ discussion, courseId, moduleId, discussionIndex }
         
         console.log('✅ Setting replies:', repliesData.length, 'replies found');
         
+        // Save to localStorage as backup
+        saveRepliesToStorage(repliesData);
+        
         // SIMPLE APPROACH: Only set replies on first load, never overwrite after that
         setReplies(prevReplies => {
           // If this is the first load (no previous replies), load all from server
@@ -1049,12 +1153,21 @@ function DiscussionComponent({ discussion, courseId, moduleId, discussionIndex }
         } catch (e) {
           console.error('Could not parse error response');
         }
-        // Keep current replies to prevent loss
-        console.log('🔄 Keeping current replies to prevent data loss');
-        if (currentReplies.length > 0) {
-          setReplies(currentReplies);
+        
+        // Try localStorage backup
+        console.log('🔄 Trying localStorage backup...');
+        const backupReplies = loadRepliesFromStorage();
+        if (backupReplies.length > 0) {
+          setReplies(backupReplies);
+          console.log('✅ Loaded replies from localStorage backup');
         } else {
-          setReplies(discussion.replies || []);
+          // Keep current replies to prevent loss
+          console.log('🔄 Keeping current replies to prevent data loss');
+          if (currentReplies.length > 0) {
+            setReplies(currentReplies);
+          } else {
+            setReplies(discussion.replies || []);
+          }
         }
       }
     } catch (err) {
@@ -1137,7 +1250,12 @@ function DiscussionComponent({ discussion, courseId, moduleId, discussionIndex }
             const existingIds = new Set(prev.map(r => r._id));
             if (!existingIds.has(replyObject._id)) {
               console.log('🆕 Adding new reply to UI:', replyObject._id);
-              return [...prev, replyObject];
+              const newReplies = [...prev, replyObject];
+              
+              // Save to localStorage as backup
+              saveRepliesToStorage(newReplies);
+              
+              return newReplies;
             } else {
               console.log('🔄 Reply already exists, keeping current state');
               return prev;
@@ -1204,6 +1322,9 @@ function DiscussionComponent({ discussion, courseId, moduleId, discussionIndex }
     const token = localStorage.getItem('token');
     const isLiked = likedPosts.has(postId);
     
+    console.log('👍 LIKE ACTION - Post ID:', postId, 'Currently liked:', isLiked);
+    console.log('👍 LIKE ACTION - Course ID:', courseId, 'Discussion ID:', discussion._id);
+    
     try {
       
       // Optimistic update
@@ -1229,18 +1350,39 @@ function DiscussionComponent({ discussion, courseId, moduleId, discussionIndex }
         return updatedReplies;
       });
       
-      // Send to backend
-      const response = await fetch(`/api/courses/discussions/${discussion._id}/replies/${postId}/like`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ action: isLiked ? 'unlike' : 'like' })
-      });
+      // Send to backend - try both endpoint patterns
+      let response;
+      try {
+        // Try the course-specific endpoint first
+        response = await fetch(`/api/courses/${courseId}/discussions/${discussion._id}/replies/${postId}/like`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ action: isLiked ? 'unlike' : 'like' })
+        });
+        
+        if (!response.ok) {
+          // Fallback to the general endpoint
+          console.log('🔄 Trying fallback like endpoint...');
+          response = await fetch(`/api/courses/discussions/${discussion._id}/replies/${postId}/like`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ action: isLiked ? 'unlike' : 'like' })
+          });
+        }
+      } catch (fetchError) {
+        console.error('❌ Fetch error:', fetchError);
+        throw fetchError;
+      }
       
       if (!response.ok) {
-        console.error('Failed to update like status');
+        const errorText = await response.text();
+        console.error('❌ Failed to update like status:', response.status, errorText);
         // Revert optimistic update on error
         if (isLiked) {
           setLikedPosts(prev => new Set([...prev, postId]));
@@ -1261,9 +1403,13 @@ function DiscussionComponent({ discussion, courseId, moduleId, discussionIndex }
               : reply
           );
         });
+      } else {
+        console.log('✅ Like status updated successfully');
+        const responseData = await response.json();
+        console.log('✅ Like response data:', responseData);
       }
     } catch (err) {
-      console.error('Error liking post:', err);
+      console.error('❌ Error liking post:', err);
       // Revert optimistic updates on error to prevent state corruption
       if (isLiked) {
         setLikedPosts(prev => new Set([...prev, postId]));
@@ -1288,6 +1434,88 @@ function DiscussionComponent({ discussion, courseId, moduleId, discussionIndex }
       // Like operation complete
       console.log('👍 Like operation completed');
     }
+  };
+
+  // Debug function for like functionality
+  window.debugLikeFunctionality = () => {
+    console.log('🔍 DEBUG LIKE FUNCTIONALITY:');
+    console.log('📋 Current replies:', replies);
+    console.log('👍 Liked posts:', Array.from(likedPosts));
+    console.log('👤 Current user:', JSON.parse(localStorage.getItem('user') || '{}'));
+    console.log('🔗 Discussion ID:', discussion._id);
+    console.log('🔗 Course ID:', courseId);
+  };
+
+
+
+  // Test like functionality
+  window.testLikeFunctionality = async (postId) => {
+    console.log('🧪 Testing like functionality for post:', postId);
+    
+    const token = localStorage.getItem('token');
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    
+    console.log('🔍 Test data:', {
+      token: token ? 'Present' : 'Missing',
+      userId: user._id || user.id,
+      courseId,
+      discussionId: discussion._id,
+      postId
+    });
+    
+    // Test the API endpoint directly
+    try {
+      const response = await fetch(`/api/courses/${courseId}/discussions/${discussion._id}/replies/${postId}/like`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ action: 'like' })
+      });
+      
+      console.log('🧪 Test response status:', response.status);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('🧪 Test response data:', data);
+        console.log('✅ Like API is working!');
+      } else {
+        const errorText = await response.text();
+        console.log('❌ Like API failed:', errorText);
+      }
+    } catch (error) {
+      console.log('❌ Like API error:', error.message);
+    }
+  };
+
+
+
+  // Function to save replies to localStorage as backup
+  const saveRepliesToStorage = (repliesToSave) => {
+    try {
+      const storageKey = `discussion_replies_${discussion._id}`;
+      localStorage.setItem(storageKey, JSON.stringify(repliesToSave));
+      console.log('💾 Saved replies to localStorage:', repliesToSave.length);
+    } catch (error) {
+      console.log('⚠️ Could not save replies to localStorage:', error.message);
+    }
+  };
+
+  // Function to load replies from localStorage as backup
+  const loadRepliesFromStorage = () => {
+    try {
+      const storageKey = `discussion_replies_${discussion._id}`;
+      const stored = localStorage.getItem(storageKey);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        console.log('📂 Loaded replies from localStorage:', parsed.length);
+        return parsed;
+      }
+    } catch (error) {
+      console.log('⚠️ Could not load replies from localStorage:', error.message);
+    }
+    return [];
   };
 
   const handleReplyToPost = async (postId) => {
@@ -1413,66 +1641,68 @@ function DiscussionComponent({ discussion, courseId, moduleId, discussionIndex }
 
       {/* Discussion Title and Description */}
       <div style={{ marginBottom: '2rem' }}>
-        <h2 style={{ color: '#1a1a1a', marginBottom: '1rem', fontSize: '1.5rem', fontWeight: '600' }}>
-          Discussion {discussionIndex + 1}: {discussion.title}
-        </h2>
+        <div style={{ marginBottom: '1rem' }}>
+          <h2 style={{ color: '#1a1a1a', fontSize: '1.5rem', fontWeight: '600' }}>
+            Discussion {discussionIndex + 1}: {discussion.title}
+          </h2>
+        </div>
         <div style={{ color: '#6b7280', fontSize: '1rem', lineHeight: '1.6' }}>
-          {discussion.content || 'No description provided for this discussion.'}
+          {(() => {
+            let content = discussion.content;
+            
+            console.log('🔍 DISCUSSION CONTENT DEBUG:', {
+              originalContent: content,
+              contentType: typeof content,
+              isString: typeof content === 'string',
+              startsWithBrace: typeof content === 'string' && content.startsWith('{'),
+              endsWithBrace: typeof content === 'string' && content.endsWith('}'),
+              discussionObject: discussion
+            });
+            
+            // Handle case where content might be a JSON string
+            if (typeof content === 'string' && content.startsWith('{') && content.endsWith('}')) {
+              try {
+                const parsed = JSON.parse(content);
+                console.log('✅ Successfully parsed JSON content:', parsed);
+                content = parsed.content || parsed.title || content;
+              } catch (e) {
+                console.warn('❌ Failed to parse discussion content as JSON:', e);
+                console.warn('❌ Content that failed to parse:', content);
+              }
+            }
+            
+            // If content is still empty, try to get it from other fields
+            if (!content || content.trim() === '') {
+              console.log('🔍 Content is empty, checking other fields...');
+              if (discussion.description) {
+                content = discussion.description;
+                console.log('✅ Using discussion.description:', content);
+              } else if (discussion.text) {
+                content = discussion.text;
+                console.log('✅ Using discussion.text:', content);
+              } else if (discussion.body) {
+                content = discussion.body;
+                console.log('✅ Using discussion.body:', content);
+              } else {
+                console.log('❌ No content found in any field');
+              }
+            }
+            
+            console.log('🔍 FINAL CONTENT TO DISPLAY:', content);
+            return content || 'No description provided for this discussion.';
+          })()}
         </div>
       </div>
 
-
-
-      {/* Post Reply Form */}
-      <form onSubmit={handleSubmitReply} style={{ marginBottom: '2rem' }}>
-        <textarea
-          value={newReply}
-          onChange={(e) => setNewReply(e.target.value)}
-          placeholder="Share your thoughts, ask questions, or contribute to the discussion..."
-          disabled={loading}
-          style={{
-            width: '100%',
-            minHeight: '120px',
-            padding: '1rem',
-            border: '1px solid #d1d5db',
-            borderRadius: '8px',
-            fontSize: '1rem',
-            marginBottom: '1rem',
-            resize: 'vertical',
-            fontFamily: 'inherit'
-          }}
-        />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <button 
-            type="submit" 
-            disabled={loading || !newReply.trim()}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              padding: '0.75rem 1.5rem',
-              backgroundColor: loading || !newReply.trim() ? '#9ca3af' : '#007BFF',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              fontSize: '1rem',
-              fontWeight: '500',
-              cursor: loading || !newReply.trim() ? 'not-allowed' : 'pointer'
-            }}
-          >
-            <Send />
-            {loading ? 'Posting...' : 'Post'}
-          </button>
-          <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-            {replies.length} {replies.length === 1 ? 'reply' : 'replies'} • Replies preserved permanently
-            {loading && <span style={{ color: '#007BFF', marginLeft: '0.5rem' }}>• Saving...</span>}
-          </div>
-        </div>
-      </form>
-
-        {replies.length > 0 && (
+      {/* Replies Section */}
+      {replies.length > 0 && (
+        <div style={{ marginBottom: '2rem' }}>
+          <h3 style={{ color: '#1a1a1a', fontSize: '1.25rem', fontWeight: '600', marginBottom: '1rem' }}>
+            Replies ({replies.length})
+          </h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {replies.map((post) => (
+
               <div key={post._id} style={{ 
                 padding: '1.5rem', 
                 backgroundColor: '#f9fafb', 
@@ -1664,12 +1894,20 @@ function DiscussionComponent({ discussion, courseId, moduleId, discussionIndex }
               </div>
             ))}
           </div>
+          </div>
         )}
     </div>
   );
-}
+} // Closing brace for DiscussionComponent
 
 function ModuleContentInner() {
+  // Add render counter to detect infinite re-renders
+  if (!window.moduleContentRenderCount) {
+    window.moduleContentRenderCount = 0;
+  }
+  window.moduleContentRenderCount++;
+  console.log(`🔄 ModuleContent render #${window.moduleContentRenderCount}`);
+  
   const { courseId, moduleId, resourceId, assessmentId, quizId, discussionId } = useParams();
   const navigate = useNavigate();
   const [course, setCourse] = useState(null);
@@ -1684,7 +1922,18 @@ function ModuleContentInner() {
   const [isMarkingComplete, setIsMarkingComplete] = useState(false);
   const [userRole, setUserRole] = useState(null);
 
+  // Helper function to get the correct course overview path based on user role
+  const getCourseOverviewPath = () => {
+    if (userRole === 'instructor') {
+      return `/instructor/courses/${courseId}/overview`;
+    } else {
+      return `/courses/${courseId}/overview`;
+    }
+  };
+
   useEffect(() => {
+    console.log('🔄 ModuleContent useEffect triggered - checking for infinite loop');
+    
     // Get user role from localStorage or token with better debugging
     const userStr = localStorage.getItem('user');
     const user = userStr ? JSON.parse(userStr) : {};
@@ -1712,8 +1961,21 @@ function ModuleContentInner() {
       urlPath: window.location.pathname
     });
     
+    // Add a flag to prevent multiple simultaneous calls
+    if (window.moduleContentLoading) {
+      console.log('⚠️ ModuleContent already loading, skipping...');
+      return;
+    }
+    
+    window.moduleContentLoading = true;
+    
     fetchCourseAndModule();
-    fetchCompletionStatus();
+    
+    // Call fetchCompletionStatus after a short delay to ensure courseId and moduleId are available
+    setTimeout(() => {
+      console.log('⏰ Delayed fetchCompletionStatus call');
+      fetchCompletionStatus();
+    }, 1000);
     
     // Add debugging function to window for manual testing
     window.debugModuleContent = () => {
@@ -1758,6 +2020,12 @@ function ModuleContentInner() {
         hasContent: contentItems.length > 0,
         currentContentType: currentContent?.type || 'none'
       };
+    };
+    
+    // Add function to manually test completion status
+    window.testCompletionStatus = async () => {
+      console.log('🧪 Manual completion status test');
+      await fetchCompletionStatus();
     };
     
     // Add enhanced function to test backend data directly
@@ -1875,7 +2143,80 @@ function ModuleContentInner() {
       }
     };
     
-  }, [courseId, moduleId]);
+    // Add debug function to test quiz data
+    const debugQuizData = () => {
+      console.log('🔍 DEBUG QUIZ DATA:');
+      console.log('Course:', course);
+      console.log('Module:', module);
+      console.log('Content Items:', contentItems);
+      console.log('Current Content:', currentContent);
+      console.log('Current Index:', currentIndex);
+      
+      if (module && module.quizzes) {
+        console.log('📚 Module Quizzes:', module.quizzes);
+        module.quizzes.forEach((quiz, index) => {
+          console.log(`Quiz ${index + 1}:`, {
+            id: quiz._id,
+            title: quiz.title,
+            description: quiz.description,
+            hasQuestions: !!quiz.questions,
+            questionCount: quiz.questions?.length || 0,
+            instructorId: quiz.instructorId,
+            courseId: quiz.courseId,
+            sampleQuestion: quiz.questions?.[0]?.question || 'No questions'
+          });
+        });
+      }
+      
+      // Test API call to get quiz data
+      const testQuizAPI = async () => {
+        try {
+          const token = localStorage.getItem('token');
+          const response = await fetch(`/api/courses/${courseId}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            console.log('✅ API Response:', data);
+            
+            if (data.success && data.data && data.data.course) {
+              const courseData = data.data.course;
+              const moduleData = courseData.modules?.find(m => m._id === moduleId);
+              console.log('📚 Module from API:', moduleData);
+              
+              if (moduleData && moduleData.quizzes) {
+                console.log('🎯 Quizzes from API:', moduleData.quizzes);
+              }
+            }
+          } else {
+            console.error('❌ API Error:', response.status, response.statusText);
+          }
+        } catch (error) {
+          console.error('❌ API Call Error:', error);
+        }
+      };
+      
+      testQuizAPI();
+    };
+
+    // Add debug functions to window for easy access
+    window.debugQuizData = debugQuizData;
+    // Debug functions will be assigned later when they're defined
+    // window.debugInstructorQuizAccess = debugInstructorQuizAccess; // Removed to prevent initialization error
+    
+    // Cleanup function to reset the loading flag and clear any pending API calls
+    return () => {
+      window.moduleContentLoading = false;
+      // Clear any pending API calls for this component
+      releaseApiCall(`/api/courses/${courseId}`);
+      releaseApiCall(`/api/courses/${courseId}/progress`);
+      console.log('🧹 ModuleContent useEffect cleanup - reset loading flag and cleared API calls');
+    };
+  }, [courseId, moduleId, quizId, discussionId, resourceId, assessmentId]);
 
   // Update currentContent when contentItems or currentIndex changes
   useEffect(() => {
@@ -1889,6 +2230,14 @@ function ModuleContentInner() {
     }
   }, [contentItems, currentIndex]);
 
+  // Refresh completion status when current content changes
+  useEffect(() => {
+    if (currentContent && courseId) {
+      console.log('🔄 Current content changed, refreshing completion status');
+      fetchCompletionStatus();
+    }
+  }, [currentContent, currentIndex, courseId]);
+
   // Handle content navigation (for quiz completion screen)
   const handleContentNavigation = (targetIndex) => {
     if (targetIndex >= 0 && targetIndex < contentItems.length) {
@@ -1901,6 +2250,13 @@ function ModuleContentInner() {
   // Manual completion only - no auto-completion
 
   const fetchCourseAndModule = async () => {
+    const endpoint = `/api/courses/${courseId}`;
+    
+    // Use global API call limiter
+    if (!isApiCallAllowed(endpoint)) {
+      return;
+    }
+    
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
@@ -1954,8 +2310,39 @@ function ModuleContentInner() {
       if (courseData) {
         setCourse(courseData);
         
-        const foundModule = courseData.modules.find(m => m._id === moduleId);
+        // First try to get the module from course data
+        let foundModule = courseData.modules.find(m => m._id === moduleId);
+        
+        // If module found, try to fetch populated data from module endpoint
         if (foundModule) {
+          try {
+            console.log('🔍 Fetching populated module data for:', moduleId);
+            const moduleResponse = await fetch(`/api/courses/modules/${moduleId}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+            
+            if (moduleResponse.ok) {
+              const moduleData = await moduleResponse.json();
+              if (moduleData.success && moduleData.data && moduleData.data.module) {
+                console.log('✅ Populated module data received:', {
+                  title: moduleData.data.module.title,
+                  quizzesCount: moduleData.data.module.quizzes?.length || 0,
+                  discussionsCount: moduleData.data.module.discussions?.length || 0
+                });
+                foundModule = moduleData.data.module;
+              } else {
+                console.warn('⚠️ Module endpoint returned invalid data, using course data');
+              }
+            } else {
+              console.warn('⚠️ Module endpoint failed, using course data');
+            }
+          } catch (moduleError) {
+            console.warn('⚠️ Error fetching populated module data:', moduleError);
+          }
+          
           setModule(foundModule);
           
           // Build content items array
@@ -2000,6 +2387,36 @@ function ModuleContentInner() {
             });
           }
           
+          // Process contentItems (articles, files, etc.)
+          if (foundModule.contentItems && Array.isArray(foundModule.contentItems)) {
+            console.log('📄 Processing contentItems:', foundModule.contentItems.length);
+            foundModule.contentItems.forEach((contentItem, idx) => {
+              console.log('📄 Content item:', {
+                index: idx,
+                type: contentItem.type,
+                title: contentItem.title,
+                url: contentItem.url,
+                fileUrl: contentItem.fileUrl,
+                publicUrl: contentItem.publicUrl,
+                fileName: contentItem.fileName,
+                description: contentItem.description,
+                fullData: contentItem
+              });
+              
+              items.push({
+                type: contentItem.type || 'article',
+                title: contentItem.title || `Content ${idx + 1}`,
+                data: contentItem,
+                icon: contentItem.type === 'article' ? Article : 
+                      contentItem.type === 'video' ? VideoLibrary :
+                      contentItem.type === 'audio' ? AudioFile :
+                      contentItem.type === 'file' ? AttachFile : Article
+              });
+            });
+          } else {
+            console.log('📄 No contentItems found in module');
+          }
+          
           // Count assessments and quizzes for proper numbering
           let assessmentCount = 0;
           let quizCount = 0;
@@ -2023,34 +2440,210 @@ function ModuleContentInner() {
               title: q.title,
               hasQuestions: !!q.questions && q.questions.length > 0,
               questionCount: q.questions?.length || 0,
-              type: q.type
+              type: q.type,
+              isString: typeof q === 'string',
+              isObject: typeof q === 'object',
+              fullData: q
             })));
             
-            foundModule.quizzes.forEach((quiz, idx) => {
+            // Also check if quizzes might be stored in a different property
+            console.log('🔍 Checking for alternative quiz storage...');
+            console.log('Module keys:', Object.keys(foundModule));
+            console.log('Module quiz property type:', typeof foundModule.quizzes);
+            console.log('Module quiz property value:', foundModule.quizzes);
+            
+            // Check if quizzes array is empty or undefined
+            if (foundModule.quizzes.length === 0) {
+              console.warn('⚠️ Module has empty quizzes array');
+            }
+            
+            // Check if quizzes are just IDs or full objects
+            const hasFullQuizData = foundModule.quizzes.some(q => q.questions && q.questions.length > 0);
+            console.log('🔍 Quiz data analysis:', {
+              totalQuizzes: foundModule.quizzes.length,
+              hasFullQuizData,
+              quizTypes: foundModule.quizzes.map(q => typeof q),
+              firstQuiz: foundModule.quizzes[0]
+            });
+            
+            // Fetch full quiz data for each quiz
+            for (let idx = 0; idx < foundModule.quizzes.length; idx++) {
+              const quizRef = foundModule.quizzes[idx];
               quizCount++;
+              
+              try {
+                // If quizRef is just an ID, fetch the full quiz data
+                let fullQuizData = quizRef;
+                
+                if (typeof quizRef === 'string' || (quizRef && !quizRef.questions)) {
+                  console.log('🔄 Fetching full quiz data for:', quizRef._id || quizRef);
+                  
+                  // Use different endpoint based on user role
+                  const endpoint = userRole === 'instructor' || userRole === 'admin' 
+                    ? `/api/instructor/quizzes/${quizRef._id || quizRef}`
+                    : `/api/instructor/quizzes/${quizRef._id || quizRef}/student`;
+                  
+                  const quizResponse = await fetch(endpoint, {
+                    headers: {
+                      'Authorization': `Bearer ${token}`,
+                      'Content-Type': 'application/json'
+                    }
+                  });
+                  
+                  if (quizResponse.ok) {
+                    const quizData = await quizResponse.json();
+                    if (quizData.success && quizData.data) {
+                      fullQuizData = quizData.data.quiz || quizData.data;
+                      console.log('✅ Fetched full quiz data:', fullQuizData.title);
+                    } else {
+                      console.warn('⚠️ Quiz API response not successful:', quizData);
+                      fullQuizData = quizRef; // Fall back to original data
+                    }
+                  } else {
+                    console.warn('⚠️ Failed to fetch quiz data:', quizResponse.status);
+                    fullQuizData = quizRef; // Fall back to original data
+                  }
+                }
+                
               console.log('📄 Processing quiz:', {
                 index: idx,
                 quizNumber: quizCount,
-                title: quiz.title,
-                id: quiz._id,
-                hasQuestions: !!quiz.questions && quiz.questions.length > 0,
-                questionCount: quiz.questions?.length || 0,
-                dueDate: quiz.dueDate,
-                hasDueDate: !!quiz.dueDate,
-                allFields: Object.keys(quiz)
+                  title: fullQuizData.title,
+                  id: fullQuizData._id,
+                  hasQuestions: !!fullQuizData.questions && fullQuizData.questions.length > 0,
+                  questionCount: fullQuizData.questions?.length || 0,
+                  dueDate: fullQuizData.dueDate,
+                  hasDueDate: !!fullQuizData.dueDate,
+                  allFields: Object.keys(fullQuizData)
+              });
+              
+              // Debug: Log the actual quiz data being passed
+              console.log('🔍 FULL QUIZ DATA BEING PASSED TO QUIZTAKER:', {
+                quizId: fullQuizData._id,
+                title: fullQuizData.title,
+                questions: fullQuizData.questions?.map((q, qIdx) => ({
+                  question: q.question,
+                  type: q.type,
+                  correctAnswer: q.correctAnswer,
+                  options: q.options
+                })) || []
               });
               
               items.push({
                 type: 'quiz',
-                title: quiz.title || `Quiz ${quizCount}`,
-                data: quiz,
+                  title: fullQuizData.title || `Quiz ${quizCount}`,
+                  data: fullQuizData,
                 icon: Quiz
               });
-            });
+                
+              } catch (quizError) {
+                console.error('❌ Error fetching quiz data:', quizError);
+                console.error('🔍 Quiz error details:', {
+                  quizRef: quizRef,
+                  quizId: quizRef._id || quizRef,
+                  errorMessage: quizError.message,
+                  errorStack: quizError.stack
+                });
+                // Add quiz with available data
+                items.push({
+                  type: 'quiz',
+                  title: quizRef.title || `Quiz ${quizCount}`,
+                  data: quizRef,
+                  icon: Quiz
+                });
+              }
+            }
+          } else {
+            console.warn('⚠️ Module has no quizzes property or quizzes is null/undefined');
+            console.log('🔍 Module properties:', Object.keys(foundModule));
+            
+            // Check if quizzes might be stored as a JSON string
+            if (foundModule.quizData) {
+              console.log('🔍 Found quizData property, attempting to parse...');
+              try {
+                const parsedQuizzes = typeof foundModule.quizData === 'string' 
+                  ? JSON.parse(foundModule.quizData) 
+                  : foundModule.quizData;
+                
+                if (Array.isArray(parsedQuizzes) && parsedQuizzes.length > 0) {
+                  console.log('✅ Found quizzes in quizData property:', parsedQuizzes.length);
+                  
+                  // Process the parsed quizzes
+                  for (let idx = 0; idx < parsedQuizzes.length; idx++) {
+                    const quizRef = parsedQuizzes[idx];
+                    quizCount++;
+                    
+                    try {
+                      let fullQuizData = quizRef;
+                      
+                      if (typeof quizRef === 'string' || (quizRef && !quizRef.questions)) {
+                        console.log('🔄 Fetching full quiz data for:', quizRef._id || quizRef);
+                        
+                        const endpoint = userRole === 'instructor' || userRole === 'admin' 
+                          ? `/api/instructor/quizzes/${quizRef._id || quizRef}`
+                          : `/api/instructor/quizzes/${quizRef._id || quizRef}/student`;
+                        
+                        const quizResponse = await fetch(endpoint, {
+                          headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                          }
+                        });
+                        
+                        if (quizResponse.ok) {
+                          const quizData = await quizResponse.json();
+                          if (quizData.success && quizData.data) {
+                            fullQuizData = quizData.data.quiz || quizData.data;
+                            console.log('✅ Fetched full quiz data:', fullQuizData.title);
+                          } else {
+                            fullQuizData = quizRef;
+                          }
+                        } else {
+                          fullQuizData = quizRef;
+                        }
+                      }
+                      
+                      items.push({
+                        type: 'quiz',
+                        title: fullQuizData.title || `Quiz ${quizCount}`,
+                        data: fullQuizData,
+                        icon: Quiz
+                      });
+                      
+                    } catch (quizError) {
+                      console.error('❌ Error processing quiz from quizData:', quizError);
+                      items.push({
+                        type: 'quiz',
+                        title: quizRef.title || `Quiz ${quizCount}`,
+                        data: quizRef,
+                        icon: Quiz
+                      });
+                    }
+                  }
+                }
+              } catch (parseError) {
+                console.error('❌ Error parsing quizData:', parseError);
+              }
+            }
           }
           
           if (foundModule.discussions) {
+            console.log('🔍 DISCUSSIONS DEBUG - Found discussions:', foundModule.discussions.length);
+            console.log('🔍 DISCUSSIONS DEBUG - Discussion details:', foundModule.discussions.map(d => ({
+              _id: d._id,
+              title: d.title,
+              content: d.content,
+              moduleId: d.moduleId
+            })));
+            
             foundModule.discussions.forEach((discussion, idx) => {
+              console.log('🔍 DISCUSSIONS DEBUG - Adding discussion to items:', {
+                index: idx,
+                title: discussion.title,
+                content: discussion.content,
+                type: typeof discussion.content
+              });
+              
               items.push({
                 type: 'discussion',
                 title: discussion.title || `Discussion ${idx + 1}`,
@@ -2058,15 +2651,207 @@ function ModuleContentInner() {
                 icon: Forum
               });
             });
+          } else {
+            console.log('🔍 DISCUSSIONS DEBUG - No discussions found in module');
           }
           
-          setContentItems(items);
-          setCurrentIndex(0);
+          console.log('🔍 CONTENT ITEMS DEBUG - Final items array:', items.map(item => ({
+            type: item.type,
+            title: item.title,
+            hasData: !!item.data,
+            dataKeys: item.data ? Object.keys(item.data) : []
+          })));
           
-          // Set the first item as current content
+          setContentItems(items);
+          
+          // Determine initial content based on URL parameters
+          let initialIndex = 0;
+          let initialContent = items[0];
+          
+          // Check URL for specific content navigation
+          const pathParts = window.location.pathname.split('/');
+          const quizIndex = pathParts.findIndex(part => part === 'quiz');
+          const discussionIndex = pathParts.findIndex(part => part === 'discussion');
+          const assessmentIndex = pathParts.findIndex(part => part === 'assessment');
+          const resourceIndex = pathParts.findIndex(part => part === 'resource');
+          const contentIndex = pathParts.findIndex(part => part === 'content');
+          
+          console.log('🔍 URL PARSING DEBUG:', {
+            fullPath: window.location.pathname,
+            pathParts,
+            quizIndex,
+            discussionIndex,
+            assessmentIndex,
+            resourceIndex,
+            contentIndex,
+            isInstructorRoute: pathParts.includes('instructor'),
+            userRole,
+            quizIndexValue: quizIndex !== -1 && quizIndex + 1 < pathParts.length ? pathParts[quizIndex + 1] : 'N/A',
+            availableQuizItems: items.filter(item => item.type === 'quiz').length
+          });
+          
+          console.log('🔍 URL Analysis for initial content:', {
+            pathParts,
+            quizIndex,
+            discussionIndex,
+            assessmentIndex,
+            resourceIndex,
+            contentIndex,
+            totalItems: items.length,
+            currentPath: window.location.pathname
+          });
+          
+          // If URL ends with /content, show the actual content (not quiz)
+          if (contentIndex !== -1 && contentIndex === pathParts.length - 1) {
+            console.log('🎯 URL ends with /content - looking for actual content');
+            
+            // Find first content item (description or content type)
+            const firstContentIndex = items.findIndex(item => item.type === 'content' || item.type === 'description');
+            if (firstContentIndex !== -1) {
+              initialIndex = firstContentIndex;
+              initialContent = items[firstContentIndex];
+              console.log('✅ Found content at index', firstContentIndex, 'for /content URL:', items[firstContentIndex].type);
+            } else {
+              // If no content, find first video
+              const firstVideoIndex = items.findIndex(item => item.type === 'video');
+              if (firstVideoIndex !== -1) {
+                initialIndex = firstVideoIndex;
+                initialContent = items[firstVideoIndex];
+                console.log('✅ Found video content at index', firstVideoIndex, 'for /content URL');
+              } else {
+                // If no video, find first resource
+                const firstResourceIndex = items.findIndex(item => item.type === 'resource');
+                if (firstResourceIndex !== -1) {
+                  initialIndex = firstResourceIndex;
+                  initialContent = items[firstResourceIndex];
+                  console.log('✅ Found resource content at index', firstResourceIndex, 'for /content URL');
+                } else {
+                  // Fall back to first item
+                  console.log('⚠️ No content found, falling back to first item');
+                }
+              }
+            }
+          }
+          
+          if (quizIndex !== -1 && quizIndex + 1 < pathParts.length) {
+            const quizIdentifier = pathParts[quizIndex + 1];
+            console.log('🎯 Quiz identifier from URL:', quizIdentifier);
+            console.log('👨‍🏫 Instructor quiz access check:', {
+              userRole,
+              isInstructorRoute: pathParts.includes('instructor'),
+              quizIdentifier,
+              pathParts
+            });
+            
+            // Try to find quiz by ID first, then by index
+            const quizItems = items.filter(item => item.type === 'quiz');
+            console.log('📝 Available quiz items:', quizItems.length);
+            
+            // First, try to find by quiz ID
+            let foundQuizIndex = -1;
+            for (let i = 0; i < items.length; i++) {
+              if (items[i].type === 'quiz' && items[i].data && items[i].data._id === quizIdentifier) {
+                foundQuizIndex = i;
+                console.log('✅ Found quiz by ID:', quizIdentifier, 'at position', i);
+                break;
+              }
+            }
+            
+            // If not found by ID, try by index (for backward compatibility)
+            if (foundQuizIndex === -1) {
+              const quizIndexValue = parseInt(quizIdentifier);
+              if (!isNaN(quizIndexValue)) {
+                console.log('🔍 Trying to find quiz by index:', quizIndexValue);
+                let quizCount = 0;
+                for (let i = 0; i < items.length; i++) {
+                  if (items[i].type === 'quiz') {
+                    if (quizCount === quizIndexValue) {
+                      foundQuizIndex = i;
+                      console.log('✅ Found quiz at index', quizIndexValue, 'in content items at position', i);
+                      break;
+                    }
+                    quizCount++;
+                  }
+                }
+              }
+            }
+            
+            if (foundQuizIndex !== -1) {
+              initialIndex = foundQuizIndex;
+              initialContent = items[foundQuizIndex];
+              console.log('👨‍🏫 Instructor will see quiz:', {
+                title: items[foundQuizIndex].title,
+                hasQuestions: !!items[foundQuizIndex].data?.questions,
+                questionCount: items[foundQuizIndex].data?.questions?.length || 0
+              });
+            } else {
+              console.log('❌ Quiz not found with identifier:', quizIdentifier);
+            }
+          }
+          
+          if (discussionIndex !== -1 && discussionIndex + 1 < pathParts.length) {
+            const discussionIndexValue = parseInt(pathParts[discussionIndex + 1]);
+            console.log('💬 Discussion index from URL:', discussionIndexValue);
+            
+            if (!isNaN(discussionIndexValue)) {
+              // Find discussion by index
+              const discussionItems = items.filter(item => item.type === 'discussion');
+              console.log('💬 Available discussion items:', discussionItems.length);
+              
+              if (discussionIndexValue >= 0 && discussionIndexValue < discussionItems.length) {
+                // Find the discussion at the specified index
+                let discussionCount = 0;
+                for (let i = 0; i < items.length; i++) {
+                  if (items[i].type === 'discussion') {
+                    if (discussionCount === discussionIndexValue) {
+                      initialIndex = i;
+                      initialContent = items[i];
+                      console.log('✅ Found discussion at index', discussionIndexValue, 'in content items at position', i);
+                      console.log('💬 Discussion content:', {
+                        title: items[i].title,
+                        hasContent: !!items[i].data?.content,
+                        contentLength: items[i].data?.content?.length || 0
+                      });
+                      break;
+                    }
+                    discussionCount++;
+                  }
+                }
+              } else {
+                console.log('❌ Discussion index out of range:', discussionIndexValue, 'available discussions:', discussionItems.length);
+              }
+            }
+          }
+          
           if (items.length > 0) {
-            setCurrentContent(items[0]);
-            console.log('✅ Set initial content:', items[0].type, items[0].title);
+            console.log('🔍 CONTENT SELECTION DEBUG:', {
+              totalItems: items.length,
+              availableTypes: items.map(item => item.type),
+              quizItems: items.filter(item => item.type === 'quiz').map(item => ({ title: item.title, index: items.indexOf(item) })),
+              discussionItems: items.filter(item => item.type === 'discussion').map(item => ({ title: item.title, index: items.indexOf(item) })),
+              initialIndex: initialIndex,
+              initialContentType: initialContent?.type,
+              initialContentTitle: initialContent?.title,
+              urlHasQuiz: quizIndex !== -1,
+              urlHasDiscussion: discussionIndex !== -1,
+              quizIndexValue: quizIndex !== -1 && quizIndex + 1 < pathParts.length ? pathParts[quizIndex + 1] : 'N/A',
+              discussionIndexValue: discussionIndex !== -1 && discussionIndex + 1 < pathParts.length ? pathParts[discussionIndex + 1] : 'N/A'
+            });
+            
+            setCurrentIndex(initialIndex);
+            setCurrentContent(initialContent);
+            console.log('✅ Set initial content based on URL:', initialContent.type, initialContent.title, 'at index:', initialIndex);
+            
+            // Special check for instructor quiz access
+            if (userRole === 'instructor' && quizIndex !== -1 && initialContent.type !== 'quiz') {
+              console.log('⚠️ Instructor accessed quiz URL but got:', initialContent.type);
+              console.log('🔍 Available content types:', items.map(item => item.type));
+              console.log('🔍 Quiz items:', items.filter(item => item.type === 'quiz').map(item => item.title));
+            }
+          } else {
+            console.log('⚠️ No content items available');
+            setCurrentIndex(0);
+            setCurrentContent(null);
           }
         } else {
           setError('Module not found in course');
@@ -2079,35 +2864,78 @@ function ModuleContentInner() {
       setError(error.message || 'Failed to load course content');
     } finally {
       setLoading(false);
+      // Release the API call
+      releaseApiCall(endpoint);
+      console.log('✅ fetchCourseAndModule completed, released API call');
     }
   };
 
   const fetchCompletionStatus = async () => {
+    console.log('🚀 fetchCompletionStatus called with:', { courseId, moduleId });
+    
+    if (!courseId || !moduleId) {
+      console.log('❌ Missing courseId or moduleId:', { courseId, moduleId });
+      return;
+    }
+    
+    const endpoint = `/api/courses/${courseId}/progress`;
+    
+    // Use global API call limiter
+    if (!isApiCallAllowed(endpoint)) {
+      console.log('🚫 API call blocked by limiter');
+      return;
+    }
+    
     try {
       const token = localStorage.getItem('token');
+      console.log('🔍 Making API call to:', `/api/courses/${courseId}/progress`);
+      console.log('🔍 Token available:', !!token);
+      
       const response = await fetch(`/api/courses/${courseId}/progress`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       });
+      
+      console.log('📊 API response status:', response.status, response.ok);
 
       if (response.ok) {
         const data = await response.json();
+        console.log('📊 Progress API response:', data);
+        
         if (data.success && data.data) {
           const completedSet = new Set();
           // Extract completed items from progress data
           if (data.data.modulesProgress) {
             const moduleProgress = data.data.modulesProgress[moduleId];
+            console.log('📊 Module progress for current module:', {
+              moduleId,
+              moduleProgress,
+              allModulesProgress: data.data.modulesProgress
+            });
+            
             if (moduleProgress && moduleProgress.completedItems) {
               moduleProgress.completedItems.forEach(item => completedSet.add(item));
+              console.log('✅ Extracted completed items:', Array.from(completedSet));
             }
           }
           setCompletedItems(completedSet);
+          console.log('🔄 Updated completedItems state:', Array.from(completedSet));
         }
       }
     } catch (err) {
-      console.error('Error fetching completion status:', err);
+      console.error('❌ Error fetching completion status:', err);
+      console.error('❌ Error details:', {
+        message: err.message,
+        stack: err.stack,
+        courseId,
+        moduleId
+      });
+    } finally {
+      // Release the API call
+      releaseApiCall(endpoint);
+      console.log('✅ fetchCompletionStatus completed, released API call');
     }
   };
 
@@ -2143,6 +2971,20 @@ function ModuleContentInner() {
         });
       }
       
+      const requestBody = {
+        moduleId: moduleId,
+        contentType: currentContent.type,
+        itemIndex: currentIndex,
+        completionKey: currentItemId,
+        completed: true
+      };
+      
+      console.log('🎯 Sending progress update request:', {
+        url: `/api/courses/${courseId}/progress`,
+        method: 'PUT',
+        requestBody: requestBody
+      });
+      
       // Use the same progress endpoint as StudentCourseOverview
       const response = await fetch(`/api/courses/${courseId}/progress`, {
         method: 'PUT',
@@ -2150,13 +2992,7 @@ function ModuleContentInner() {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          moduleId: moduleId,
-          contentType: currentContent.type,
-          itemIndex: currentIndex,
-          completionKey: currentItemId,
-          completed: true
-        })
+        body: JSON.stringify(requestBody)
       });
 
       if (response.ok) {
@@ -2164,7 +3000,15 @@ function ModuleContentInner() {
         console.log('✅ Item marked as complete in ModuleContent:', data);
         
         // Update local completion status
-        setCompletedItems(prev => new Set([...prev, currentItemId]));
+        setCompletedItems(prev => {
+          const newSet = new Set([...prev, currentItemId]);
+          console.log('🔄 Updated completedItems state:', {
+            previous: Array.from(prev),
+            new: Array.from(newSet),
+            addedItem: currentItemId
+          });
+          return newSet;
+        });
         
         // Also update localStorage to sync with StudentCourseOverview
         const currentCompletedItems = Array.from(completedItems);
@@ -2180,6 +3024,11 @@ function ModuleContentInner() {
         window.dispatchEvent(new CustomEvent('courseProgressUpdated', { 
           detail: { courseId, completionKey: currentItemId } 
         }));
+        
+        // Refresh completion status from server to ensure consistency
+        setTimeout(() => {
+          fetchCompletionStatus();
+        }, 500);
         
         // Additional debugging for quiz and discussion
         if (currentContent.type === 'quiz' || currentContent.type === 'discussion') {
@@ -2223,14 +3072,37 @@ function ModuleContentInner() {
         }
       } else {
         const errorText = await response.text();
-        console.error('❌ Error marking item as complete:', errorText);
-        alert('Failed to mark item as complete');
+        console.error('❌ Error marking item as complete:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorText: errorText,
+          requestBody: {
+            moduleId: moduleId,
+            contentType: currentContent.type,
+            itemIndex: currentIndex,
+            completionKey: currentItemId,
+            completed: true
+          }
+        });
+        
+        // Try to parse error as JSON for better error message
+        try {
+          const errorData = JSON.parse(errorText);
+          alert(`Failed to mark item as complete: ${errorData.message || 'Unknown error'}`);
+        } catch (e) {
+          alert(`Failed to mark item as complete (Status: ${response.status})`);
+        }
       }
     } catch (err) {
       console.error('Error marking item as complete:', err);
       alert('Failed to mark item as complete');
     } finally {
       setIsMarkingComplete(false);
+      console.log('🏁 handleMarkComplete finished, final state:', {
+        isMarkingComplete: false,
+        currentItemId: currentContent ? `${currentContent.type}-${currentIndex}` : null,
+        completedItems: Array.from(completedItems)
+      });
     }
   };
 
@@ -2274,9 +3146,15 @@ function ModuleContentInner() {
     
     // Navigate to next item or finish module
     if (currentIndex === contentItems.length - 1) {
-      console.log('🏁 Last item reached, staying on current content');
-      // Last item - stay on current content instead of auto-redirecting
-      // User can manually navigate back using the back button
+      console.log('🏁 Last item reached, navigating back to course overview');
+      // Last item - navigate back to course overview to see progress and next module
+      let returnUrl;
+      if (userRole === 'instructor' || userRole === 'admin') {
+        returnUrl = localStorage.getItem('courseOverviewReturnUrl') || `/instructor/courses/${courseId}/overview`;
+      } else {
+        returnUrl = localStorage.getItem('courseOverviewReturnUrl') || `/courses/${courseId}/overview`;
+      }
+      navigate(returnUrl);
     } else {
       console.log('➡️ Moving to next item');
       handleNext();
@@ -2341,6 +3219,12 @@ function ModuleContentInner() {
         return <Forum style={{ fontSize: '1rem' }} />;
       case 'resource':
         return <Link style={{ fontSize: '1rem' }} />;
+      case 'article':
+        return <Article style={{ fontSize: '1rem' }} />;
+      case 'file':
+        return <AttachFile style={{ fontSize: '1rem' }} />;
+      case 'audio':
+        return <AudioFile style={{ fontSize: '1rem' }} />;
       default:
         return <Description style={{ fontSize: '1rem' }} />;
     }
@@ -2401,7 +3285,7 @@ function ModuleContentInner() {
                 Debug Full Data
               </button>
               <button 
-                onClick={() => navigate(`/courses/${courseId}/overview`)}
+                onClick={() => navigate(getCourseOverviewPath())}
                 style={{ 
                   padding: '0.5rem 1rem', 
                   background: '#007BFF', 
@@ -2535,40 +3419,288 @@ function ModuleContentInner() {
         );
       
       case 'video':
+        console.log('🎥 VIDEO CONTENT DEBUG:', {
+          hasData: !!currentContent.data,
+          dataKeys: currentContent.data ? Object.keys(currentContent.data) : [],
+          videoTitle: currentContent.data?.title,
+          hasUrl: !!currentContent.data?.url,
+          hasFileUrl: !!currentContent.data?.fileUrl,
+          hasPublicUrl: !!currentContent.data?.publicUrl,
+          fullData: currentContent.data
+        });
+        
+        if (!currentContent.data) {
+          return (
+            <ContentBody>
+              <div style={{ padding: '2rem', textAlign: 'center', color: 'red', background: '#fff5f5', border: '1px solid #fed7d7', borderRadius: '8px' }}>
+                <h3>❌ Video Data Missing</h3>
+                <p>The video content is not available.</p>
+              </div>
+            </ContentBody>
+          );
+        }
+
+        // Helper function to get embeddable URL for YouTube/Vimeo
+        const getEmbeddableUrl = (url) => {
+          if (!url) return '';
+          
+          // YouTube
+          if (url.includes('youtube.com/watch?v=')) {
+            const videoId = url.split('v=')[1]?.split('&')[0];
+            return videoId ? `https://www.youtube.com/embed/${videoId}` : url;
+          }
+          
+          // YouTube short format
+          if (url.includes('youtu.be/')) {
+            const videoId = url.split('youtu.be/')[1]?.split('?')[0];
+            return videoId ? `https://www.youtube.com/embed/${videoId}` : url;
+          }
+          
+          // Vimeo
+          if (url.includes('vimeo.com/')) {
+            const videoId = url.split('vimeo.com/')[1]?.split('/')[0];
+            return videoId ? `https://player.vimeo.com/video/${videoId}` : url;
+          }
+          
+          return url;
+        };
+        
         return (
           <ContentBody>
             <div style={{ 
-              background: '#f8f9fa', 
-              padding: '2rem', 
-              borderRadius: '12px',
+              background: 'linear-gradient(135deg, #007BFF 0%, #0056b3 50%, #000000 100%)',
+              padding: '3rem 2rem',
+              borderRadius: '25px',
+              color: 'white',
               textAlign: 'center',
-              border: '1px solid #e5e7eb'
+              position: 'relative',
+              overflow: 'hidden',
+              boxShadow: '0 25px 50px rgba(0,123,255,0.3)',
+              border: '2px solid rgba(255,255,255,0.1)'
             }}>
-              <VideoLibrary style={{ fontSize: '3rem', color: '#007BFF', marginBottom: '1rem' }} />
-              <h3 style={{ marginBottom: '1rem', color: '#1a1a1a' }}>
-                {currentContent.data.title || 'Video Lecture'}
-              </h3>
-              <p style={{ marginBottom: '1.5rem', color: '#6b7280' }}>
-                This video content will open in a new window
-              </p>
+              {/* Animated Background Elements */}
+              <div style={{
+                position: 'absolute',
+                top: '-20%',
+                left: '-20%',
+                width: '140%',
+                height: '140%',
+                background: 'radial-gradient(circle at 30% 30%, rgba(255,255,255,0.1) 0%, transparent 50%)',
+                animation: 'pulse 4s ease-in-out infinite'
+              }} />
+              
+              <div style={{
+                position: 'absolute',
+                bottom: '-10%',
+                right: '-10%',
+                width: '120%',
+                height: '120%',
+                background: 'radial-gradient(circle at 70% 70%, rgba(0,123,255,0.2) 0%, transparent 50%)',
+                animation: 'pulse 6s ease-in-out infinite reverse'
+              }} />
+
+              {/* Floating Geometric Shapes */}
+              <div style={{
+                position: 'absolute',
+                top: '15%',
+                left: '10%',
+                width: '30px',
+                height: '30px',
+                background: 'rgba(255,255,255,0.15)',
+                borderRadius: '50%',
+                animation: 'float 5s ease-in-out infinite',
+                backdropFilter: 'blur(5px)'
+              }} />
+              
+              <div style={{
+                position: 'absolute',
+                top: '60%',
+                right: '15%',
+                width: '20px',
+                height: '20px',
+                background: 'rgba(0,123,255,0.3)',
+                borderRadius: '50%',
+                animation: 'float 7s ease-in-out infinite reverse'
+              }} />
+              
+              <div style={{
+                position: 'absolute',
+                bottom: '20%',
+                left: '20%',
+                width: '15px',
+                height: '15px',
+                background: 'rgba(255,255,255,0.2)',
+                borderRadius: '50%',
+                animation: 'float 4s ease-in-out infinite'
+              }} />
+              
+              {/* Content */}
+              <div style={{ position: 'relative', zIndex: 2 }}>
+                <h2 style={{ 
+                  marginBottom: '2rem', 
+                  fontSize: '3rem', 
+                  fontWeight: '800',
+                  textShadow: '0 4px 8px rgba(0,0,0,0.5)',
+                  background: 'linear-gradient(45deg, #ffffff, #e6f3ff)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text'
+                }}>
+                  {currentContent.data.title || 'Video Content'}
+                </h2>
+
+                {/* Description Section */}
+                {currentContent.data.description && (
+                  <div style={{ 
+                    background: 'rgba(255,255,255,0.1)', 
+                    padding: '2.5rem', 
+                    borderRadius: '20px', 
+                    marginBottom: '2.5rem',
+                    backdropFilter: 'blur(15px)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    boxShadow: '0 10px 30px rgba(0,0,0,0.2)'
+                  }}>
+                    <p style={{ 
+                      color: 'white', 
+                      lineHeight: '1.8', 
+                      margin: 0,
+                      fontSize: '1.2rem',
+                      textShadow: '0 2px 4px rgba(0,0,0,0.3)',
+                      fontWeight: '500'
+                    }}>
+                      {currentContent.data.description}
+                    </p>
+                  </div>
+                )}
+
+                {/* Video Link Section - Only show for instructors */}
+                {userRole === 'instructor' && currentContent.data.url && (
+                  <div style={{ 
+                    background: 'rgba(255,255,255,0.1)', 
+                    padding: '2rem', 
+                    borderRadius: '20px', 
+                    marginBottom: '2rem',
+                    backdropFilter: 'blur(15px)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    boxShadow: '0 10px 30px rgba(0,0,0,0.2)'
+                  }}>
+                    <h3 style={{ 
+                      color: 'white', 
+                      fontSize: '1.5rem', 
+                      marginBottom: '1rem',
+                      textShadow: '0 2px 4px rgba(0,0,0,0.3)'
+                    }}>
+                      Video Link (Instructor View)
+                    </h3>
+                    <a 
+                      href={currentContent.data.url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      style={{
+                        color: '#87CEEB',
+                        textDecoration: 'underline',
+                        fontSize: '1.1rem',
+                        wordBreak: 'break-all'
+                      }}
+                    >
+                      {currentContent.data.url}
+                    </a>
+                  </div>
+                )}
+
+                {/* Video Player Section */}
+                {(currentContent.data.url || currentContent.data.fileUrl || currentContent.data.publicUrl) ? (
+                  <div style={{ textAlign: 'center' }}>
+                    {/* Video Player */}
+                    <div style={{ 
+                      marginBottom: '2rem',
+                      borderRadius: '15px',
+                      overflow: 'hidden',
+                      boxShadow: '0 15px 35px rgba(0,0,0,0.3)'
+                    }}>
+                      {currentContent.data.url && (
+                        <iframe
+                          src={getEmbeddableUrl(currentContent.data.url)}
+                          title={currentContent.data.title || 'Video'}
+                          width="100%"
+                          height="400"
+                          frameBorder="0"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                          style={{ borderRadius: '15px' }}
+                        />
+                      )}
+                      {(currentContent.data.fileUrl || currentContent.data.publicUrl) && (
+                        <video
+                          controls
+                          width="100%"
+                          height="400"
+                          style={{ borderRadius: '15px' }}
+                        >
+                          <source src={currentContent.data.fileUrl || currentContent.data.publicUrl} type="video/mp4" />
+                          Your browser does not support the video tag.
+                        </video>
+                      )}
+                    </div>
+
+                    {/* Watch Button - Only for file uploads */}
+                    {(currentContent.data.fileUrl || currentContent.data.publicUrl) && (
               <button
-                onClick={() => window.open(currentContent.data.url, '_blank')}
+                        onClick={() => {
+                          const videoUrl = currentContent.data.fileUrl || currentContent.data.publicUrl;
+                          console.log('🎥 Opening video URL:', videoUrl);
+                          window.open(videoUrl, '_blank');
+                        }}
                 style={{
-                  background: '#007BFF',
+                          background: 'rgba(255,255,255,0.15)',
                   color: 'white',
-                  border: 'none',
-                  padding: '0.875rem 2rem',
-                  borderRadius: '8px',
-                  fontSize: '1rem',
-                  fontWeight: '600',
+                          border: '2px solid rgba(255,255,255,0.3)',
+                          padding: '1.5rem 4rem',
+                          borderRadius: '50px',
+                          fontSize: '1.3rem',
+                          fontWeight: '700',
                   cursor: 'pointer',
-                  transition: 'all 0.2s ease'
-                }}
-                onMouseOver={e => e.target.style.background = '#0056b3'}
-                onMouseOut={e => e.target.style.background = '#007BFF'}
-              >
-                Watch Video →
+                          transition: 'all 0.4s ease',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '1rem',
+                          backdropFilter: 'blur(15px)',
+                          boxShadow: '0 15px 35px rgba(0,0,0,0.3)',
+                          textShadow: '0 2px 4px rgba(0,0,0,0.3)'
+                        }}
+                        onMouseOver={e => {
+                          e.target.style.background = 'rgba(255,255,255,0.25)';
+                          e.target.style.transform = 'translateY(-3px) scale(1.05)';
+                          e.target.style.boxShadow = '0 20px 40px rgba(0,0,0,0.4)';
+                          e.target.style.border = '2px solid rgba(255,255,255,0.5)';
+                        }}
+                        onMouseOut={e => {
+                          e.target.style.background = 'rgba(255,255,255,0.15)';
+                          e.target.style.transform = 'translateY(0) scale(1)';
+                          e.target.style.boxShadow = '0 15px 35px rgba(0,0,0,0.3)';
+                          e.target.style.border = '2px solid rgba(255,255,255,0.3)';
+                        }}
+                      >
+                        <span style={{ fontSize: '1.8rem' }}>🎥</span>
+                        Watch Video
               </button>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ 
+                    padding: '2rem', 
+                    background: 'rgba(255,255,255,0.1)', 
+                    border: '1px solid rgba(255,255,255,0.2)', 
+                    borderRadius: '20px', 
+                    color: 'white',
+                    backdropFilter: 'blur(15px)',
+                    boxShadow: '0 10px 30px rgba(0,0,0,0.2)'
+                  }}>
+                    <strong style={{ fontSize: '1.2rem' }}>⚠️ Video Unavailable</strong><br/>
+                    <span style={{ fontSize: '1rem', opacity: '0.9' }}>The video URL is missing. Please contact your instructor.</span>
+                  </div>
+                )}
+              </div>
             </div>
           </ContentBody>
         );
@@ -2700,10 +3832,24 @@ function ModuleContentInner() {
                 </div>
                 <div style={{ marginTop: '1rem' }}>
                   <button 
-                    onClick={() => window.testBackendData && window.testBackendData()}
+                    onClick={() => window.debugQuizData && window.debugQuizData()}
                     style={{ 
                       padding: '0.5rem 1rem', 
                       background: '#28a745', 
+                      color: 'white', 
+                      border: 'none', 
+                      borderRadius: '4px', 
+                      cursor: 'pointer',
+                      marginRight: '0.5rem'
+                    }}
+                  >
+                    Debug Quiz Data
+                  </button>
+                  <button 
+                    onClick={() => window.testBackendData && window.testBackendData()}
+                    style={{ 
+                      padding: '0.5rem 1rem', 
+                      background: '#007BFF', 
                       color: 'white', 
                       border: 'none', 
                       borderRadius: '4px', 
@@ -2735,10 +3881,24 @@ function ModuleContentInner() {
                 </div>
                 <div style={{ marginTop: '1rem' }}>
                   <button 
-                    onClick={() => window.testBackendData && window.testBackendData()}
+                    onClick={() => window.debugQuizData && window.debugQuizData()}
                     style={{ 
                       padding: '0.5rem 1rem', 
                       background: '#28a745', 
+                      color: 'white', 
+                      border: 'none', 
+                      borderRadius: '4px', 
+                      cursor: 'pointer',
+                      marginRight: '0.5rem'
+                    }}
+                  >
+                    Debug Quiz Data
+                  </button>
+                  <button 
+                    onClick={() => window.testBackendData && window.testBackendData()}
+                    style={{ 
+                      padding: '0.5rem 1rem', 
+                      background: '#007BFF', 
                       color: 'white', 
                       border: 'none', 
                       borderRadius: '4px', 
@@ -2991,6 +4151,604 @@ function ModuleContentInner() {
         const discussionIndex = contentItems.slice(0, currentIndex).filter(item => item.type === 'discussion').length;
         return <DiscussionComponent discussion={currentContent.data} courseId={courseId} moduleId={moduleId} discussionIndex={discussionIndex} />;
       
+      case 'article':
+        console.log('📄 ARTICLE CONTENT DEBUG:', {
+          hasData: !!currentContent.data,
+          dataKeys: currentContent.data ? Object.keys(currentContent.data) : [],
+          articleTitle: currentContent.data?.title,
+          hasContent: !!currentContent.data?.content,
+          hasUrl: !!currentContent.data?.url,
+          contentLength: currentContent.data?.content?.length || 0,
+          fullData: currentContent.data
+        });
+        
+        if (!currentContent.data) {
+          return (
+            <ContentBody>
+              <div style={{ padding: '2rem', textAlign: 'center', color: 'red', background: '#fff5f5', border: '1px solid #fed7d7', borderRadius: '8px' }}>
+                <h3>❌ Article Data Missing</h3>
+                <p>The article content is not available.</p>
+              </div>
+            </ContentBody>
+          );
+        }
+        
+        // If it's an external URL, show a link to open it
+        if (currentContent.data.url) {
+          return (
+            <ContentBody>
+              <div style={{ 
+                background: 'linear-gradient(135deg, #007BFF 0%, #0056b3 50%, #000000 100%)',
+                padding: '3rem 2rem',
+                borderRadius: '25px',
+                color: 'white',
+                textAlign: 'center',
+                position: 'relative',
+                overflow: 'hidden',
+                boxShadow: '0 25px 50px rgba(0,123,255,0.3)',
+                border: '2px solid rgba(255,255,255,0.1)'
+              }}>
+                {/* Animated Background Elements */}
+                <div style={{
+                  position: 'absolute',
+                  top: '-20%',
+                  left: '-20%',
+                  width: '140%',
+                  height: '140%',
+                  background: 'radial-gradient(circle at 30% 30%, rgba(255,255,255,0.1) 0%, transparent 50%)',
+                  animation: 'pulse 4s ease-in-out infinite'
+                }} />
+                
+                <div style={{
+                  position: 'absolute',
+                  bottom: '-10%',
+                  right: '-10%',
+                  width: '120%',
+                  height: '120%',
+                  background: 'radial-gradient(circle at 70% 70%, rgba(0,123,255,0.2) 0%, transparent 50%)',
+                  animation: 'pulse 6s ease-in-out infinite reverse'
+                }} />
+
+                {/* Floating Geometric Shapes */}
+                <div style={{
+                  position: 'absolute',
+                  top: '15%',
+                  left: '10%',
+                  width: '30px',
+                  height: '30px',
+                  background: 'rgba(255,255,255,0.15)',
+                  borderRadius: '50%',
+                  animation: 'float 5s ease-in-out infinite',
+                  backdropFilter: 'blur(5px)'
+                }} />
+                
+                <div style={{
+                  position: 'absolute',
+                  top: '60%',
+                  right: '15%',
+                  width: '20px',
+                  height: '20px',
+                  background: 'rgba(0,123,255,0.3)',
+                  borderRadius: '50%',
+                  animation: 'float 7s ease-in-out infinite reverse'
+                }} />
+                
+                <div style={{
+                  position: 'absolute',
+                  bottom: '20%',
+                  left: '20%',
+                  width: '15px',
+                  height: '15px',
+                  background: 'rgba(255,255,255,0.2)',
+                  borderRadius: '50%',
+                  animation: 'float 4s ease-in-out infinite'
+                }} />
+                
+                {/* Content */}
+                <div style={{ position: 'relative', zIndex: 2 }}>
+                  <h2 style={{ 
+                    marginBottom: '2rem', 
+                    fontSize: '3rem', 
+                    fontWeight: '800',
+                    textShadow: '0 4px 8px rgba(0,0,0,0.5)',
+                    background: 'linear-gradient(45deg, #ffffff, #e6f3ff)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    backgroundClip: 'text'
+                  }}>
+                  {currentContent.data.title || 'Article'}
+                </h2>
+
+                  {/* Description Section */}
+                {currentContent.data.description && (
+                    <div style={{ 
+                      background: 'rgba(255,255,255,0.1)', 
+                      padding: '2.5rem', 
+                      borderRadius: '20px', 
+                      marginBottom: '2.5rem',
+                      backdropFilter: 'blur(15px)',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      boxShadow: '0 10px 30px rgba(0,0,0,0.2)'
+                    }}>
+                      <p style={{ 
+                        color: 'white', 
+                        lineHeight: '1.8', 
+                        margin: 0,
+                        fontSize: '1.2rem',
+                        textShadow: '0 2px 4px rgba(0,0,0,0.3)',
+                        fontWeight: '500'
+                      }}>
+                    {currentContent.data.description}
+                  </p>
+                    </div>
+                )}
+
+                  {/* Action Section */}
+                  <div style={{ textAlign: 'center' }}>
+                <button
+                  onClick={() => window.open(currentContent.data.url, '_blank')}
+                  style={{
+                        background: 'rgba(255,255,255,0.15)',
+                    color: 'white',
+                        border: '2px solid rgba(255,255,255,0.3)',
+                        padding: '1.5rem 4rem',
+                        borderRadius: '50px',
+                        fontSize: '1.3rem',
+                        fontWeight: '700',
+                    cursor: 'pointer',
+                        transition: 'all 0.4s ease',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '1rem',
+                        backdropFilter: 'blur(15px)',
+                        boxShadow: '0 15px 35px rgba(0,0,0,0.3)',
+                        textShadow: '0 2px 4px rgba(0,0,0,0.3)'
+                      }}
+                      onMouseOver={e => {
+                        e.target.style.background = 'rgba(255,255,255,0.25)';
+                        e.target.style.transform = 'translateY(-3px) scale(1.05)';
+                        e.target.style.boxShadow = '0 20px 40px rgba(0,0,0,0.4)';
+                        e.target.style.border = '2px solid rgba(255,255,255,0.5)';
+                      }}
+                      onMouseOut={e => {
+                        e.target.style.background = 'rgba(255,255,255,0.15)';
+                        e.target.style.transform = 'translateY(0) scale(1)';
+                        e.target.style.boxShadow = '0 15px 35px rgba(0,0,0,0.3)';
+                        e.target.style.border = '2px solid rgba(255,255,255,0.3)';
+                      }}
+                    >
+                      <span style={{ fontSize: '1.8rem' }}>📰</span>
+                      Read Article
+                </button>
+                  </div>
+                </div>
+              </div>
+            </ContentBody>
+          );
+        }
+        
+        // If it has content, display it directly
+        if (currentContent.data.content) {
+          return (
+            <ContentBody>
+              <div style={{ padding: '2rem' }}>
+                <h2 style={{ marginBottom: '1.5rem', color: '#1a1a1a' }}>
+                  {currentContent.data.title || 'Article'}
+                </h2>
+                <div dangerouslySetInnerHTML={{ __html: currentContent.data.content }} />
+              </div>
+            </ContentBody>
+          );
+        }
+        
+        // Fallback
+        return (
+          <ContentBody>
+            <div style={{ padding: '2rem', textAlign: 'center', color: '#d69e2e', background: '#fffbeb', border: '1px solid #f6e05e', borderRadius: '8px' }}>
+              <h3>⚠️ Article Content Unavailable</h3>
+              <p>This article has no content or URL to display.</p>
+            </div>
+          </ContentBody>
+        );
+      
+      case 'file':
+        console.log('📁 FILE CONTENT DEBUG:', {
+          hasData: !!currentContent.data,
+          dataKeys: currentContent.data ? Object.keys(currentContent.data) : [],
+          fileName: currentContent.data?.fileName,
+          hasUrl: !!currentContent.data?.url,
+          hasFileUrl: !!currentContent.data?.fileUrl,
+          hasPublicUrl: !!currentContent.data?.publicUrl,
+          url: currentContent.data?.url,
+          fileUrl: currentContent.data?.fileUrl,
+          publicUrl: currentContent.data?.publicUrl,
+          fullData: currentContent.data
+        });
+        
+        if (!currentContent.data) {
+          return (
+            <ContentBody>
+              <div style={{ padding: '2rem', textAlign: 'center', color: 'red', background: '#fff5f5', border: '1px solid #fed7d7', borderRadius: '8px' }}>
+                <h3>❌ File Data Missing</h3>
+                <p>The file content is not available.</p>
+              </div>
+            </ContentBody>
+          );
+        }
+        
+        return (
+          <ContentBody>
+            <div style={{ 
+              background: 'linear-gradient(135deg, #007BFF 0%, #0056b3 50%, #000000 100%)',
+              padding: '3rem 2rem',
+              borderRadius: '25px',
+              color: 'white',
+              textAlign: 'center',
+              position: 'relative',
+              overflow: 'hidden',
+              boxShadow: '0 25px 50px rgba(0,123,255,0.3)',
+              border: '2px solid rgba(255,255,255,0.1)'
+            }}>
+              {/* Animated Background Elements */}
+              <div style={{
+                position: 'absolute',
+                top: '-20%',
+                left: '-20%',
+                width: '140%',
+                height: '140%',
+                background: 'radial-gradient(circle at 30% 30%, rgba(255,255,255,0.1) 0%, transparent 50%)',
+                animation: 'pulse 4s ease-in-out infinite'
+              }} />
+              
+              <div style={{
+                position: 'absolute',
+                bottom: '-10%',
+                right: '-10%',
+                width: '120%',
+                height: '120%',
+                background: 'radial-gradient(circle at 70% 70%, rgba(0,123,255,0.2) 0%, transparent 50%)',
+                animation: 'pulse 6s ease-in-out infinite reverse'
+              }} />
+
+              {/* Floating Geometric Shapes */}
+              <div style={{
+                position: 'absolute',
+                top: '15%',
+                left: '10%',
+                width: '30px',
+                height: '30px',
+                background: 'rgba(255,255,255,0.15)',
+                borderRadius: '50%',
+                animation: 'float 5s ease-in-out infinite',
+                backdropFilter: 'blur(5px)'
+              }} />
+              
+              <div style={{
+                position: 'absolute',
+                top: '60%',
+                right: '15%',
+                width: '20px',
+                height: '20px',
+                background: 'rgba(0,123,255,0.3)',
+                borderRadius: '50%',
+                animation: 'float 7s ease-in-out infinite reverse'
+              }} />
+              
+              <div style={{
+                position: 'absolute',
+                bottom: '20%',
+                left: '20%',
+                width: '15px',
+                height: '15px',
+                background: 'rgba(255,255,255,0.2)',
+                borderRadius: '50%',
+                animation: 'float 4s ease-in-out infinite'
+              }} />
+              
+              {/* Content */}
+              <div style={{ position: 'relative', zIndex: 2 }}>
+                <h2 style={{ 
+                  marginBottom: '2rem', 
+                  fontSize: '3rem', 
+                  fontWeight: '800',
+                  textShadow: '0 4px 8px rgba(0,0,0,0.5)',
+                  background: 'linear-gradient(45deg, #ffffff, #e6f3ff)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text'
+                }}>
+                  {currentContent.data.title || 'File Content'}
+                </h2>
+
+                {/* Description Section */}
+              {currentContent.data.description && (
+                  <div style={{ 
+                    background: 'rgba(255,255,255,0.1)', 
+                    padding: '2.5rem', 
+                    borderRadius: '20px', 
+                    marginBottom: '2.5rem',
+                    backdropFilter: 'blur(15px)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    boxShadow: '0 10px 30px rgba(0,0,0,0.2)'
+                  }}>
+                    <p style={{ 
+                      color: 'white', 
+                      lineHeight: '1.8', 
+                      margin: 0,
+                      fontSize: '1.2rem',
+                      textShadow: '0 2px 4px rgba(0,0,0,0.3)',
+                      fontWeight: '500'
+                    }}>
+                  {currentContent.data.description}
+                </p>
+                  </div>
+              )}
+
+                {/* Action Section */}
+                <div style={{ textAlign: 'center' }}>
+                  {(currentContent.data.url || currentContent.data.fileUrl || currentContent.data.publicUrl) ? (
+                <button
+                      onClick={() => {
+                        const fileUrl = currentContent.data.fileUrl || currentContent.data.publicUrl || currentContent.data.url;
+                        console.log('📁 Opening file URL:', fileUrl);
+                        window.open(fileUrl, '_blank');
+                      }}
+                  style={{
+                        background: 'rgba(255,255,255,0.15)',
+                    color: 'white',
+                        border: '2px solid rgba(255,255,255,0.3)',
+                        padding: '1.5rem 4rem',
+                        borderRadius: '50px',
+                        fontSize: '1.3rem',
+                        fontWeight: '700',
+                    cursor: 'pointer',
+                        transition: 'all 0.4s ease',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '1rem',
+                        backdropFilter: 'blur(15px)',
+                        boxShadow: '0 15px 35px rgba(0,0,0,0.3)',
+                        textShadow: '0 2px 4px rgba(0,0,0,0.3)'
+                      }}
+                      onMouseOver={e => {
+                        e.target.style.background = 'rgba(255,255,255,0.25)';
+                        e.target.style.transform = 'translateY(-3px) scale(1.05)';
+                        e.target.style.boxShadow = '0 20px 40px rgba(0,0,0,0.4)';
+                        e.target.style.border = '2px solid rgba(255,255,255,0.5)';
+                      }}
+                      onMouseOut={e => {
+                        e.target.style.background = 'rgba(255,255,255,0.15)';
+                        e.target.style.transform = 'translateY(0) scale(1)';
+                        e.target.style.boxShadow = '0 15px 35px rgba(0,0,0,0.3)';
+                        e.target.style.border = '2px solid rgba(255,255,255,0.3)';
+                      }}
+                    >
+                      <span style={{ fontSize: '1.8rem' }}>📄</span>
+                      Explore Content
+                </button>
+                  ) : (
+                    <div style={{ 
+                      padding: '2rem', 
+                      background: 'rgba(255,255,255,0.1)', 
+                      border: '1px solid rgba(255,255,255,0.2)', 
+                      borderRadius: '20px', 
+                      color: 'white',
+                      backdropFilter: 'blur(15px)',
+                      boxShadow: '0 10px 30px rgba(0,0,0,0.2)'
+                    }}>
+                      <strong style={{ fontSize: '1.2rem' }}>⚠️ Content Unavailable</strong><br/>
+                      <span style={{ fontSize: '1rem', opacity: '0.9' }}>The file URL is missing. Please contact your instructor.</span>
+                    </div>
+              )}
+            </div>
+              </div>
+            </div>
+
+            <style>
+              {`
+                @keyframes float {
+                  0%, 100% { transform: translateY(0px) rotate(0deg); }
+                  50% { transform: translateY(-15px) rotate(180deg); }
+                }
+                @keyframes pulse {
+                  0%, 100% { opacity: 0.3; transform: scale(1); }
+                  50% { opacity: 0.6; transform: scale(1.1); }
+                }
+              `}
+            </style>
+          </ContentBody>
+        );
+      
+      case 'audio':
+        console.log('🎵 AUDIO CONTENT DEBUG:', {
+          hasData: !!currentContent.data,
+          dataKeys: currentContent.data ? Object.keys(currentContent.data) : [],
+          audioTitle: currentContent.data?.title,
+          hasUrl: !!currentContent.data?.url,
+          fullData: currentContent.data
+        });
+        
+        if (!currentContent.data) {
+          return (
+            <ContentBody>
+              <div style={{ padding: '2rem', textAlign: 'center', color: 'red', background: '#fff5f5', border: '1px solid #fed7d7', borderRadius: '8px' }}>
+                <h3>❌ Audio Data Missing</h3>
+                <p>The audio content is not available.</p>
+              </div>
+            </ContentBody>
+          );
+        }
+        
+        return (
+          <ContentBody>
+            <div style={{ 
+              background: 'linear-gradient(135deg, #007BFF 0%, #0056b3 50%, #000000 100%)',
+              padding: '3rem 2rem',
+              borderRadius: '25px',
+              color: 'white',
+              textAlign: 'center',
+              position: 'relative',
+              overflow: 'hidden',
+              boxShadow: '0 25px 50px rgba(0,123,255,0.3)',
+              border: '2px solid rgba(255,255,255,0.1)'
+            }}>
+              {/* Animated Background Elements */}
+              <div style={{
+                position: 'absolute',
+                top: '-20%',
+                left: '-20%',
+                width: '140%',
+                height: '140%',
+                background: 'radial-gradient(circle at 30% 30%, rgba(255,255,255,0.1) 0%, transparent 50%)',
+                animation: 'pulse 4s ease-in-out infinite'
+              }} />
+              
+              <div style={{
+                position: 'absolute',
+                bottom: '-10%',
+                right: '-10%',
+                width: '120%',
+                height: '120%',
+                background: 'radial-gradient(circle at 70% 70%, rgba(0,123,255,0.2) 0%, transparent 50%)',
+                animation: 'pulse 6s ease-in-out infinite reverse'
+              }} />
+
+              {/* Floating Geometric Shapes */}
+              <div style={{
+                position: 'absolute',
+                top: '15%',
+                left: '10%',
+                width: '30px',
+                height: '30px',
+                background: 'rgba(255,255,255,0.15)',
+                borderRadius: '50%',
+                animation: 'float 5s ease-in-out infinite',
+                backdropFilter: 'blur(5px)'
+              }} />
+              
+              <div style={{
+                position: 'absolute',
+                top: '60%',
+                right: '15%',
+                width: '20px',
+                height: '20px',
+                background: 'rgba(0,123,255,0.3)',
+                borderRadius: '50%',
+                animation: 'float 7s ease-in-out infinite reverse'
+              }} />
+              
+              <div style={{
+                position: 'absolute',
+                bottom: '20%',
+                left: '20%',
+                width: '15px',
+                height: '15px',
+                background: 'rgba(255,255,255,0.2)',
+                borderRadius: '50%',
+                animation: 'float 4s ease-in-out infinite'
+              }} />
+              
+              {/* Content */}
+              <div style={{ position: 'relative', zIndex: 2 }}>
+                <h2 style={{ 
+                  marginBottom: '2rem', 
+                  fontSize: '3rem', 
+                  fontWeight: '800',
+                  textShadow: '0 4px 8px rgba(0,0,0,0.5)',
+                  background: 'linear-gradient(45deg, #ffffff, #e6f3ff)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text'
+                }}>
+                {currentContent.data.title || 'Audio Content'}
+                </h2>
+
+                {/* Description Section */}
+              {currentContent.data.description && (
+                  <div style={{ 
+                    background: 'rgba(255,255,255,0.1)', 
+                    padding: '2.5rem', 
+                    borderRadius: '20px', 
+                    marginBottom: '2.5rem',
+                    backdropFilter: 'blur(15px)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    boxShadow: '0 10px 30px rgba(0,0,0,0.2)'
+                  }}>
+                    <p style={{ 
+                      color: 'white', 
+                      lineHeight: '1.8', 
+                      margin: 0,
+                      fontSize: '1.2rem',
+                      textShadow: '0 2px 4px rgba(0,0,0,0.3)',
+                      fontWeight: '500'
+                    }}>
+                  {currentContent.data.description}
+                </p>
+                  </div>
+              )}
+
+                {/* Action Section */}
+                <div style={{ textAlign: 'center' }}>
+                  {(currentContent.data.url || currentContent.data.fileUrl || currentContent.data.publicUrl) ? (
+                <button
+                      onClick={() => {
+                        const audioUrl = currentContent.data.fileUrl || currentContent.data.publicUrl || currentContent.data.url;
+                        console.log('🎵 Opening audio URL:', audioUrl);
+                        window.open(audioUrl, '_blank');
+                      }}
+                  style={{
+                        background: 'rgba(255,255,255,0.15)',
+                    color: 'white',
+                        border: '2px solid rgba(255,255,255,0.3)',
+                        padding: '1.5rem 4rem',
+                        borderRadius: '50px',
+                        fontSize: '1.3rem',
+                        fontWeight: '700',
+                    cursor: 'pointer',
+                        transition: 'all 0.4s ease',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '1rem',
+                        backdropFilter: 'blur(15px)',
+                        boxShadow: '0 15px 35px rgba(0,0,0,0.3)',
+                        textShadow: '0 2px 4px rgba(0,0,0,0.3)'
+                      }}
+                      onMouseOver={e => {
+                        e.target.style.background = 'rgba(255,255,255,0.25)';
+                        e.target.style.transform = 'translateY(-3px) scale(1.05)';
+                        e.target.style.boxShadow = '0 20px 40px rgba(0,0,0,0.4)';
+                        e.target.style.border = '2px solid rgba(255,255,255,0.5)';
+                      }}
+                      onMouseOut={e => {
+                        e.target.style.background = 'rgba(255,255,255,0.15)';
+                        e.target.style.transform = 'translateY(0) scale(1)';
+                        e.target.style.boxShadow = '0 15px 35px rgba(0,0,0,0.3)';
+                        e.target.style.border = '2px solid rgba(255,255,255,0.3)';
+                      }}
+                    >
+                      <span style={{ fontSize: '1.8rem' }}>🎵</span>
+                      Listen Audio
+                </button>
+                  ) : (
+                    <div style={{ 
+                      padding: '2rem', 
+                      background: 'rgba(255,255,255,0.1)', 
+                      border: '1px solid rgba(255,255,255,0.2)', 
+                      borderRadius: '20px', 
+                      color: 'white',
+                      backdropFilter: 'blur(15px)',
+                      boxShadow: '0 10px 30px rgba(0,0,0,0.2)'
+                    }}>
+                      <strong style={{ fontSize: '1.2rem' }}>⚠️ Audio Unavailable</strong><br/>
+                      <span style={{ fontSize: '1rem', opacity: '0.9' }}>The audio URL is missing. Please contact your instructor.</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </ContentBody>
+        );
+      
       default:
         console.log('❌ Unknown content type:', currentContent.type);
         return (
@@ -3031,7 +4789,7 @@ function ModuleContentInner() {
           </div>
           <div style={{ marginTop: '1rem' }}>
             <button 
-              onClick={() => navigate(`/courses/${courseId}/overview`)}
+              onClick={() => navigate(getCourseOverviewPath())}
               style={{ padding: '0.5rem 1rem', background: '#007BFF', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
             >
               Back to Course Overview
@@ -3047,7 +4805,7 @@ function ModuleContentInner() {
     return (
       <Container>
         <Header>
-          <BackButton onClick={() => navigate(`/courses/${courseId}/overview`)}>
+          <BackButton onClick={() => navigate(getCourseOverviewPath())}>
             <ArrowBack style={{ fontSize: '1rem' }} />
             Back to Course Overview
           </BackButton>
@@ -3080,7 +4838,7 @@ function ModuleContentInner() {
               Test Backend Data
             </button>
             <button 
-              onClick={() => navigate(`/courses/${courseId}/overview`)}
+              onClick={() => navigate(getCourseOverviewPath())}
               style={{ padding: '0.75rem 1.5rem', background: '#007BFF', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
             >
               Back to Course Overview
@@ -3124,73 +4882,142 @@ function ModuleContentInner() {
     }))
   });
 
-  // Add debug function 
-  const debugContentStructure = () => {
-    console.log('🔍 DEBUG CONTENT STRUCTURE:', {
-      course: course ? {
-        id: course._id,
-        title: course.title,
-        modulesCount: course.modules?.length || 0
-      } : null,
-      module: module ? {
-        id: module._id,
-        title: module.title,
-        hasDescription: !!module.description,
-        hasContent: !!module.content,
-        hasVideoUrl: !!module.videoUrl,
-        hasResources: !!module.resources && module.resources.length > 0,
-        hasAssessments: !!module.assessments && module.assessments.length > 0,
-        hasQuizzes: !!module.quizzes && module.quizzes.length > 0,
-        hasDiscussions: !!module.discussions && module.discussions.length > 0,
-        moduleKeys: module ? Object.keys(module) : [],
-        fullModule: module
-      } : null,
-      contentItems: contentItems.map(item => ({
+  // Additional debugging for completion key matching
+  if (currentItemId && completedItems.size > 0) {
+    console.log('🔍 Completion key matching debug:', {
+      currentItemId,
+      completedItemsArray: Array.from(completedItems),
+      hasMatch: completedItems.has(currentItemId),
+      exactMatches: Array.from(completedItems).filter(item => item === currentItemId),
+      partialMatches: Array.from(completedItems).filter(item => item.includes(currentContent.type))
+    });
+  }
+
+  // Debug function for content loading
+  window.debugContentLoading = () => {
+    console.log('🔍 DEBUG CONTENT LOADING:');
+    console.log('📋 Content items:', contentItems);
+    console.log('📋 Current content:', currentContent);
+    console.log('📋 Current index:', currentIndex);
+    console.log('📋 Module:', module);
+    console.log('📋 Course:', course);
+    console.log('📋 URL params:', { quizId, discussionId, assessmentId, resourceId });
+    console.log('📋 Available discussions:', contentItems.filter(item => item.type === 'discussion'));
+  };
+
+  // Add instructor-specific debug function
+  const debugInstructorQuizAccess = () => {
+    console.log('👨‍🏫 INSTRUCTOR QUIZ ACCESS DEBUG:');
+    console.log('Current URL:', window.location.href);
+    console.log('User Role:', userRole);
+    console.log('Is Instructor:', userRole === 'instructor');
+    
+    // Check if we're on the correct instructor route
+    const isInstructorRoute = window.location.pathname.includes('/instructor/');
+    console.log('Is Instructor Route:', isInstructorRoute);
+    
+    // Check current content
+    console.log('Current Content Type:', currentContent?.type);
+    console.log('Current Content Data:', currentContent?.data);
+    
+    // Check content items
+    console.log('🔍 CONTENT ITEMS ANALYSIS:');
+    console.log('Total content items:', contentItems.length);
+    contentItems.forEach((item, index) => {
+      console.log(`Item ${index}:`, {
         type: item.type,
         title: item.title,
         hasData: !!item.data,
-        dataKeys: item.data ? Object.keys(item.data) : [],
-        dataPreview: item.data ? (typeof item.data === 'string' ? item.data.substring(0, 100) + '...' : item.data) : null
-      })),
-      currentContent: currentContent ? {
-        type: currentContent.type,
-        title: currentContent.title,
-        hasData: !!currentContent.data,
-        dataType: typeof currentContent.data,
-        dataKeys: currentContent.data ? Object.keys(currentContent.data) : [],
-        dataPreview: currentContent.data ? (typeof currentContent.data === 'string' ? currentContent.data.substring(0, 100) + '...' : currentContent.data) : null
-      } : null,
-      urlInfo: {
-        pathname: window.location.pathname,
-        courseId,
-        moduleId,
-        quizId,
-        discussionId,
-        assessmentId,
-        resourceId
-      }
+        dataKeys: item.data ? Object.keys(item.data) : []
+      });
     });
+    
+    // Check quiz items specifically
+    const quizItems = contentItems.filter(item => item.type === 'quiz');
+    console.log('📝 QUIZ ITEMS FOUND:', quizItems.length);
+    quizItems.forEach((quiz, index) => {
+      console.log(`Quiz ${index}:`, {
+        title: quiz.title,
+        hasQuestions: !!quiz.data?.questions,
+        questionCount: quiz.data?.questions?.length || 0,
+        quizId: quiz.data?._id
+      });
+    });
+    
+    // Test API endpoints
+    const testQuizAPI = async () => {
+      console.log('🧪 TESTING QUIZ API ENDPOINTS...');
+      const token = localStorage.getItem('token');
+      
+      try {
+        // Test instructor quiz endpoint
+        const response = await fetch('/api/instructor/quizzes/test-quiz-id', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        console.log('🔍 Instructor quiz API test response:', response.status, response.statusText);
+        
+        // Test student quiz endpoint
+        const studentResponse = await fetch('/api/instructor/quizzes/test-quiz-id/student', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        console.log('🔍 Student quiz API test response:', studentResponse.status, studentResponse.statusText);
+        
+      } catch (error) {
+        console.error('❌ Quiz API test error:', error);
+      }
+    };
+    
+    testQuizAPI();
+    
+    // Check if quiz data is available
+    if (currentContent?.type === 'quiz' && currentContent?.data) {
+      console.log('✅ Quiz data found for instructor view');
+      console.log('Quiz Title:', currentContent.data.title);
+      console.log('Question Count:', currentContent.data.questions?.length || 0);
+      
+      // Show each question with its correct answer
+      currentContent.data.questions?.forEach((question, index) => {
+        console.log(`Question ${index + 1}:`, {
+          type: question.type,
+          question: question.question,
+          correctAnswer: question.correctAnswer,
+          options: question.options,
+          explanation: question.explanation
+        });
+      });
+    } else {
+      console.log('❌ No quiz data available for instructor view');
+    }
   };
-
-  // Add debug function to window for easy access
-  window.debugContentStructure = debugContentStructure;
 
   return (
     <Container>
       {/* Header */}
       <Header>
-        <BackButton onClick={() => navigate(`/courses/${courseId}/overview`)}>
+        <BackButton onClick={() => navigate(getCourseOverviewPath())}>
           <ArrowBack style={{ fontSize: '1rem' }} />
           Back to Course Overview
         </BackButton>
         <CourseInfo>
           <CourseTitle>{course.title}</CourseTitle>
         </CourseInfo>
+
       </Header>
 
 
 
       {renderContent()}
+
+        {/* Debug Button - Only show in development */}
+
+
+
 
       <NavigationBar>
         <NavButton 
@@ -3202,11 +5029,47 @@ function ModuleContentInner() {
         </NavButton>
         
         <NavButtonGroup>
-          {!isCurrentItemCompleted && (
+          {/* Debug completion status */}
+          {(() => {
+            console.log('🔍 Button rendering debug:', {
+              isCurrentItemCompleted,
+              userRole,
+              currentItemId: currentContent ? `${currentContent.type}-${currentIndex}` : null,
+              completedItems: Array.from(completedItems),
+              shouldShowButton: !isCurrentItemCompleted && userRole !== 'instructor' && userRole !== 'admin'
+            });
+            return null;
+          })()}
+          
+          {/* Only show Mark as Complete button for students/refugees, not instructors */}
+          {(() => {
+            const currentItemId = currentContent ? `${currentContent.type}-${currentIndex}` : null;
+            const isCompleted = currentItemId ? completedItems.has(currentItemId) : false;
+            const shouldShow = !isCompleted && userRole !== 'instructor' && userRole !== 'admin';
+            
+            console.log('🔍 Real-time button condition check:', {
+              currentItemId,
+              isCompleted,
+              userRole,
+              shouldShow,
+              completedItems: Array.from(completedItems)
+            });
+            
+            return shouldShow;
+          })() && (
             <NavButton 
-              onClick={() => {
+              onClick={async () => {
                 console.log('🔘 Mark as Complete button clicked');
-                handleMarkComplete();
+                console.log('🔍 Pre-click state:', {
+                  currentItemId: currentContent ? `${currentContent.type}-${currentIndex}` : null,
+                  completedItems: Array.from(completedItems),
+                  isMarkingComplete
+                });
+                await handleMarkComplete();
+                console.log('🔍 Post-click state:', {
+                  completedItems: Array.from(completedItems),
+                  isMarkingComplete
+                });
               }}
               disabled={isMarkingComplete}
             >
@@ -3228,7 +5091,7 @@ function ModuleContentInner() {
         </NavButtonGroup>
       </NavigationBar>
       
-      {showCompletionModal && (
+      {showCompletionModal && userRole !== 'instructor' && userRole !== 'admin' && (
         <CourseCompletionModal>
           <ModalContent>
             <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🎉</div>
@@ -3256,7 +5119,7 @@ function ModuleContentInner() {
       )}
     </Container>
   );
-}
+} // End of ModuleContentInner function
 
 // Export the component directly without authentication check (handled by App.js)
 export default function SharedModuleContent() {

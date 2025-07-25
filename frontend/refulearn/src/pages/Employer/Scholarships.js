@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import offlineIntegrationService from '../../services/offlineIntegrationService';
+
 
 const Container = styled.div`
   padding: 2rem;
@@ -124,7 +124,7 @@ const ScholarshipsGrid = styled.div`
 `;
 
 const ScholarshipCard = styled.div`
-  background: white;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
   border-radius: 12px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   padding: 0;
@@ -132,8 +132,9 @@ const ScholarshipCard = styled.div`
   flex-direction: column;
   border: 1px solid rgba(226, 232, 240, 0.8);
   width: 100%;
-  min-height: 480px;
-  overflow: visible;
+  min-height: 450px;
+  max-height: 480px;
+  overflow: hidden;
   transition: all 0.2s ease;
   position: relative;
   
@@ -141,6 +142,17 @@ const ScholarshipCard = styled.div`
     transform: translateY(-4px);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
     border-color: rgba(59, 130, 246, 0.3);
+  }
+  
+  &:before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #007bff, #0056b3);
+    border-radius: 12px 12px 0 0;
   }
 `;
 
@@ -168,16 +180,23 @@ const CardFooter = styled.div`
 const MetricItem = styled.div`
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem;
+  gap: 0.25rem;
+  padding: 0.4rem 0.6rem;
   background: white;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid #e9ecef;
   transition: all 0.2s ease;
+  min-height: 32px;
+  width: 100%;
   
   &:hover {
     background: #f8f9fa;
     border-color: #dee2e6;
+  }
+  
+  @media (max-width: 768px) {
+    padding: 0.3rem 0.5rem;
+    min-height: 28px;
   }
 `;
 
@@ -209,20 +228,17 @@ const StatusBadge = styled.span`
 `;
 
 const ActionButton = styled.button`
-  padding: 0.8rem 1.5rem;
-  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
   border: none;
-  font-size: 0.95rem;
-  font-weight: 700;
+  font-size: 0.8rem;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 0.25rem;
   white-space: nowrap;
-  min-height: 42px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   
   ${({ variant }) => {
     switch (variant) {
@@ -364,70 +380,31 @@ const Scholarships = () => {
   const fetchScholarships = async () => {
     setLoading(true);
     setError('');
-    
-    const isOnline = navigator.onLine;
-    let scholarshipsData = [];
-
-    if (isOnline) {
-      try {
-        // Try online API calls first (preserving existing behavior)
-        console.log('🌐 Online mode: Fetching scholarships from API...');
-        
-        let url = '/api/scholarships/employer/scholarships';
-        if (statusFilter) {
-          url += `?status=${statusFilter}`;
-        }
-
-        const response = await fetch(url, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-          }
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-          scholarshipsData = (data.data && data.data.scholarships) ? data.data.scholarships : [];
-          
-          // Store scholarships data for offline use
-          await offlineIntegrationService.storeEmployerScholarships(scholarshipsData);
-          console.log('✅ Scholarships stored for offline use');
-        } else if (data.offline) {
-          // Handle offline response from service worker
-          console.log('📴 Service worker returned offline response, using empty array');
-          scholarshipsData = [];
-        } else {
-          throw new Error(data.message || 'Failed to fetch scholarships');
-        }
-      } catch (onlineError) {
-        console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
-        
-        // Fall back to offline data if online fails
-        try {
-          scholarshipsData = await offlineIntegrationService.getEmployerScholarships() || [];
-        } catch (offlineError) {
-          console.warn('⚠️ Offline service also failed, using empty array:', offlineError);
-          scholarshipsData = [];
-        }
-        
-        // Don't throw error if we have any data (even empty array)
-        // Only throw if there's a serious network/system error
-        if (scholarshipsData.length === 0 && onlineError.message && !onlineError.message.includes('offline')) {
-          console.log('ℹ️ No scholarships available, showing empty state');
-        }
-      }
-    } else {
-      // Offline mode: use offline services
-      console.log('📴 Offline mode: Using offline scholarships data...');
-      scholarshipsData = await offlineIntegrationService.getEmployerScholarships() || [];
-    }
 
     try {
-      // Ensure scholarshipsData is always an array
-      const safeScholarshipsData = Array.isArray(scholarshipsData) ? scholarshipsData : [];
-      setScholarships(safeScholarshipsData);
-    } catch (err) {
-      console.error('Scholarships fetch error:', err);
+      console.log('🌐 Fetching scholarships from API...');
+      
+      let url = '/api/scholarships/employer/scholarships';
+      if (statusFilter) {
+        url += `?status=${statusFilter}`;
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+        }
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        const scholarshipsData = (data.data && data.data.scholarships) ? data.data.scholarships : [];
+        setScholarships(scholarshipsData);
+      } else {
+        throw new Error(data.message || 'Failed to fetch scholarships');
+      }
+    } catch (error) {
+      console.error('Scholarships fetch error:', error);
       setError('Network error. Please try again.');
       setScholarships([]); // Set empty array as fallback
     } finally {
@@ -444,50 +421,29 @@ const Scholarships = () => {
   };
 
   const confirmDelete = async (scholarshipId) => {
-    const isOnline = navigator.onLine;
-    
-    if (isOnline) {
-      try {
-        console.log('🌐 Online mode: Deleting scholarship...');
-        
-        const response = await fetch(`/api/scholarships/${scholarshipId}`, {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-          }
-        });
-
-        if (response.ok) {
-          setSuccessMessage('Scholarship deleted successfully');
-          fetchScholarships();
-        } else {
-          throw new Error('Failed to delete scholarship');
+    try {
+      console.log('🌐 Deleting scholarship...');
+      
+      const response = await fetch(`/api/scholarships/${scholarshipId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
         }
-      } catch (onlineError) {
-        console.warn('⚠️ Online delete failed, queuing for offline sync:', onlineError);
-        
-        // Queue action for offline sync
-        await offlineIntegrationService.queueEmployerScholarshipAction({
-          action: 'delete',
-          scholarshipId: scholarshipId
-        });
-        
-        setSuccessMessage('Scholarship deletion queued for sync when online');
-      }
-    } else {
-      // Offline mode: queue action for sync
-      console.log('📴 Offline mode: Queuing scholarship deletion for sync...');
-      
-      await offlineIntegrationService.queueEmployerScholarshipAction({
-        action: 'delete',
-        scholarshipId: scholarshipId
       });
-      
-      setSuccessMessage('Scholarship deletion queued for sync when online');
+
+      if (response.ok) {
+        setSuccessMessage('Scholarship deleted successfully');
+        fetchScholarships();
+      } else {
+        throw new Error('Failed to delete scholarship');
+      }
+    } catch (error) {
+      console.error('❌ Delete scholarship error:', error);
+      setError('Failed to delete scholarship. Please try again.');
+    } finally {
+      setShowDelete(null);
+      setTimeout(() => setSuccessMessage(''), 3000);
     }
-    
-    setShowDelete(null);
-    setTimeout(() => setSuccessMessage(''), 3000);
   };
 
   const cancelDelete = () => {
@@ -638,8 +594,8 @@ const Scholarships = () => {
               <CardBody>
                 <div style={{ 
                   display: 'grid', 
-                  gridTemplateColumns: '1fr 1fr', 
-                  gap: '0.8rem' 
+                  gridTemplateColumns: '1fr', 
+                  gap: '0.4rem' 
                 }}>
                   <MetricItem>
                     <div style={{ 
@@ -649,22 +605,24 @@ const Scholarships = () => {
                       width: '100%' 
                     }}>
                       <div style={{ 
-                        fontSize: '0.75rem', 
+                        fontSize: '0.65rem', 
                         color: '#64748b', 
                         fontWeight: 600, 
                         textTransform: 'uppercase', 
-                        letterSpacing: '0.5px' 
+                        letterSpacing: '0.5px',
+                        flexShrink: 0,
+                        minWidth: '70px'
                       }}>
                         Provider:
                       </div>
                       <div style={{ 
-                        fontSize: '0.9rem', 
+                        fontSize: '0.8rem', 
                         color: '#1e293b', 
                         fontWeight: 600,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        marginLeft: '0.5rem'
+                        marginLeft: '0.3rem',
+                        flex: 1,
+                        textAlign: 'right',
+                        wordBreak: 'break-word'
                       }}>
                         {sch.provider || 'N/A'}
                       </div>
@@ -679,22 +637,24 @@ const Scholarships = () => {
                       width: '100%' 
                     }}>
                       <div style={{ 
-                        fontSize: '0.75rem', 
+                        fontSize: '0.65rem', 
                         color: '#64748b', 
                         fontWeight: 600, 
                         textTransform: 'uppercase', 
-                        letterSpacing: '0.5px' 
+                        letterSpacing: '0.5px',
+                        flexShrink: 0,
+                        minWidth: '70px'
                       }}>
                         Location:
                       </div>
                       <div style={{ 
-                        fontSize: '0.9rem', 
+                        fontSize: '0.8rem', 
                         color: '#1e293b', 
                         fontWeight: 600,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        marginLeft: '0.5rem'
+                        marginLeft: '0.3rem',
+                        flex: 1,
+                        textAlign: 'right',
+                        wordBreak: 'break-word'
                       }}>
                         {sch.location || 'Global'}
                       </div>
@@ -709,46 +669,23 @@ const Scholarships = () => {
                       width: '100%' 
                     }}>
                       <div style={{ 
-                        fontSize: '0.75rem', 
+                        fontSize: '0.65rem', 
                         color: '#64748b', 
                         fontWeight: 600, 
                         textTransform: 'uppercase', 
-                        letterSpacing: '0.5px' 
-                      }}>
-                        Applications:
-                      </div>
-                      <div style={{ 
-                        fontSize: '0.9rem', 
-                        color: '#007bff', 
-                        fontWeight: 700,
-                        marginLeft: '0.5rem'
-                      }}>
-                        {sch.applications?.length || 0}
-                      </div>
-                    </div>
-                  </MetricItem>
-
-                  <MetricItem>
-                    <div style={{ 
-                      display: 'flex', 
-                      justifyContent: 'space-between', 
-                      alignItems: 'center',
-                      width: '100%' 
-                    }}>
-                      <div style={{ 
-                        fontSize: '0.75rem', 
-                        color: '#64748b', 
-                        fontWeight: 600, 
-                        textTransform: 'uppercase', 
-                        letterSpacing: '0.5px' 
+                        letterSpacing: '0.5px',
+                        flexShrink: 0,
+                        minWidth: '70px'
                       }}>
                         Days Left:
                       </div>
                       <div style={{ 
-                        fontSize: '0.9rem', 
+                        fontSize: '0.8rem', 
                         color: calculateDaysRemaining(sch.deadline) < 7 ? '#dc3545' : '#28a745', 
                         fontWeight: 700,
-                        marginLeft: '0.5rem'
+                        marginLeft: '0.3rem',
+                        flex: 1,
+                        textAlign: 'right'
                       }}>
                         {calculateDaysRemaining(sch.deadline)} days
                       </div>
@@ -793,7 +730,7 @@ const Scholarships = () => {
                              <CardFooter>
                  <div style={{ 
                    display: 'grid', 
-                   gridTemplateColumns: '1fr 1fr 1fr',
+                   gridTemplateColumns: 'repeat(3, 1fr)',
                    gap: '0.5rem',
                    alignItems: 'center'
                  }}>

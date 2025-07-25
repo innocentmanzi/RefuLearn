@@ -3,27 +3,56 @@ import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../../contexts/UserContext';
+import preloader from '../../utils/preloader';
 
 const DashboardGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 3rem;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 4rem;
   margin: 2rem 0;
-  width: 100%;
+  width: calc(100% - 4rem);
   box-sizing: border-box;
-  padding: 0 1rem;
+  margin-left: 2rem;
+  margin-right: 2rem;
   
+  /* Large screens: 3 cards in a row */
+  @media (min-width: 1200px) {
+    grid-template-columns: repeat(3, 1fr);
+    max-width: 1200px;
+    margin: 2rem auto;
+    gap: 5rem;
+    width: calc(100% - 6rem);
+    margin-left: 3rem;
+    margin-right: 3rem;
+  }
+  
+  /* Medium screens: 2 cards in a row */
+  @media (max-width: 1199px) and (min-width: 900px) {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4rem;
+    width: calc(100% - 5rem);
+    margin-left: 2.5rem;
+    margin-right: 2.5rem;
+  }
+  
+  /* Small screens: 1 card per row */
   @media (max-width: 900px) {
     grid-template-columns: 1fr;
-    gap: 2.5rem;
+    gap: 3rem;
     margin: 1.5rem auto;
     max-width: 500px;
-    padding: 0 1.5rem;
+    width: calc(100% - 4rem);
+    margin-left: 2rem;
+    margin-right: 2rem;
   }
+  
+  /* Mobile screens: 1 card per row with reduced spacing */
   @media (max-width: 600px) {
-    gap: 2rem;
+    gap: 2.5rem;
     margin: 1rem auto;
-    padding: 0 1rem;
+    width: calc(100% - 3rem);
+    margin-left: 1.5rem;
+    margin-right: 1.5rem;
     max-width: 100%;
   }
 `;
@@ -31,7 +60,7 @@ const DashboardGrid = styled.div`
 const Card = styled.div`
   background: white;
   border-radius: 12px;
-  padding: 1.5rem;
+  padding: 2rem;
   box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   transition: transform 0.2s, box-shadow 0.2s;
   width: 100%;
@@ -40,6 +69,10 @@ const Card = styled.div`
   color: #333;
   border: 1px solid #e9ecef;
   cursor: pointer;
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
   
   &:hover {
     transform: translateY(-2px);
@@ -47,11 +80,13 @@ const Card = styled.div`
   }
   
   @media (max-width: 900px) {
-    padding: 1.25rem;
+    padding: 1.75rem;
+    min-height: 200px;
   }
   
   @media (max-width: 600px) {
-    padding: 1rem;
+    padding: 1.5rem;
+    min-height: 180px;
   }
 `;
 
@@ -86,17 +121,78 @@ const QuickAction = styled.button`
   color: white;
   border: none;
   border-radius: 8px;
-  padding: 0.8rem 1.2rem;
+  padding: 1rem 1.5rem;
   font-size: 1rem;
   cursor: pointer;
   width: 100%;
-  margin-top: 1rem;
+  margin-top: 2rem;
   transition: all 0.2s ease;
   font-weight: 600;
   
   &:hover {
     background: #0056b3;
     transform: translateY(-1px);
+  }
+`;
+
+const DashboardContainer = styled.div`
+  background: #fff;
+  min-height: 100vh;
+  padding: 2rem 3rem;
+  margin: 0;
+  
+  @media (max-width: 900px) {
+    padding: 1.5rem 2.5rem;
+  }
+  
+  @media (max-width: 600px) {
+    padding: 1rem 2rem;
+  }
+`;
+
+const ScholarshipsContainer = styled.div`
+  display: flex;
+  justify-content: center;
+  margin-top: 2rem;
+  width: calc(100% - 4rem);
+  margin-left: 2rem;
+  margin-right: 2rem;
+  
+  @media (min-width: 1200px) {
+    width: calc(100% - 6rem);
+    margin-left: 3rem;
+    margin-right: 3rem;
+  }
+  
+  @media (max-width: 1199px) and (min-width: 900px) {
+    width: calc(100% - 5rem);
+    margin-left: 2.5rem;
+    margin-right: 2.5rem;
+  }
+  
+  @media (max-width: 900px) {
+    width: calc(100% - 4rem);
+    margin-left: 2rem;
+    margin-right: 2rem;
+  }
+  
+  @media (max-width: 600px) {
+    width: calc(100% - 3rem);
+    margin-left: 1.5rem;
+    margin-right: 1.5rem;
+  }
+`;
+
+const ScholarshipsCardWrapper = styled.div`
+  width: 100%;
+  max-width: calc((100% - 10rem) / 3);
+  
+  @media (max-width: 1199px) and (min-width: 900px) {
+    max-width: calc((100% - 8rem) / 2);
+  }
+  
+  @media (max-width: 900px) {
+    max-width: 100%;
   }
 `;
 
@@ -115,12 +211,12 @@ const CourseCard = styled.div`
   padding: 1.5rem;
   box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   transition: transform 0.2s, box-shadow 0.2s;
-  width: calc(100% - 2rem);
+  width: calc(100% - 4rem);
   max-width: 100%;
   overflow-wrap: break-word;
   color: #333;
   border: 1px solid #e9ecef;
-  margin: 2rem 1rem;
+  margin: 2rem 2rem;
   
   &:hover {
     transform: translateY(-2px);
@@ -128,14 +224,14 @@ const CourseCard = styled.div`
   }
   
   @media (max-width: 900px) {
-    width: calc(100% - 3rem);
-    margin: 1.5rem 1.5rem;
+    width: calc(100% - 5rem);
+    margin: 1.5rem 2.5rem;
     padding: 1.25rem;
   }
   
   @media (max-width: 600px) {
-    width: calc(100% - 2rem);
-    margin: 1rem 1rem;
+    width: calc(100% - 4rem);
+    margin: 1rem 2rem;
     padding: 1rem;
   }
 `;
@@ -178,14 +274,14 @@ const AvailableCourses = ({ courses, onCourseClick, t }) => {
   
   return (
     <CourseCard>
-      <CourseCardTitle>Available Courses ({publishedCourses.length})</CourseCardTitle>
+      <CourseCardTitle>{t('dashboard.availableCourses', 'Available Courses')} ({publishedCourses.length})</CourseCardTitle>
       <CourseList>
         {publishedCourses.map(course => (
           <CourseItemStyled key={course._id} onClick={() => onCourseClick(course)}>
             <div>
               <div style={{ fontWeight: 'bold', color: '#333', fontSize: '1rem' }}>{course.title}</div>
               <div style={{ fontSize: '0.9rem', color: '#6c757d', marginTop: '0.25rem' }}>
-                {course.category} • {course.level || 'Beginner'} • {course.duration || 'Self-paced'}
+                {course.category} • {course.level || t('dashboard.beginner', 'Beginner')} • {course.duration || t('dashboard.selfPaced', 'Self-paced')}
               </div>
             </div>
             <div style={{ 
@@ -197,7 +293,7 @@ const AvailableCourses = ({ courses, onCourseClick, t }) => {
               background: '#d4edda',
               border: '1px solid #c3e6cb'
             }}>
-              Available
+              {t('dashboard.available', 'Available')}
             </div>
           </CourseItemStyled>
         ))}
@@ -210,9 +306,20 @@ const RefugeeDashboard = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { user } = useUser();
+  const [courses, setCourses] = useState([]);
+  const [jobs, setJobs] = useState([]);
+  const [scholarships, setScholarships] = useState([]);
+  const [stats, setStats] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [isDataFetching, setIsDataFetching] = useState(false);
   const [isFirstLogin] = useState(false);
   const [userName, setUserName] = useState('');
-  
+  const [welcomeText, setWelcomeText] = useState('');
+  const [overviewText, setOverviewText] = useState('');
+  const [isTyping, setIsTyping] = useState(true);
+  const [isTypingOverview, setIsTypingOverview] = useState(false);
+  const [error, setError] = useState(null);
+
   // Debug user context
   console.log('Dashboard user context:', user);
   
@@ -220,269 +327,248 @@ const RefugeeDashboard = () => {
   if (user && user.role !== 'refugee') {
     console.log('User role is not refugee:', user.role);
   }
-  const [welcomeText, setWelcomeText] = useState('');
-  const [overviewText, setOverviewText] = useState('');
-  const [isTyping, setIsTyping] = useState(true);
-  const [isTypingOverview, setIsTypingOverview] = useState(false);
-  const [courses, setCourses] = useState([]);
-  const [stats, setStats] = useState({
-    completedCourses: 0,
-    enrolledCourses: 0,
-    availableCourses: 0,
-    certificates: 0,
-    assessmentsCompleted: 0,
-    learningPathProgress: 0,
-    peerLearningSessions: 0,
-    jobApplications: 0,
-    scholarships: 0
-  });
-  const [jobs, setJobs] = useState([]);
-  const [scholarships, setScholarships] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [isDataFetching, setIsDataFetching] = useState(false);
 
+  // Fetch dashboard data with caching
   const fetchDashboardData = async () => {
-    // Prevent multiple concurrent API calls
-    if (isDataFetching) {
-      console.log('⏸️ Data already fetching, skipping...');
-      return;
-    }
-    
-    setIsDataFetching(true);
     try {
-      setLoading(true);
-      console.log('🚀 Starting fetchDashboardData');
-      
+      setIsDataFetching(true);
       const token = localStorage.getItem('token');
-      console.log('🔑 Token available:', !!token);
-      console.log('🔑 Token preview:', token ? token.substring(0, 20) + '...' : 'null');
+      const isOnline = navigator.onLine;
       
-      if (!token) {
-        console.log('❌ No token found, but continuing to fetch data anyway...');
-      }
-      
-      // Initialize data arrays
-      let coursesData = [];
-      let statsData = {};
-      let jobsData = [];
-      let scholarshipsData = [];
-      let certificatesData = [];
-      
-      // Fetch courses
-      try {
-        console.log('📚 Fetching courses...');
-        const headers = {
-          'Content-Type': 'application/json'
-        };
-        
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        } else {
-          console.log('⚠️ Fetching courses without authentication token');
+              // Check for preloaded data first (fastest)
+        const preloadedData = preloader.getPreloadedData('dashboard');
+        if (preloadedData && preloadedData.timestamp) {
+          const now = Date.now();
+          if ((now - preloadedData.timestamp) < 2 * 60 * 1000) {
+            console.log('🚀 Using preloaded dashboard data');
+            if (preloadedData.courses) setCourses(preloadedData.courses.data?.courses || []);
+            if (preloadedData.jobs) setJobs(preloadedData.jobs.data?.jobs || []);
+            if (preloadedData.scholarships) setScholarships(preloadedData.scholarships.data?.scholarships || []);
+            
+            const calculatedStats = {
+              availableCourses: (preloadedData.courses?.data?.courses || []).length,
+              certificates: 0, // Will be calculated separately
+              jobApplications: (preloadedData.jobs?.data?.jobs || []).length,
+              scholarships: (preloadedData.scholarships?.data?.scholarships || []).length
+            };
+            setStats(calculatedStats);
+            setLoading(false);
+            setIsDataFetching(false);
+            return;
+          }
         }
         
-        const coursesResponse = await fetch('/api/courses', { headers });
+        // Check if we have recent cached data (less than 5 minutes old)
+        const cachedData = localStorage.getItem('dashboard_cache');
+        const cacheTime = localStorage.getItem('dashboard_cache_time');
+        const now = Date.now();
         
-        console.log('📊 Courses response status:', coursesResponse.status);
-        
-        if (coursesResponse.status === 429) {
-          console.log('⏸️ Rate limited, waiting 2 seconds before retry...');
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          const retryResponse = await fetch('/api/courses', { headers });
-          if (retryResponse.ok) {
-            const coursesApiData = await retryResponse.json();
-            if (coursesApiData.success && coursesApiData.data && coursesApiData.data.courses) {
-              coursesData = coursesApiData.data.courses;
-              console.log('✅ Found courses after retry:', coursesData.length);
-            }
-          }
-        } else if (coursesResponse.ok) {
-          const coursesApiData = await coursesResponse.json();
-          console.log('✅ Courses API response:', coursesApiData);
+        if (cachedData && cacheTime && (now - parseInt(cacheTime)) < 5 * 60 * 1000) {
+          console.log('📱 Using cached dashboard data for courses, jobs, scholarships');
+          const parsedData = JSON.parse(cachedData);
+          setCourses(parsedData.courses || []);
+          setJobs(parsedData.jobs || []);
+          setScholarships(parsedData.scholarships || []);
           
-          if (coursesApiData.success && coursesApiData.data && coursesApiData.data.courses) {
-            coursesData = coursesApiData.data.courses;
-            console.log('✅ Found courses:', coursesData.length);
-            coursesData.forEach(course => {
-              console.log(`📖 Course: "${course.title}" - Published: ${course.isPublished}`);
+          // Always fetch fresh certificates data (not from cache)
+          let fetchedCertificates = [];
+          try {
+            const certificatesResponse = await fetch('/api/certificates/user?limit=100', {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
             });
-          }
-        } else {
-          console.error('❌ Courses API failed with status:', coursesResponse.status);
-        }
-      } catch (error) {
-        console.error('❌ Courses fetch failed:', error);
-      }
-      
-      // Fetch jobs
-      try {
-        console.log('💼 Fetching jobs...');
-        const jobsHeaders = {
-          'Content-Type': 'application/json'
-        };
-        
-        if (token) {
-          jobsHeaders['Authorization'] = `Bearer ${token}`;
-        }
-        
-        const jobsResponse = await fetch('/api/jobs', { headers: jobsHeaders });
-        
-        if (jobsResponse.ok) {
-          const jobsApiData = await jobsResponse.json();
-          console.log('✅ Jobs API response:', jobsApiData);
-          
-          if (jobsApiData.success && jobsApiData.data && jobsApiData.data.jobs) {
-            jobsData = jobsApiData.data.jobs;
-            console.log('✅ Found jobs:', jobsData.length);
-          }
-        }
-      } catch (error) {
-        console.error('❌ Jobs fetch failed:', error);
-      }
-      
-      // Fetch scholarships
-      try {
-        console.log('🎓 Fetching scholarships...');
-        const scholarshipsHeaders = {
-          'Content-Type': 'application/json'
-        };
-        
-        if (token) {
-          scholarshipsHeaders['Authorization'] = `Bearer ${token}`;
-        }
-        
-        const scholarshipsResponse = await fetch('/api/scholarships', { headers: scholarshipsHeaders });
-        
-        if (scholarshipsResponse.ok) {
-          const scholarshipsApiData = await scholarshipsResponse.json();
-          console.log('✅ Scholarships API response:', scholarshipsApiData);
-          
-          if (scholarshipsApiData.success && scholarshipsApiData.data && scholarshipsApiData.data.scholarships) {
-            scholarshipsData = scholarshipsApiData.data.scholarships;
-            console.log('✅ Found scholarships:', scholarshipsData.length);
-          }
-        }
-      } catch (error) {
-        console.error('❌ Scholarships fetch failed:', error);
-      }
-      
-      // Fetch peer learning sessions
-      let peerLearningData = [];
-      try {
-        console.log('👥 Fetching peer learning sessions...');
-        const peerHeaders = {
-          'Content-Type': 'application/json'
-        };
-        
-        if (token) {
-          peerHeaders['Authorization'] = `Bearer ${token}`;
-        }
-        
-        const peerLearningResponse = await fetch('/api/peer-learning/groups', { headers: peerHeaders });
-        
-        if (peerLearningResponse.ok) {
-          const peerLearningApiData = await peerLearningResponse.json();
-          console.log('✅ Peer Learning API response:', peerLearningApiData);
-          
-          if (peerLearningApiData.success && peerLearningApiData.data && peerLearningApiData.data.groups) {
-            peerLearningData = peerLearningApiData.data.groups;
-            console.log('✅ Found peer learning sessions:', peerLearningData.length);
-          }
-        }
-      } catch (error) {
-        console.error('❌ Peer learning fetch failed:', error);
-      }
-      
-      // Fetch certificates
-      try {
-        console.log('📜 Fetching certificates...');
-        const certificatesHeaders = {
-          'Content-Type': 'application/json'
-        };
-        
-        if (token) {
-          certificatesHeaders['Authorization'] = `Bearer ${token}`;
-        }
-        
-        const certificatesResponse = await fetch('/api/certificates/user', { headers: certificatesHeaders });
-        
-        if (certificatesResponse.ok) {
-          const certificatesApiData = await certificatesResponse.json();
-          console.log('✅ Certificates API response:', certificatesApiData);
-          console.log('🔍 Raw API data structure:', JSON.stringify(certificatesApiData, null, 2));
-          
-          if (certificatesApiData.success && certificatesApiData.data && certificatesApiData.data.certificates) {
-            certificatesData = certificatesApiData.data.certificates;
-            console.log('✅ Found certificates:', certificatesData.length);
-            console.log('📜 Certificate details:', certificatesData);
-          } else {
-            console.warn('⚠️ Invalid certificates API response structure');
-            console.log('📊 Response structure check:');
-            console.log('  - success:', certificatesApiData.success);
-            console.log('  - data exists:', !!certificatesApiData.data);
-            console.log('  - certificates exists:', !!(certificatesApiData.data && certificatesApiData.data.certificates));
-          }
-        } else {
-          console.error('❌ Certificates API failed with status:', certificatesResponse.status);
-          const errorText = await certificatesResponse.text();
-          console.error('❌ Error response:', errorText);
-        }
-      } catch (error) {
-        console.error('❌ Certificates fetch failed:', error);
-      }
 
-      // Update state immediately
-      setCourses(coursesData);
-      setJobs(jobsData);
-      setScholarships(scholarshipsData);
-      
-      // Update stats with real counts
-      const publishedCoursesCount = coursesData.filter(course => 
-        course.isPublished === true || course.isPublished === 'true'
-      ).length;
-      
-      console.log('📊 Final counts:');
-      console.log('  - Published courses:', publishedCoursesCount);
-      console.log('  - Jobs:', jobsData.length);
-      console.log('  - Scholarships:', scholarshipsData.length);
-      console.log('  - Certificates:', certificatesData.length);
-      console.log('  - Peer Learning Sessions:', peerLearningData.length);
-      console.log('  - Dashboard will show all these counts now!');
-      console.log('🎯 CERTIFICATE COUNT THAT WILL BE DISPLAYED:', certificatesData.length);
-      
-      setStats(prev => ({
-        ...prev,
-        availableCourses: publishedCoursesCount,
-        jobApplications: jobsData.length,
-        certificates: certificatesData.length,
-        peerLearningSessions: peerLearningData.length,
-        scholarships: scholarshipsData.length,
-        completedCourses: 0,
-        enrolledCourses: 0,
-        assessmentsCompleted: 0,
-        learningPathProgress: 0
-      }));
+            if (certificatesResponse.ok) {
+              const certificatesData = await certificatesResponse.json();
+              fetchedCertificates = certificatesData.data?.certificates || [];
+              console.log('🏆 Dashboard fetched certificates:', {
+                count: fetchedCertificates.length,
+                certificates: fetchedCertificates.map(c => ({
+                  id: c._id,
+                  courseTitle: c.courseTitle,
+                  certificateNumber: c.certificateNumber
+                }))
+              });
+            }
+          } catch (error) {
+            console.warn('Failed to fetch certificates:', error);
+          }
+          
+          // Calculate stats with fresh certificates data
+          const calculatedStats = {
+            availableCourses: (parsedData.courses || []).length,
+            certificates: fetchedCertificates.length,
+            jobApplications: (parsedData.jobs || []).length,
+            scholarships: (parsedData.scholarships || []).length
+          };
+          setStats(calculatedStats);
+          setLoading(false);
+          setIsDataFetching(false);
+          return;
+        }
 
-    } catch (err) {
-      console.error('❌ Dashboard fetch error:', err);
+      if (isOnline) {
+        try {
+          let fetchedCourses = [];
+          let fetchedJobs = [];
+          let fetchedScholarships = [];
+
+          // Fetch courses
+          const coursesResponse = await fetch('/api/courses', {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (coursesResponse.ok) {
+            const coursesData = await coursesResponse.json();
+            fetchedCourses = coursesData.data?.courses || [];
+            setCourses(fetchedCourses);
+          }
+
+          // Fetch jobs
+          const jobsResponse = await fetch('/api/jobs', {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (jobsResponse.ok) {
+            const jobsData = await jobsResponse.json();
+            fetchedJobs = jobsData.data?.jobs || [];
+            setJobs(fetchedJobs);
+          }
+
+          // Fetch scholarships
+          const scholarshipsResponse = await fetch('/api/scholarships', {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (scholarshipsResponse.ok) {
+            const scholarshipsData = await scholarshipsResponse.json();
+            fetchedScholarships = scholarshipsData.data?.scholarships || [];
+            setScholarships(fetchedScholarships);
+          }
+
+          // Fetch certificates for the current user
+          let fetchedCertificates = [];
+          try {
+            const certificatesResponse = await fetch('/api/certificates/user?limit=100', {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (certificatesResponse.ok) {
+              const certificatesData = await certificatesResponse.json();
+              fetchedCertificates = certificatesData.data?.certificates || [];
+              console.log('🏆 Dashboard fetched certificates:', {
+                count: fetchedCertificates.length,
+                certificates: fetchedCertificates.map(c => ({
+                  id: c._id,
+                  courseTitle: c.courseTitle,
+                  certificateNumber: c.certificateNumber
+                }))
+              });
+            }
+          } catch (error) {
+            console.warn('Failed to fetch certificates:', error);
+          }
+
+          // Fetch job applications for the current user
+          let fetchedJobApplications = [];
+          try {
+            const applicationsResponse = await fetch('/api/jobs/applications/user', {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (applicationsResponse.ok) {
+              const applicationsData = await applicationsResponse.json();
+              fetchedJobApplications = applicationsData.data?.applications || [];
+            }
+          } catch (error) {
+            console.warn('Failed to fetch job applications:', error);
+          }
+
+          // Calculate stats from fetched data
+          const calculatedStats = {
+            availableCourses: fetchedCourses.length,
+            certificates: fetchedCertificates.length,
+            jobApplications: fetchedJobs.length, // Show total available jobs instead of user applications
+            scholarships: fetchedScholarships.length
+          };
+          setStats(calculatedStats);
+          
+          // Cache the data for 5 minutes
+          const cacheData = {
+            courses: fetchedCourses,
+            jobs: fetchedJobs,
+            scholarships: fetchedScholarships,
+            stats: calculatedStats
+          };
+          localStorage.setItem('dashboard_cache', JSON.stringify(cacheData));
+          localStorage.setItem('dashboard_cache_time', Date.now().toString());
+
+        } catch (error) {
+          console.error('Error fetching dashboard data:', error);
+          setError('Failed to load dashboard data');
+        }
+      } else {
+        // Offline mode - load from cache
+        console.log('📱 Offline mode - loading cached dashboard data');
+        const cachedCourses = localStorage.getItem('courses_cache');
+        const cachedJobs = localStorage.getItem('jobs_cache');
+        const cachedScholarships = localStorage.getItem('scholarships_cache');
+        const cachedStats = localStorage.getItem('user_stats_cache');
+
+        if (cachedCourses) {
+          setCourses(JSON.parse(cachedCourses));
+        }
+        if (cachedJobs) {
+          setJobs(JSON.parse(cachedJobs));
+        }
+        if (cachedScholarships) {
+          setScholarships(JSON.parse(cachedScholarships));
+        }
+        if (cachedStats) {
+          setStats(JSON.parse(cachedStats));
+        }
+      }
+    } catch (error) {
+      console.error('Error in fetchDashboardData:', error);
+      setError('Failed to load data');
     } finally {
       setLoading(false);
       setIsDataFetching(false);
     }
   };
 
+  // Fetch data on component mount
   useEffect(() => {
-    console.log('🔄 Dashboard useEffect triggered');
-    
-    // Add a small delay to prevent too many requests
-    const timer = setTimeout(() => {
-      console.log('✅ Fetching dashboard data after delay...');
-      fetchDashboardData();
-    }, 1000);
-
-    return () => clearTimeout(timer);
+    fetchDashboardData();
   }, []);
+
+  // Periodic refresh every 10 minutes (reduced frequency)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!isDataFetching && navigator.onLine) {
+        fetchDashboardData();
+      }
+    }, 10 * 60 * 1000); // 10 minutes
+
+    return () => clearInterval(interval);
+  }, [isDataFetching]);
 
   const welcomeMessage = isFirstLogin 
     ? t('dashboard.welcome', { userName })
@@ -490,37 +576,13 @@ const RefugeeDashboard = () => {
 
   const overviewMessage = t('dashboard.overview');
 
+  // Simplified welcome message without typing animation for better performance
   useEffect(() => {
-    let currentIndex = 0;
-    const typingInterval = setInterval(() => {
-      if (currentIndex <= welcomeMessage.length) {
-        setWelcomeText(welcomeMessage.slice(0, currentIndex));
-      }
-      currentIndex++;
-      if (currentIndex > welcomeMessage.length) {
-        clearInterval(typingInterval);
-        setIsTyping(false);
-        setIsTypingOverview(true);
-      }
-    }, 40);
-    return () => clearInterval(typingInterval);
-  }, [welcomeMessage]);
-
-  useEffect(() => {
-    if (!isTypingOverview) return;
-    let currentIndex = 0;
-    const typingInterval = setInterval(() => {
-      if (currentIndex <= overviewMessage.length) {
-        setOverviewText(overviewMessage.slice(0, currentIndex));
-      }
-      currentIndex++;
-      if (currentIndex > overviewMessage.length) {
-        clearInterval(typingInterval);
-        setIsTypingOverview(false);
-      }
-    }, 20);
-    return () => clearInterval(typingInterval);
-  }, [overviewMessage, isTypingOverview]);
+    setWelcomeText(welcomeMessage);
+    setOverviewText(overviewMessage);
+    setIsTyping(false);
+    setIsTypingOverview(false);
+  }, [welcomeMessage, overviewMessage]);
 
   const handleCourseClick = (course) => {
     // Navigate to the course overview page for better user experience
@@ -531,7 +593,6 @@ const RefugeeDashboard = () => {
     return (
       <div style={{ textAlign: 'center', padding: '2rem' }}>
         <div>Loading dashboard...</div>
-        {isDataFetching && <div style={{ marginTop: '1rem', color: '#666' }}>Fetching data from server...</div>}
       </div>
     );
   }
@@ -545,55 +606,58 @@ const RefugeeDashboard = () => {
   }
   
   return (
-    <div style={{ background: '#fff', minHeight: '100vh', padding: '1.5rem 1rem', margin: 0 }}>
-      {/* Animated Welcome Message */}
+    <DashboardContainer>
+      {/* Welcome Message */}
       <div style={{ marginBottom: '1.5rem', textAlign: 'left' }}>
-        <Title style={{ color: '#007BFF', fontSize: '2rem', marginBottom: '0.5rem' }}>{welcomeText}<span style={{ opacity: isTyping ? 1 : 0 }}>|</span></Title>
-        <OverviewText style={{ color: '#333' }}>{overviewText}<span style={{ opacity: isTypingOverview ? 1 : 0 }}>|</span></OverviewText>
+        <Title style={{ color: '#007BFF', fontSize: '2rem', marginBottom: '0.5rem' }}>{welcomeText}</Title>
+        <OverviewText style={{ color: '#333' }}>{overviewText}</OverviewText>
+        
+
       </div>
       <ul style={{ color: '#1976d2', display: 'none' }}>
         {courses.map(course => (
           <li key={course._id}>{course.title} - Progress: {course.progress || 0}%</li>
         ))}
       </ul>
+      {/* First row: 3 main cards */}
       <DashboardGrid>
-        <ProgressCard onClick={() => navigate('/courses')}>
-          <SubTitle>Available Courses</SubTitle>
-          <Stat>{stats.availableCourses}</Stat>
-          <StatLabel>Courses Available</StatLabel>
-          <QuickAction>Browse Courses</QuickAction>
-        </ProgressCard>
-        <ProgressCard onClick={() => navigate('/certificates')}>
-          <SubTitle>Certificates</SubTitle>
-          <Stat>{stats.certificates}</Stat>
-          <StatLabel>Certificates Earned</StatLabel>
-          <QuickAction>View Certificates</QuickAction>
-        </ProgressCard>
-        <ProgressCard onClick={() => navigate('/peer-learning')}>
-          <SubTitle>Peer Learning</SubTitle>
-          <Stat>{stats.peerLearningSessions}</Stat>
-          <StatLabel>Learning Sessions</StatLabel>
-          <QuickAction>Join Session</QuickAction>
-        </ProgressCard>
-        <ProgressCard onClick={() => navigate('/jobs')}>
-          <SubTitle>Job Applications</SubTitle>
-          <Stat>{stats.jobApplications}</Stat>
-          <StatLabel>Applications Released</StatLabel>
-          <QuickAction>Browse Jobs</QuickAction>
-        </ProgressCard>
-        <ProgressCard onClick={() => navigate('/jobs')}>
-          <SubTitle>Scholarships</SubTitle>
-          <Stat>{stats.scholarships}</Stat>
-          <StatLabel>Scholarships Available</StatLabel>
-          <QuickAction>Browse Scholarships</QuickAction>
-        </ProgressCard>
+                          <ProgressCard onClick={() => navigate('/courses')}>
+                    <SubTitle>{t('dashboard.availableCourses', 'Available Courses')}</SubTitle>
+                    <Stat>{stats.availableCourses || 0}</Stat>
+                    <StatLabel>{t('dashboard.coursesAvailable', 'Courses Available')}</StatLabel>
+                    <QuickAction>{t('dashboard.browseCourses', 'Browse Courses')}</QuickAction>
+                  </ProgressCard>
+                  <ProgressCard onClick={() => navigate('/certificates')}>
+                    <SubTitle>{t('certificates.title', 'Certificates')}</SubTitle>
+                    <Stat>{stats.certificates || 0}</Stat>
+                    <StatLabel>{t('dashboard.certificatesEarned', 'Certificates Earned')}</StatLabel>
+                    <QuickAction>{t('dashboard.viewCertificates', 'View Certificates')}</QuickAction>
+                  </ProgressCard>
+                  <ProgressCard onClick={() => navigate('/jobs')}>
+                    <SubTitle>{t('dashboard.jobApplications', 'Job Applications')}</SubTitle>
+                    <Stat>{stats.jobApplications || 0}</Stat>
+                    <StatLabel>{t('dashboard.jobsAvailable', 'Jobs Available')}</StatLabel>
+                    <QuickAction>{t('dashboard.browseJobs', 'Browse Jobs')}</QuickAction>
+                  </ProgressCard>
       </DashboardGrid>
+      
+      {/* Second row: Scholarships card with same size as first row cards */}
+      <ScholarshipsContainer>
+        <ScholarshipsCardWrapper>
+                              <ProgressCard onClick={() => navigate('/jobs')}>
+                      <SubTitle>{t('scholarships', 'Scholarships')}</SubTitle>
+                      <Stat>{stats.scholarships || 0}</Stat>
+                      <StatLabel>{t('dashboard.scholarshipsAvailable', 'Scholarships Available')}</StatLabel>
+                      <QuickAction>{t('dashboard.browseScholarships', 'Browse Scholarships')}</QuickAction>
+                    </ProgressCard>
+        </ScholarshipsCardWrapper>
+      </ScholarshipsContainer>
       <AvailableCourses courses={courses} onCourseClick={handleCourseClick} t={t} />
 
       {/* Recent Job Opportunities */}
       {jobs.length > 0 && (
         <CourseCard>
-          <CourseCardTitle>Recent Job Opportunities</CourseCardTitle>
+          <CourseCardTitle>{t('dashboard.recentJobOpportunities', 'Recent Job Opportunities')}</CourseCardTitle>
           <CourseList>
             {jobs.map(job => (
               <CourseItemStyled key={job._id} onClick={() => navigate('/jobs')}>
@@ -612,7 +676,7 @@ const RefugeeDashboard = () => {
                   background: '#e3f2fd',
                   border: '1px solid #bbdefb'
                 }}>
-                  Apply Now
+                  {t('dashboard.applyNow', 'Apply Now')}
                 </div>
               </CourseItemStyled>
             ))}
@@ -623,14 +687,14 @@ const RefugeeDashboard = () => {
       {/* Recent Scholarships */}
       {scholarships.length > 0 && (
         <CourseCard>
-          <CourseCardTitle>Recent Scholarship Opportunities</CourseCardTitle>
+          <CourseCardTitle>{t('dashboard.recentScholarshipOpportunities', 'Recent Scholarship Opportunities')}</CourseCardTitle>
           <CourseList>
             {scholarships.map(scholarship => (
               <CourseItemStyled key={scholarship._id} onClick={() => navigate('/scholarships')}>
                 <div>
                   <div style={{ fontWeight: 'bold', color: '#333', fontSize: '1rem' }}>{scholarship.title}</div>
                   <div style={{ fontSize: '0.9rem', color: '#6c757d', marginTop: '0.25rem' }}>
-                    {scholarship.provider} • Deadline: {new Date(scholarship.deadline).toLocaleDateString()}
+                    {scholarship.provider} • {t('dashboard.deadline', 'Deadline')}: {new Date(scholarship.deadline).toLocaleDateString()}
                   </div>
                 </div>
                 <div style={{ 
@@ -642,14 +706,14 @@ const RefugeeDashboard = () => {
                   background: '#d4edda',
                   border: '1px solid #c3e6cb'
                 }}>
-                  Apply
+                  {t('dashboard.apply', 'Apply')}
                 </div>
               </CourseItemStyled>
             ))}
           </CourseList>
         </CourseCard>
       )}
-    </div>
+    </DashboardContainer>
   );
 };
 

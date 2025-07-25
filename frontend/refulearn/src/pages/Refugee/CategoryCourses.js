@@ -93,13 +93,13 @@ const FilterButton = styled.button`
 
 const CourseGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: 2rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0;
   width: 100%;
   justify-items: start;
   @media (max-width: 900px) {
     grid-template-columns: 1fr;
-    gap: 1.5rem;
+    gap: 0;
   }
 `;
 
@@ -107,10 +107,15 @@ const CourseCard = styled.div`
   background: white;
   border-radius: 16px;
   overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.07);
   transition: all 0.3s ease;
   cursor: pointer;
   border: 1px solid #f0f0f0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  max-width: 320px;
   
   &:hover {
     transform: translateY(-8px);
@@ -119,9 +124,10 @@ const CourseCard = styled.div`
 `;
 
 const CourseImage = styled.div`
-  height: 200px;
+  height: 160px;
   background: ${({ image }) => `url(${image}) center/cover`};
   position: relative;
+  background-color: #f8f9fa;
 `;
 
 const CourseLevel = styled.span`
@@ -141,26 +147,31 @@ const CourseLevel = styled.span`
 `;
 
 const CourseContent = styled.div`
-  padding: 1.5rem;
+  padding: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 180px;
 `;
 
 const CourseTitle = styled.h3`
-  margin: 0 0 0.75rem 0;
+  margin: 0 0 0.5rem 0;
   color: #333;
-  font-size: 1.3rem;
+  font-size: 1.1rem;
   font-weight: 600;
   line-height: 1.3;
 `;
 
 const CourseDescription = styled.p`
   color: #666;
-  font-size: 0.95rem;
-  margin-bottom: 1.5rem;
-  line-height: 1.5;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+  line-height: 1.4;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  flex: 1;
 `;
 
 const CourseMeta = styled.div`
@@ -169,7 +180,7 @@ const CourseMeta = styled.div`
   align-items: center;
   color: #666;
   font-size: 0.9rem;
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
 `;
 
 const MetaItem = styled.div`
@@ -183,12 +194,13 @@ const EnrollButton = styled.button`
   color: white;
   border: none;
   border-radius: 8px;
-  padding: 0.8rem 1.5rem;
+  padding: 0.7rem 1.2rem;
   width: 100%;
   cursor: pointer;
   transition: all 0.2s;
   font-weight: 600;
-  font-size: 1rem;
+  font-size: 0.9rem;
+  margin-top: auto;
   
   &:hover {
     background: ${({ theme }) => theme.colors.secondary};
@@ -283,9 +295,26 @@ const CategoryCourses = () => {
   // Use categoryName as category for consistency
   const category = categoryName;
   
-  // All useState hooks must be called first, before any conditional logic
-  const [courses, setCourses] = useState([]);
-  const [enrolledCourses, setEnrolledCourses] = useState([]);
+  // Initialize with cached data to prevent empty states  
+  const [courses, setCourses] = useState(() => {
+    try {
+      const cached = localStorage.getItem(`refugee_category_${categoryName}_courses`);
+      return cached ? JSON.parse(cached) : [];
+    } catch { return []; }
+  });
+  const [enrolledCourses, setEnrolledCourses] = useState(() => {
+    try {
+      const cached = localStorage.getItem('refugee_enrolled_cache');
+      return cached ? JSON.parse(cached) : [];
+    } catch { return []; }
+  });
+  const [completedCourses, setCompletedCourses] = useState(() => {
+    try {
+      const cached = localStorage.getItem('refugee_completed_cache');
+      return cached ? JSON.parse(cached) : [];
+    } catch { return []; }
+  });
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
@@ -303,6 +332,40 @@ const CategoryCourses = () => {
 
   useEffect(() => {
     console.log('🔧 useEffect triggered, category:', category);
+    
+    // Load cached data IMMEDIATELY to prevent empty states
+    const loadCachedData = () => {
+      try {
+        const cachedCourses = localStorage.getItem(`refugee_category_${category}_courses`);
+        const cachedEnrolled = localStorage.getItem('refugee_enrolled_cache');
+        
+        if (cachedCourses) {
+          const coursesData = JSON.parse(cachedCourses);
+          setCourses(coursesData);
+          console.log('📦 IMMEDIATELY loaded cached category courses:', coursesData.length);
+        }
+        
+        if (cachedEnrolled) {
+          const enrolledData = JSON.parse(cachedEnrolled);
+          setEnrolledCourses(enrolledData);
+          console.log('📦 IMMEDIATELY loaded cached enrolled courses:', enrolledData.length);
+        }
+        
+        const cachedCompleted = localStorage.getItem('refugee_completed_cache');
+        if (cachedCompleted) {
+          const completedData = JSON.parse(cachedCompleted);
+          setCompletedCourses(completedData);
+          console.log('📦 IMMEDIATELY loaded cached completed courses:', completedData.length);
+        }
+        
+
+      } catch (error) {
+        console.warn('⚠️ Error loading cached category data:', error);
+      }
+    };
+    
+    // Load cached data FIRST
+    loadCachedData();
     
     const fetchData = async () => {
       console.log('🔍 Starting to fetch data for category:', category);
@@ -353,16 +416,16 @@ const CategoryCourses = () => {
 
         if (isOnline) {
           try {
-            // Try online API calls first (preserving existing behavior)
-            console.log('🌐 Online mode: Fetching category courses from API...');
+            // SIMPLIFIED APPROACH: Always use the general courses endpoint with client-side filtering
+            // This is more reliable than the category-specific endpoint
+            console.log('🌐 Online mode: Fetching ALL courses and filtering by category...');
+            console.log('🔍 Target category:', category);
             
-            // Fetch courses from the category endpoint
-            const apiUrl = `/api/courses/category/${encodeURIComponent(category)}`;
-            console.log('🌐 Making API call to:', apiUrl);
-            console.log('🔍 Category parameter:', category);
-            console.log('🔍 Encoded category:', encodeURIComponent(category));
+            // Fetch ALL courses first
+            const allCoursesUrl = '/api/courses';
+            console.log('🌐 Making API call to:', allCoursesUrl);
             
-            const response = await fetch(apiUrl, {
+            const response = await fetch(allCoursesUrl, {
               headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
@@ -370,24 +433,33 @@ const CategoryCourses = () => {
             });
 
             console.log('📊 Response status:', response.status);
-            console.log('📊 Response headers:', response.headers);
             console.log('📊 Response ok:', response.ok);
             
             if (response.ok) {
               const data = await response.json();
-              console.log('✅ Data received:', data);
-              console.log('✅ Success:', data.success);
-              console.log('✅ Courses array:', data.data?.courses);
-              console.log('✅ Courses length:', data.data?.courses?.length || 0);
-              console.log('✅ Debug info from API:', data.data?.debug);
+              console.log('✅ All courses data received:', data);
+              console.log('✅ Total courses found:', data.data?.courses?.length || 0);
               
               if (data.success && data.data?.courses) {
-                coursesData = data.data.courses;
+                // Filter courses by category CLIENT-SIDE (more reliable)
+                const allCourses = data.data.courses;
+                console.log('📚 All courses:', allCourses.length);
+                console.log('🔍 All course categories:', allCourses.map(c => `"${c.title}" -> "${c.category}"`));
+                
+                // Filter by category (case-insensitive)
+                coursesData = allCourses.filter(course => {
+                  if (!course.category) return false;
+                  const matches = course.category.toLowerCase() === category.toLowerCase();
+                  console.log(`🔍 "${course.title}" category="${course.category}" target="${category}" matches=${matches}`);
+                  return matches;
+                });
+                
+                console.log('✅ Filtered courses for category:', coursesData.length);
                 
                 // Store category courses for offline use
                 await offlineIntegrationService.storeCategoryCourses(category, coursesData);
                 
-                // Fetch enrolled courses properly from the backend
+                // Fetch enrolled courses
                 try {
                   const enrolledResponse = await fetch('/api/courses/enrolled/courses', {
                     headers: {
@@ -399,10 +471,7 @@ const CategoryCourses = () => {
                   if (enrolledResponse.ok) {
                     const enrolledApiData = await enrolledResponse.json();
                     console.log('✅ Enrolled courses data:', enrolledApiData);
-                    // Set enrolled courses as array of course IDs
                     enrolledData = enrolledApiData.data.courses?.map(course => course._id) || [];
-                    
-                    // Store enrolled courses for offline use
                     await offlineIntegrationService.storeEnrolledCourses(enrolledData);
                   } else {
                     console.error('❌ Failed to fetch enrolled courses');
@@ -413,155 +482,14 @@ const CategoryCourses = () => {
                   enrolledData = [];
                 }
                 
-                console.log('📚 Courses set:', coursesData.length);
-              } else if (data.success && data.data?.courses?.length === 0) {
-                // API succeeded but no courses found for this category
-                console.log('⚠️ No courses found for category:', category);
-                console.log('🔄 Trying to fetch all courses and filter client-side...');
-                
-                // Fallback: Get all courses and filter client-side
-                const allCoursesResponse = await fetch('/api/courses', {
-                  headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                  }
-                });
-                
-                if (allCoursesResponse.ok) {
-                  const allCoursesData = await allCoursesResponse.json();
-                  if (allCoursesData.success && allCoursesData.data?.courses) {
-                    // Filter courses by category client-side (case-insensitive)
-                    coursesData = allCoursesData.data.courses.filter(course => 
-                      course.category && course.category.toLowerCase() === category.toLowerCase()
-                    );
-                    console.log('📚 Client-side filtered courses:', coursesData.length);
-                    
-                    // Store for offline use
-                    await offlineIntegrationService.storeCategoryCourses(category, coursesData);
-                  }
-                }
-                
-                // Still get enrolled courses
-                try {
-                  const enrolledResponse = await fetch('/api/courses/enrolled/courses', {
-                    headers: {
-                      'Authorization': `Bearer ${token}`,
-                      'Content-Type': 'application/json'
-                    }
-                  });
-
-                  if (enrolledResponse.ok) {
-                    const enrolledApiData = await enrolledResponse.json();
-                    enrolledData = enrolledApiData.data.courses?.map(course => course._id) || [];
-                    await offlineIntegrationService.storeEnrolledCourses(enrolledData);
-                  }
-                } catch (enrolledError) {
-                  console.error('❌ Error fetching enrolled courses:', enrolledError);
-                  enrolledData = [];
-                }
+                console.log('📚 Final courses for category:', coursesData.length);
               } else {
                 console.error('❌ Invalid response structure:', data);
                 throw new Error('Invalid response from server');
               }
             } else {
-              console.error('❌ Response not ok:', response.status);
-              const errorText = await response.text();
-              console.error('❌ Error response:', errorText);
-              console.error('❌ Response headers:', Object.fromEntries(response.headers.entries()));
-              
-              // Parse error response to understand what went wrong
-              let errorMessage = 'Unknown error';
-              let isAuthError = false;
-              let isNotFoundError = false;
-              
-              if (response.status === 401) {
-                errorMessage = 'Authentication failed. Please log in again.';
-                isAuthError = true;
-              } else if (response.status === 403) {
-                errorMessage = 'Access denied. Insufficient permissions.';
-                isAuthError = true;
-              } else if (response.status === 404) {
-                errorMessage = 'Category endpoint not found.';
-                isNotFoundError = true;
-              } else {
-                try {
-                  const errorData = JSON.parse(errorText);
-                  console.error('❌ Parsed error data:', errorData);
-                  errorMessage = errorData.message || errorData.error || `HTTP ${response.status} error`;
-                } catch (parseError) {
-                  console.error('❌ Failed to parse error response:', parseError);
-                  errorMessage = `HTTP ${response.status}: ${response.statusText || 'Server error'}`;
-                }
-              }
-              
-              console.error('❌ Final error message:', errorMessage);
-              
-              // If it's an auth error, redirect to login
-              if (isAuthError) {
-                localStorage.removeItem('token');
-                window.location.href = '/login';
-                return;
-              }
-              
-              // Try fallback: get all courses and filter client-side
-              console.log('🔄 API failed, trying fallback: fetch all courses and filter...');
-              
-              try {
-                const allCoursesResponse = await fetch('/api/courses', {
-                  headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                  }
-                });
-                
-                if (allCoursesResponse.ok) {
-                  const allCoursesData = await allCoursesResponse.json();
-                  if (allCoursesData.success && allCoursesData.data?.courses) {
-                    console.log('📚 All courses from fallback API:', allCoursesData.data.courses.length);
-                    console.log('📋 All course categories:', allCoursesData.data.courses.map(c => `"${c.title}" -> "${c.category}"`));
-                    
-                    // Filter courses by category client-side (case-insensitive)
-                    coursesData = allCoursesData.data.courses.filter(course => {
-                      if (!course.category) return false;
-                      const matches = course.category.toLowerCase() === category.toLowerCase();
-                      console.log(`🔍 "${course.title}" category="${course.category}" matches="${matches}" published="${course.isPublished}"`);
-                      return matches;
-                    });
-                    console.log('📚 Fallback: Client-side filtered courses:', coursesData.length);
-                    
-                    // Store for offline use
-                    await offlineIntegrationService.storeCategoryCourses(category, coursesData);
-                    
-                    // Get enrolled courses
-                    try {
-                      const enrolledResponse = await fetch('/api/courses/enrolled/courses', {
-                        headers: {
-                          'Authorization': `Bearer ${token}`,
-                          'Content-Type': 'application/json'
-                        }
-                      });
-
-                      if (enrolledResponse.ok) {
-                        const enrolledApiData = await enrolledResponse.json();
-                        enrolledData = enrolledApiData.data.courses?.map(course => course._id) || [];
-                        await offlineIntegrationService.storeEnrolledCourses(enrolledData);
-                      }
-                    } catch (enrolledError) {
-                      console.error('❌ Error fetching enrolled courses:', enrolledError);
-                      enrolledData = [];
-                    }
-                  } else {
-                    throw new Error('Failed to fetch all courses as fallback');
-                  }
-                } else {
-                  throw new Error(`Fallback API also failed: HTTP ${allCoursesResponse.status}`);
-                }
-              } catch (fallbackError) {
-                console.error('❌ Fallback also failed:', fallbackError);
-                
-                // Set detailed error message for user
-                throw new Error(`${errorMessage}. Fallback also failed: ${fallbackError.message}`);
-              }
+              console.error('❌ API Response not ok:', response.status, response.statusText);
+              throw new Error(`Failed to fetch courses: HTTP ${response.status}`);
             }
 
           } catch (onlineError) {
@@ -577,11 +505,77 @@ const CategoryCourses = () => {
           const offlineData = await fetchOfflineData();
           coursesData = offlineData.courses;
           enrolledData = offlineData.enrolled;
+          
+          // Load completed courses from cache for offline mode
+          const cachedCompleted = localStorage.getItem('refugee_completed_cache');
+          if (cachedCompleted) {
+            const completedData = JSON.parse(cachedCompleted);
+            setCompletedCourses(completedData);
+          }
+          
+
         }
 
-        // Update state with fetched data
-        setCourses(coursesData);
-        setEnrolledCourses(enrolledData);
+        // Update state with fetched data (only if we got new data or have no existing data)
+        if (coursesData.length > 0 || courses.length === 0) {
+          setCourses(coursesData);
+          // Cache category courses
+          try {
+            localStorage.setItem(`refugee_category_${category}_courses`, JSON.stringify(coursesData));
+          } catch (e) { console.warn('Failed to cache category courses:', e); }
+        }
+        
+        if (enrolledData.length > 0 || enrolledCourses.length === 0) {
+          setEnrolledCourses(enrolledData);
+          // Cache enrolled courses
+          try {
+            localStorage.setItem('refugee_enrolled_cache', JSON.stringify(enrolledData));
+          } catch (e) { console.warn('Failed to cache enrolled courses:', e); }
+        }
+
+        // Fetch completion status for enrolled courses
+        if (enrolledData.length > 0) {
+          try {
+            const completionPromises = enrolledData.map(async (courseId) => {
+              try {
+                const response = await fetch(`/api/courses/${courseId}/progress`, {
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                  }
+                });
+                
+                if (response.ok) {
+                  const data = await response.json();
+                  const progressPercentage = data.data?.progressPercentage || 0;
+                  const isCompleted = progressPercentage >= 95;
+                  return { courseId, isCompleted, progressPercentage };
+                }
+                return { courseId, isCompleted: false, progressPercentage: 0 };
+              } catch (error) {
+                console.warn(`⚠️ Could not fetch progress for course ${courseId}:`, error);
+                return { courseId, isCompleted: false, progressPercentage: 0 };
+              }
+            });
+            
+            const completionResults = await Promise.all(completionPromises);
+            const newCompletedCourses = completionResults.filter(result => result.isCompleted).map(result => result.courseId);
+            
+            console.log('🔄 Updated completion status:', {
+              totalEnrolled: enrolledData.length,
+              completed: newCompletedCourses.length,
+              completionResults: completionResults
+            });
+            
+            setCompletedCourses(newCompletedCourses);
+            localStorage.setItem('refugee_completed_cache', JSON.stringify(newCompletedCourses));
+            
+          } catch (error) {
+            console.error('❌ Error fetching completion status:', error);
+          }
+        }
+
+
         
         // Debug final results
         console.log('🎯 Final results for category:', category);
@@ -609,7 +603,9 @@ const CategoryCourses = () => {
         console.error('❌ General error:', err);
         console.error('❌ Error message:', err.message);
         console.error('❌ Error stack:', err.stack);
-        setError('Failed to load courses. Please try again.');
+        // Don't clear existing data on error - keep what we have
+        console.log('🔄 Keeping existing category courses data due to API error');
+        setError('Failed to refresh courses. Showing cached data.');
       } finally {
         setLoading(false);
       }
@@ -627,7 +623,8 @@ const CategoryCourses = () => {
   }, [category]);
 
   const handleViewCourse = (course) => {
-    navigate(`/courses/${course._id}`, { state: course });
+    // Navigate to course overview page for all courses (enrolled, completed, or not enrolled)
+    navigate(`/courses/${course._id}/overview`, { state: course });
   };
 
   const handleEnroll = async (course) => {
@@ -706,6 +703,13 @@ const CategoryCourses = () => {
     return enrolledCourses.includes(courseId);
   };
 
+  const isCompleted = (courseId) => {
+    if (!courseId || !completedCourses) return false;
+    return completedCourses.includes(courseId);
+  };
+
+
+
   const filteredCourses = (() => {
     try {
       return (courses || []).filter(course => {
@@ -721,6 +725,8 @@ const CategoryCourses = () => {
         if (activeFilter === 'all') return matchesSearch;
         if (activeFilter === 'enrolled') return matchesSearch && isEnrolled(course._id);
         if (activeFilter === 'not-enrolled') return matchesSearch && !isEnrolled(course._id);
+        if (activeFilter === 'completed') return matchesSearch && isCompleted(course._id);
+
         
         return matchesSearch;
       });
@@ -843,6 +849,13 @@ const CategoryCourses = () => {
           >
             Not Enrolled
           </FilterButton>
+          <FilterButton
+            active={activeFilter === 'completed'}
+            onClick={() => setActiveFilter('completed')}
+          >
+            Completed
+          </FilterButton>
+
         </FilterSection>
 
         <div style={{ marginBottom: '2rem' }}>
@@ -852,7 +865,8 @@ const CategoryCourses = () => {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             style={{
-              width: '100%',
+              width: '300px',
+              maxWidth: '100%',
               padding: '0.75rem',
               border: '1px solid #ddd',
               borderRadius: '8px',
@@ -877,7 +891,7 @@ const CategoryCourses = () => {
                 : `No courses match your current filters. Try adjusting your search terms or filters.`
               }
             </p>
-            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
               <button
                 onClick={() => navigate('/courses')}
                 style={{
@@ -893,55 +907,21 @@ const CategoryCourses = () => {
               >
                 Browse All Courses
               </button>
-              {courses.length > 0 && (
-                <button
-                  onClick={() => {
-                    setActiveFilter('all');
-                    setSearchTerm('');
-                  }}
-                  style={{
-                    background: '#6c757d',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    padding: '0.75rem 1.5rem',
-                    cursor: 'pointer',
-                    fontWeight: '600',
-                    fontSize: '1rem'
-                  }}
-                >
-                  Clear Filters
-                </button>
-              )}
             </div>
           </div>
         ) : (
           <CourseGrid>
             {filteredCourses.map((course) => (
               <CourseCard key={course._id || Math.random()} onClick={() => handleViewCourse(course)}>
-                <CourseImage image={(() => {
-                  if (course.course_profile_picture) {
-                    // Convert Windows backslashes to forward slashes
-                    const normalizedPath = course.course_profile_picture.replace(/\\/g, '/');
-                    
-                    if (normalizedPath.startsWith('http://') || normalizedPath.startsWith('https://')) {
-                      return normalizedPath;
-                    } else if (normalizedPath.startsWith('/uploads/')) {
-                      return normalizedPath;
-                    } else if (normalizedPath.startsWith('uploads/')) {
-                      return `/${normalizedPath}`;
-                    } else {
-                      return `/uploads/${normalizedPath}`;
-                    }
-                  }
-                  return course.image || null; // Return null instead of hardcoded fallback
-                })()} />
+                <CourseImage image={course.course_profile_picture || course.image || null} />
                 <CourseLevel level={course.level || course.difficult_level || 'Beginner'}>
                   {course.level || course.difficult_level || 'Beginner'}
                 </CourseLevel>
                 <CourseContent>
                   <CourseTitle>{course.title || 'Course Title'}</CourseTitle>
-                  <CourseDescription>{course.description || 'No description available'}</CourseDescription>
+                  <CourseDescription>
+                    {course.description || course.overview || `Learn ${course.category || 'new skills'} in this comprehensive course designed for ${course.level || 'beginner'} level students.`}
+                  </CourseDescription>
                   <CourseMeta>
                     <MetaItem>
                       <span>⏱ {course.duration || 'Self-paced'}</span>
@@ -951,12 +931,24 @@ const CategoryCourses = () => {
                     </MetaItem>
                   </CourseMeta>
                   {isEnrolled(course._id) ? (
+                    isCompleted(course._id) ? (
+                      <EnrollButton 
+                        style={{ background: '#10b981' }} 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStartCourse(course);
+                        }}
+                      >
+                        ✅ Course Completed
+                      </EnrollButton>
+                    ) : (
                     <EnrollButton onClick={(e) => {
                       e.stopPropagation();
                       handleStartCourse(course);
                     }}>
                       Continue Learning
                     </EnrollButton>
+                    )
                   ) : (
                     <EnrollButton onClick={(e) => {
                       e.stopPropagation();

@@ -458,6 +458,15 @@ const CourseDiscussionPage = () => {
 
   const handleLike = async (itemId, isReply = false) => {
     try {
+      // Validate itemId
+      if (!itemId) {
+        console.error('❌ handleLike called with undefined itemId:', { itemId, isReply });
+        setError('Invalid item ID for like operation');
+        return;
+      }
+
+      console.log('🔍 handleLike called with:', { itemId, isReply });
+      
       const token = localStorage.getItem('token');
       const isOnline = navigator.onLine;
       
@@ -469,7 +478,7 @@ const CourseDiscussionPage = () => {
           console.log('🌐 Online mode: Liking course discussion item...');
           
           const endpoint = isReply ? 
-            `/api/courses/${courseId}/discussions/replies/${itemId}/like` : 
+            `/api/courses/${courseId}/discussions/${discussionId}/replies/${itemId}/like` : 
             `/api/courses/${courseId}/discussions/${itemId}/like`;
           
           const response = await fetch(endpoint, {
@@ -561,9 +570,9 @@ const CourseDiscussionPage = () => {
   return (
     <Container>
       <Header>
-        <BackButton onClick={() => navigate(`/courses/${courseId}`)}>
+        <BackButton onClick={() => navigate(`/courses/${courseId}/overview`)}>
           <ArrowBack />
-          Back to Course
+          Back to Course Overview
         </BackButton>
         <Title>{discussion.title}</Title>
         <CourseInfo>
@@ -607,32 +616,40 @@ const CourseDiscussionPage = () => {
       </PostContainer>
 
       {/* Replies */}
-      {replies.map((reply, index) => (
-        <ReplyContainer key={reply._id || index}>
-          <ReplyBox>
-            <PostHeader>
-              <Avatar>
-                <Person />
-              </Avatar>
-              <PostMeta>
-                <h4>{reply.author?.name || 'Anonymous'}</h4>
-                <p>{new Date(reply.createdAt).toLocaleString()}</p>
-              </PostMeta>
-            </PostHeader>
-            
-            <PostContent>
-              {reply.content}
-            </PostContent>
-            
-            <PostActions>
-              <ActionButton onClick={() => handleLike(reply._id, true)}>
-                <ThumbUp />
-                <span>{likes[reply._id] || 0} Likes</span>
-              </ActionButton>
-            </PostActions>
-          </ReplyBox>
-        </ReplyContainer>
-      ))}
+      {replies.map((reply, index) => {
+        console.log('🔍 Reply structure:', { 
+          reply, 
+          index, 
+          hasId: !!reply._id
+        });
+        
+        return (
+          <ReplyContainer key={reply._id || index}>
+            <ReplyBox>
+              <PostHeader>
+                <Avatar>
+                  <Person />
+                </Avatar>
+                <PostMeta>
+                  <h4>{reply.author?.name || 'Anonymous'}</h4>
+                  <p>{new Date(reply.createdAt).toLocaleString()}</p>
+                </PostMeta>
+              </PostHeader>
+              
+              <PostContent>
+                {reply.content}
+              </PostContent>
+              
+              <PostActions>
+                <ActionButton onClick={() => handleLike(reply._id, true)}>
+                  <ThumbUp />
+                  <span>{likes[reply._id] || 0} Likes</span>
+                </ActionButton>
+              </PostActions>
+            </ReplyBox>
+          </ReplyContainer>
+        );
+      })}
 
       {/* Reply Form */}
       <ReplyForm onSubmit={handleReplySubmit}>

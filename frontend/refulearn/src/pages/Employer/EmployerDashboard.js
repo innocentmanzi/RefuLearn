@@ -15,7 +15,7 @@ import {
 import PageContainer from '../../components/PageContainer';
 import ContentWrapper from '../../components/ContentWrapper';
 import { useTranslation } from 'react-i18next';
-import offlineIntegrationService from '../../services/offlineIntegrationService';
+
 
 ChartJS.register(
   CategoryScale,
@@ -493,75 +493,40 @@ const EmployerDashboard = () => {
       if (!isRefresh) setLoading(true);
       setError('');
       setLastRequestTime(now);
-      
-      const isOnline = navigator.onLine;
-      let dashboardData = null;
-
-      if (isOnline) {
-        try {
-          // Try online API calls first (preserving existing behavior)
-          console.log('🌐 Online mode: Fetching employer dashboard from API...');
-          
-          const response = await fetch('/api/employer/dashboard', {
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
-              'Content-Type': 'application/json'
-            }
-          });
-
-          if (!response.ok) {
-            if (response.status === 429) {
-              console.warn('⚠️ Rate limited by server, using cached data');
-              // For rate limiting, use cached data instead of throwing error
-              dashboardData = await offlineIntegrationService.getEmployerDashboard();
-              if (dashboardData) {
-                setDashboardData(dashboardData);
-                if (!isRefresh) setLoading(false);
-                return;
-              }
-            }
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-          }
-
-          const data = await response.json();
-
-          if (data.success) {
-            dashboardData = data.data;
-            
-            // Store dashboard data for offline use
-            await offlineIntegrationService.storeEmployerDashboard(dashboardData);
-            console.log('✅ Employer dashboard stored for offline use');
-            
-            if (isRefresh) {
-              console.log('🔄 Dashboard charts auto-updated with latest database changes');
-            } else {
-              console.log('✅ Dashboard data loaded from database');
-            }
-          } else {
-            throw new Error(data.message || 'Failed to fetch dashboard data');
-          }
-        } catch (onlineError) {
-          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
-          
-          // Fall back to offline data if online fails
-          dashboardData = await offlineIntegrationService.getEmployerDashboard();
-          
-          if (!dashboardData && !isRefresh) {
-            throw onlineError;
-          }
-        }
-      } else {
-        // Offline mode: use offline services
-        console.log('📴 Offline mode: Using offline employer dashboard data...');
-        dashboardData = await offlineIntegrationService.getEmployerDashboard();
-      }
 
       try {
-        setDashboardData(dashboardData);
-      } catch (err) {
-        console.error('❌ Dashboard fetch error:', err);
+        console.log('🌐 Fetching employer dashboard from API...');
+        
+        const response = await fetch('/api/employer/dashboard', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        if (data.success) {
+          const dashboardData = data.data;
+          
+          if (isRefresh) {
+            console.log('🔄 Dashboard charts auto-updated with latest database changes');
+          } else {
+            console.log('✅ Dashboard data loaded from database');
+          }
+          
+          setDashboardData(dashboardData);
+        } else {
+          throw new Error(data.message || 'Failed to fetch dashboard data');
+        }
+      } catch (error) {
+        console.error('❌ Dashboard fetch error:', error);
         if (!isRefresh) {
-          setError(`Network error: ${err.message}`);
+          setError(`Network error: ${error.message}`);
         }
       } finally {
         if (!isRefresh) setLoading(false);
@@ -630,7 +595,7 @@ const EmployerDashboard = () => {
   }
 
   // Extract data from API response - ALL DATA COMES FROM DATABASE
-  const { overview, charts, recentActivity, topJobs } = dashboardData;
+  const { overview, charts, recentActivity } = dashboardData;
 
   const stats = {
     jobsPosted: overview?.jobs?.total || 0,
@@ -674,50 +639,25 @@ const EmployerDashboard = () => {
     ],
   };
 
-  const applicationTrendsData = {
-    labels: charts?.applicationTrends?.map((item: any) => item.monthLabel || item.month) || [],
+  const scholarshipPostingData = {
+    labels: charts?.monthlyScholarshipPostings?.map((item: any) => item.monthLabel || item.month) || [],
     datasets: [
       {
-        label: 'Applications Received',
-        data: charts?.applicationTrends?.map((item: any) => item.applications) || [],
-        borderColor: '#007bff',
-        backgroundColor: 'rgba(0,123,255,0.1)',
-        fill: true,
-        tension: 0.4,
-        pointBackgroundColor: '#007bff',
-        pointBorderColor: '#ffffff',
-        pointBorderWidth: 2,
-        pointRadius: 4,
+        label: 'Scholarships Posted',
+        data: charts?.monthlyScholarshipPostings?.map((item: any) => item.scholarships) || [],
+        backgroundColor: '#6c5ce7',
+        borderColor: '#6c5ce7',
+        borderWidth: 2,
       },
     ],
   };
 
-  const applicationStatusData = {
-    labels: charts?.applicationStatusDistribution?.map((item: any) => 
-      item.status.charAt(0).toUpperCase() + item.status.slice(1)
-    ) || [],
-    datasets: [
-      {
-        label: 'Applications by Status',
-        data: charts?.applicationStatusDistribution?.map((item: any) => item.count) || [],
-        backgroundColor: [
-          '#28a745', // hired - green
-          '#ffc107', // pending - yellow  
-          '#17a2b8', // shortlisted - blue
-          '#dc3545', // rejected - red
-          '#6f42c1'  // reviewed - purple
-        ],
-        borderWidth: 2,
-        borderColor: '#ffffff',
-      },
-    ],
-  };
+
 
   // Log chart data for debugging
   console.log('📊 Live chart data:', {
     jobPostings: jobPostingLastMonthData.datasets[0].data,
-    applications: applicationTrendsData.datasets[0].data,
-    statusDistribution: applicationStatusData.datasets[0].data
+    scholarshipPostings: scholarshipPostingData.datasets[0].data
   });
 
   const chartOptions = {
@@ -818,188 +758,22 @@ const EmployerDashboard = () => {
               </ChartContainer>
             </Card>
             <Card>
-              <CardTitle>Application Trends (Last 6 Months)</CardTitle>
+              <CardTitle>Scholarship Posting Activity (Last 6 Months)</CardTitle>
               <ChartContainer>
-                <Line data={applicationTrendsData} options={chartOptions} />
-              </ChartContainer>
-            </Card>
-            <Card>
-              <CardTitle>Application Status Distribution</CardTitle>
-              <ChartContainer>
-                <Bar data={applicationStatusData} options={barChartOptions} />
+                <Bar data={scholarshipPostingData} options={barChartOptions} />
               </ChartContainer>
             </Card>
           </DashboardGrid>
 
           <SectionTitle>Quick Actions</SectionTitle>
           <QuickActionLink to="/employer/post-jobs">Post New Job</QuickActionLink>
-          <QuickActionLink to="/employer/applicants">View Applicants</QuickActionLink>
           <QuickActionLink to="/employer/post-scholarship">Post Scholarship</QuickActionLink>
 
-          <SectionContainer>
-            <SectionHeader>
-              <SectionTitle>Recent Applicants</SectionTitle>
-              <ViewAllLink onClick={() => navigate('/employer/applicants')}>
-                View All Applications →
-              </ViewAllLink>
-            </SectionHeader>
-            
-            {recentApplicants.length > 0 ? (
-              <ItemsGrid>
-                {recentApplicants.slice(0, 6).map((app, idx) => (
-                  <ItemCard key={idx}>
-                    <ItemHeader>
-                      <UserInfo>
-                        <Avatar>
-                          {app.name.split(' ').map(n => n[0]).join('').toUpperCase()}
-                        </Avatar>
-                        <UserDetails>
-                          <UserName>{app.name}</UserName>
-                          <UserMeta>Applied {app.appliedAt ? new Date(app.appliedAt).toLocaleDateString() : 'Recently'}</UserMeta>
-                        </UserDetails>
-                      </UserInfo>
-                      <StatusBadge status={app.status}>{app.status}</StatusBadge>
-                    </ItemHeader>
-                    
-                    <ItemContent>
-                      <JobTitle>{app.job}</JobTitle>
-                      <DateInfo>
-                        📅 {app.appliedAt ? new Date(app.appliedAt).toLocaleDateString('en-US', { 
-                          month: 'short', 
-                          day: 'numeric',
-                          year: 'numeric'
-                        }) : 'Recent'}
-                      </DateInfo>
-                    </ItemContent>
-                    
-                    <ItemActions>
-                      <ActionButton primary onClick={() => navigate(`/employer/applicants?jobId=${app.jobId}`)}>Review Application</ActionButton>
-                    </ItemActions>
-                  </ItemCard>
-                ))}
-              </ItemsGrid>
-            ) : (
-              <EmptyState>
-                <div className="icon">👥</div>
-                <div className="title">No Recent Applicants</div>
-                <div className="subtitle">Applications will appear here once candidates start applying to your jobs</div>
-                <EmptyStateButton onClick={() => navigate('/employer/post-jobs')}>
-                  Post Your First Job
-                </EmptyStateButton>
-              </EmptyState>
-            )}
-          </SectionContainer>
 
-          {topJobs && topJobs.length > 0 && (
-            <SectionContainer>
-              <SectionHeader>
-                <SectionTitle>Top Performing Jobs</SectionTitle>
-                <ViewAllLink onClick={() => navigate('/employer/jobs')}>
-                  View All Jobs →
-                </ViewAllLink>
-              </SectionHeader>
-              
-              <ItemsGrid>
-                {topJobs.slice(0, 6).map((job, idx) => {
-                  // Use success rate from database (hired + shortlisted / total applications)
-                  const successRate = job.successRate || 0;
-                  const processingRate = job.processingRate || 0;
-                  
-                  // Use success rate as the main performance metric
-                  const performancePercentage = successRate;
-                  
-                  console.log(`📊 Job "${job.title}": ${job.applicationCount} applications, Success Rate: ${successRate}%, Processing Rate: ${processingRate}%`);
-                  
-                  return (
-                    <StatsCard key={idx}>
-                      <JobTitle style={{ textAlign: 'center', marginBottom: '1rem' }}>
-                        {job.title}
-                      </JobTitle>
-                      <StatNumber>{job.applicationCount}</StatNumber>
-                      <StatDescription>Applications Received</StatDescription>
-                      
-                      {/* Success Rate */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#666', marginBottom: '0.5rem' }}>
-                        <span>Success Rate</span>
-                        <span>{successRate}%</span>
-                      </div>
-                      
-                      <PerformanceBar>
-                        <PerformanceProgress style={{ width: `${Math.max(performancePercentage, 5)}%` }} />
-                      </PerformanceBar>
-                      
-                      {/* Application Status Breakdown */}
-                      <div style={{ fontSize: '0.7rem', color: '#666', textAlign: 'center', marginTop: '0.5rem', lineHeight: '1.3' }}>
-                        {job.hiredCount > 0 && <div>✅ Hired: {job.hiredCount}</div>}
-                        {job.shortlistedCount > 0 && <div>⭐ Shortlisted: {job.shortlistedCount}</div>}
-                        {job.pendingCount > 0 && <div>⏳ Pending: {job.pendingCount}</div>}
-                        {job.rejectedCount > 0 && <div>❌ Rejected: {job.rejectedCount}</div>}
-                        {job.applicationCount === 0 && <div style={{color: '#999'}}>No applications yet</div>}
-                      </div>
-                      
-                      <ItemActions style={{ justifyContent: 'center', marginTop: '1.5rem' }}>
-                        <ActionButton primary onClick={() => navigate('/employer/jobs')}>View Details</ActionButton>
-                      </ItemActions>
-                    </StatsCard>
-                  );
-                })}
-              </ItemsGrid>
-            </SectionContainer>
-          )}
 
-          <SectionContainer>
-            <SectionHeader>
-              <SectionTitle>Recent Scholarship Applications</SectionTitle>
-              <ViewAllLink onClick={() => navigate('/employer/scholarships')}>
-                View All Scholarships →
-              </ViewAllLink>
-            </SectionHeader>
-            
-            {recentScholarshipApplications.length > 0 ? (
-              <ItemsGrid>
-                {recentScholarshipApplications.slice(0, 6).map((app, idx) => (
-                  <ItemCard key={idx}>
-                    <ItemHeader>
-                      <UserInfo>
-                        <Avatar style={{ background: 'linear-gradient(135deg, #6c5ce7, #a29bfe)' }}>
-                          {app.name.split(' ').map(n => n[0]).join('').toUpperCase()}
-                        </Avatar>
-                        <UserDetails>
-                          <UserName>{app.name}</UserName>
-                          <UserMeta>Applied {app.appliedAt ? new Date(app.appliedAt).toLocaleDateString() : 'Recently'}</UserMeta>
-                        </UserDetails>
-                      </UserInfo>
-                      <StatusBadge status="pending">New</StatusBadge>
-                    </ItemHeader>
-                    
-                    <ItemContent>
-                      <JobTitle style={{ color: '#6c5ce7' }}>🎓 {app.scholarship}</JobTitle>
-                      <DateInfo>
-                        📅 {app.appliedAt ? new Date(app.appliedAt).toLocaleDateString('en-US', { 
-                          month: 'short', 
-                          day: 'numeric',
-                          year: 'numeric'
-                        }) : 'Recent'}
-                      </DateInfo>
-                    </ItemContent>
-                    
-                    <ItemActions>
-                      <ActionButton primary onClick={() => navigate(`/employer/applicants?scholarshipId=${app.scholarshipId}`)}>Review Application</ActionButton>
-                    </ItemActions>
-                  </ItemCard>
-                ))}
-              </ItemsGrid>
-            ) : (
-              <EmptyState>
-                <div className="icon">🎓</div>
-                <div className="title">No Recent Scholarship Applications</div>
-                <div className="subtitle">Scholarship applications will appear here once students start applying</div>
-                <EmptyStateButton onClick={() => navigate('/employer/post-scholarship')}>
-                  Post Your First Scholarship
-                </EmptyStateButton>
-              </EmptyState>
-            )}
-          </SectionContainer>
+
+
+
 
 
         </ResponsiveWrapper>

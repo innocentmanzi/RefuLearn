@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import offlineIntegrationService from '../../services/offlineIntegrationService';
+
 
 const Container = styled.div`
   padding: 2rem;
@@ -152,50 +152,21 @@ const EditJob = () => {
         setError('');
         
         const token = localStorage.getItem('token');
-        const isOnline = navigator.onLine;
         
-        let jobData = null;
-
-        if (isOnline) {
-          try {
-            // Try online API calls first (preserving existing behavior)
-            console.log('🌐 Online mode: Fetching job data from API...');
-            
-            const response = await fetch(`/api/jobs/${jobId}`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-              }
-            });
-
-            if (response.ok) {
-              const jobApiData = await response.json();
-              jobData = jobApiData.data.job;
-              console.log('✅ Job data received');
-              
-              // Store job data for offline use
-              await offlineIntegrationService.storeJobData(jobId, jobData);
-            } else {
-              throw new Error('Failed to fetch job');
-            }
-
-          } catch (onlineError) {
-            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
-            
-            // Fall back to offline data if online fails
-            jobData = await offlineIntegrationService.getJobData(jobId);
-            
-            if (!jobData) {
-              throw onlineError;
-            }
+        console.log('🌐 Fetching job data from API...');
+        
+        const response = await fetch(`/api/jobs/${jobId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
           }
-        } else {
-          // Offline mode: use offline services
-          console.log('📴 Offline mode: Using offline job data...');
-          jobData = await offlineIntegrationService.getJobData(jobId);
-        }
+        });
 
-        if (jobData) {
+        if (response.ok) {
+          const jobApiData = await response.json();
+          const jobData = jobApiData.data.job;
+          console.log('✅ Job data received');
+          
           setFormData({
             title: jobData.title || '',
             description: jobData.description || '',
@@ -214,6 +185,8 @@ const EditJob = () => {
             contactEmail: jobData.contactEmail || '',
             contactPhone: jobData.contactPhone || ''
           });
+        } else {
+          throw new Error('Failed to fetch job');
         }
 
       } catch (err) {
@@ -270,81 +243,27 @@ const EditJob = () => {
       setSuccess('');
       
       const token = localStorage.getItem('token');
-      const isOnline = navigator.onLine;
-      let success = false;
+      
+      console.log('🌐 Updating job...');
+      
+      const response = await fetch(`/api/jobs/${jobId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(formData)
+      });
 
-      if (isOnline) {
-        try {
-          // Try online job update first (preserving existing behavior)
-          console.log('🌐 Online mode: Updating job...');
-          
-          const response = await fetch(`/api/jobs/${jobId}`, {
-            method: 'PUT',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(formData)
-          });
-
-          if (response.ok) {
-            success = true;
-            console.log('✅ Online job update successful');
-            
-            setSuccess('Job updated successfully!');
-            
-            // Store updated job for offline use
-            await offlineIntegrationService.storeJobData(jobId, formData);
-            
-            // Navigate back after delay
-            setTimeout(() => {
-              navigate('/employer/jobs');
-            }, 1500);
-          } else {
-            throw new Error('Failed to update job');
-          }
-
-        } catch (onlineError) {
-          console.warn('⚠️ Online update failed, using offline:', onlineError);
-          
-          // Fall back to offline job update
-          const result = await offlineIntegrationService.updateJobOffline(jobId, formData);
-          
-          if (result.success) {
-            success = true;
-            console.log('✅ Offline job update successful');
-            
-            setSuccess('Job updated offline! Changes will sync when online.');
-            
-            // Navigate back after delay
-            setTimeout(() => {
-              navigate('/employer/jobs');
-            }, 1500);
-          } else {
-            throw new Error('Failed to update job offline');
-          }
-        }
-      } else {
-        // Offline job update
-        console.log('📴 Offline mode: Updating job offline...');
-        const result = await offlineIntegrationService.updateJobOffline(jobId, formData);
+      if (response.ok) {
+        console.log('✅ Job update successful');
+        setSuccess('Job updated successfully!');
         
-        if (result.success) {
-          success = true;
-          console.log('✅ Offline job update successful');
-          
-          setSuccess('Job updated offline! Changes will sync when online.');
-          
-          // Navigate back after delay
-          setTimeout(() => {
-            navigate('/employer/jobs');
-          }, 1500);
-        } else {
-          throw new Error('Failed to update job offline');
-        }
-      }
-
-      if (!success) {
+        // Navigate back after delay
+        setTimeout(() => {
+          navigate('/employer/jobs');
+        }, 1500);
+      } else {
         throw new Error('Failed to update job');
       }
 

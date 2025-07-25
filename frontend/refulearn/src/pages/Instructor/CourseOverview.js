@@ -1,14 +1,33 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useParams, useNavigate } from 'react-router-dom';
-import { 
-  ArrowBack, Edit, Publish, Delete, PlayArrow, Assignment, Quiz, Forum, 
-  People, Schedule, Category, VisibilityOff, ExpandMore, ExpandLess, 
-  VideoLibrary, Description, Link, CheckCircle, RadioButtonUnchecked, Add,
-  MenuBook, School, Star, TrendingUp, LightbulbOutlined, Psychology, Assessment,
-  Article, AudioFile, AttachFile
+import { useUser } from '../../contexts/UserContext';
+import {
+  ArrowBack,
+  Schedule,
+  Category,
+  People,
+  PlayArrow,
+  Edit,
+  Assessment,
+  Publish,
+  VisibilityOff,
+  Delete,
+  Add,
+  Assignment,
+  Quiz,
+  Forum,
+  Description,
+  VideoLibrary,
+  AudioFile,
+  AttachFile,
+  Article,
+  Link,
+  ExpandMore,
+  ExpandLess,
+  CheckCircle
 } from '@mui/icons-material';
-import offlineIntegrationService from '../../services/offlineIntegrationService';
+
 
 const Container = styled.div`
   padding: 1rem;
@@ -52,8 +71,8 @@ const StatusBadge = styled.span`
   border-radius: 20px;
   font-size: 0.8rem;
   font-weight: 600;
-  background: ${({ published }) => (published ? '#e6f9ec' : '#fbeaea')};
-  color: ${({ published }) => (published ? '#1bbf4c' : '#d32f2f')};
+  background: ${({ published }) => (published === true ? '#e6f9ec' : '#fbeaea')};
+  color: ${({ published }) => (published === true ? '#1bbf4c' : '#d32f2f')};
   
   @media (min-width: 768px) {
     font-size: 0.9rem;
@@ -62,11 +81,18 @@ const StatusBadge = styled.span`
 
 const CourseImage = styled.img`
   width: 100%;
-  max-width: 300px;
-  height: 200px;
+  max-width: 400px;
+  height: 250px;
   object-fit: cover;
   border-radius: 12px;
   margin-bottom: 1.5rem;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  border: 2px solid #e0e0e0;
+  
+  @media (min-width: 768px) {
+    max-width: 500px;
+    height: 300px;
+  }
 `;
 
 const CourseInfo = styled.div`
@@ -629,129 +655,408 @@ const QuickActionDescription = styled.p`
 
 
 export default function CourseOverview() {
+  console.log('🎬 CourseOverview component rendering...', new Date().toISOString());
+  
   const { courseId } = useParams();
   const navigate = useNavigate();
   const [course, setCourse] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // Start as false, will be set to true when fetch starts
+  const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');
   const [expandedModules, setExpandedModules] = useState(new Set());
+  const [overviewExpanded, setOverviewExpanded] = useState(false);
+  const { token, refreshToken, logout } = useUser();
+  
+  console.log('🔍 Debug - Component state:', {
+    courseId,
+    loading,
+    processing,
+    error: error ? 'Has error' : 'No error',
+    course: course ? 'Has course' : 'No course'
+  });
+
+  // Function to check if token is expired
+  const isTokenExpired = (token) => {
+    if (!token) return true;
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      const currentTime = Date.now() / 1000;
+      return payload.exp < currentTime;
+    } catch (error) {
+      console.log('🔍 Debug - Error decoding token:', error);
+      return true;
+    }
+  };
 
   useEffect(() => {
-    fetchCourse();
-  }, [courseId]);
+    console.log('🔄 useEffect triggered with courseId:', courseId);
+    if (courseId) {
+      console.log('✅ courseId exists, calling fetchCourse...');
+      fetchCourse();
+    } else {
+      console.log('❌ courseId is missing');
+    }
+  }, [courseId]); // Only depend on courseId, not fetchCourse
 
   const fetchCourse = async () => {
+    console.log('🚀 fetchCourse called with courseId:', courseId);
+    
+    // Prevent multiple simultaneous requests
+    if (processing) {
+      console.log('🔍 Debug - Request already in progress, skipping...');
+      return;
+    }
+    
+    setLoading(true);
+    setError(null);
+    setProcessing(true);
+    
     try {
-      setLoading(true);
-      setError('');
-      const token = localStorage.getItem('token');
-      const isOnline = navigator.onLine;
+      let token = localStorage.getItem('token');
+      console.log('🔍 Debug - Token exists:', !!token);
+      console.log('🔍 Debug - Token length:', token ? token.length : 0);
       
-      console.log('Fetching course with ID:', courseId);
-      
-      let courseData = null;
-
-      if (isOnline) {
-        try {
-          // Try online API calls first (preserving existing behavior)
-          console.log('🌐 Online mode: Fetching course overview from API...');
-          
-          const response = await fetch(`/api/courses/${courseId}`, {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
-          });
-
-          console.log('Response status:', response.status);
-          console.log('Response ok:', response.ok);
-
-          if (response.ok) {
-            const data = await response.json();
-            console.log('Course data received:', data);
-            console.log('Course modules:', data.data?.course?.modules);
-            
-            if (data.success && data.data && data.data.course) {
-              courseData = data.data.course;
-              console.log('✅ Course overview data received from API');
-              
-              // Store course data for offline use
-              await offlineIntegrationService.storeCourseData(courseId, courseData);
-            } else {
-              throw new Error('Invalid course data received');
-            }
-          } else {
-            const errorText = await response.text();
-            console.error('Failed response:', response.status, errorText);
-            throw new Error(`Failed to load course: ${response.status} ${errorText}`);
-          }
-        } catch (onlineError) {
-          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
-          // Fall back to offline data if online fails
-          courseData = await offlineIntegrationService.getCourseData(courseId);
-        }
-      } else {
-        // Offline mode: use offline services
-        console.log('📴 Offline mode: Using offline course overview data...');
-        courseData = await offlineIntegrationService.getCourseData(courseId);
+      if (!token) {
+        setError('Authentication required');
+        return;
       }
 
-      if (courseData) {
-          
-          // Ensure modules is an array
-          if (courseData.modules && Array.isArray(courseData.modules)) {
-            console.log('Found', courseData.modules.length, 'modules for course');
-            courseData.modules.forEach((module, index) => {
-              console.log(`Module ${index + 1}: ${module.title}`);
-              console.log('  - contentItems:', module.contentItems ? module.contentItems.length : 'undefined', module.contentItems);
-              console.log('  - content:', module.content ? 'Yes' : 'No');
-              console.log('  - assessments:', module.assessments ? module.assessments.length : 0);
+      // Check if token is expired
+      if (isTokenExpired(token)) {
+        console.log('🔍 Debug - Token is expired, attempting refresh...');
+        const newToken = await refreshToken();
+        if (!newToken) {
+          setError('Authentication expired. Please log in again.');
+          return;
+        }
+        // Use the new token
+        token = newToken;
+      }
+
+      console.log('🌐 Making API call to:', `/api/courses/${courseId}`);
+      const response = await fetch(`/api/courses/${courseId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      console.log('🔍 Debug - Response status:', response.status);
+      console.log('🔍 Debug - Response ok:', response.ok);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.log('🔍 Debug - Error response:', errorText);
+        if (response.status === 401) {
+          console.log('🔄 Token expired, attempting refresh...');
+          const newToken = await refreshToken();
+          if (newToken) {
+            console.log('✅ Token refreshed successfully. Retrying request...');
+            const retryResponse = await fetch(`/api/courses/${courseId}`, {
+              headers: {
+                'Authorization': `Bearer ${newToken}`,
+                'Content-Type': 'application/json'
+              }
             });
+            if (retryResponse.ok) {
+              const result = await retryResponse.json();
+              console.log('✅ Course data processed successfully after refresh');
+              if (result.success && result.data && result.data.course) {
+                // Use the same processing logic as the main flow
+                const courseData = result.data.course;
+                setCourse(courseData);
+                return; // Exit early after successful retry
+              } else {
+                throw new Error('Invalid course data received after refresh');
+              }
+            } else {
+              throw new Error('Failed to refresh token or retry request');
+            }
+          } else {
+            throw new Error('Failed to refresh token');
+          }
+        } else {
+          throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
+        }
+      }
+
+      const result = await response.json();
+      console.log('🔍 Debug - Response data:', result);
+      
+      if (result.success && result.data && result.data.course) {
+        const courseData = result.data.course;
+        
+        // Process course data to ensure all properties are safe
+        const processedModules = await Promise.all((courseData.modules || []).map(async (module, index) => {
+          if (!module) {
+            console.warn(`⚠️ Module at index ${index} is null or undefined, skipping`);
+            return null;
+          }
+          
+          const safeModule = {
+            _id: module._id || `module-${index}`,
+            title: module.title || `Module ${index + 1}`,
+            contentItems: Array.isArray(module.contentItems) ? module.contentItems : [],
+            resources: Array.isArray(module.resources) ? module.resources : [],
+            assessments: Array.isArray(module.assessments) ? module.assessments : [],
+            quizzes: Array.isArray(module.quizzes) ? module.quizzes : [],
+            discussions: Array.isArray(module.discussions) ? module.discussions : [],
+            videoUrl: module.videoUrl || null,
+            videoTitle: module.videoTitle || '',
+            content: module.content || null,
+            ...module
+          };
+          
+          // Ensure contentItems is always an array
+          if (!Array.isArray(safeModule.contentItems)) {
+            safeModule.contentItems = [];
+          }
+          
+          // Remove duplicate discussions by title
+          if (safeModule.discussions && safeModule.discussions.length > 0) {
+            const seenTitles = new Set();
+            safeModule.discussions = safeModule.discussions.filter(discussion => {
+              if (seenTitles.has(discussion.title)) {
+                return false;
+              }
+              seenTitles.add(discussion.title);
+              return true;
+            });
+            console.log(`✓ Cleaned up ${safeModule.discussions.length} duplicate discussions in module: ${safeModule.title}`);
+          }
+          
+          // Fetch full quiz data for each quiz ID
+          if (safeModule.quizzes && safeModule.quizzes.length > 0) {
+            console.log(`🔍 Fetching full quiz data for ${safeModule.quizzes.length} quizzes in module: ${safeModule.title}`);
+            console.log(`🔍 Quiz items:`, safeModule.quizzes);
+            const fullQuizzes = [];
             
-            // Clean up duplicate discussions in each module
-            courseData.modules = courseData.modules.map(module => {
-              if (module.discussions && module.discussions.length > 0) {
-                const originalCount = module.discussions.length;
-                
-                // Remove duplicates by title
-                const uniqueDiscussions = [];
-                const seenTitles = new Set();
-                
-                module.discussions.forEach(discussion => {
-                  if (!seenTitles.has(discussion.title)) {
-                    seenTitles.add(discussion.title);
-                    uniqueDiscussions.push(discussion);
+            for (const quizItem of safeModule.quizzes) {
+              // Handle both string IDs and quiz objects
+              let quizId;
+              if (typeof quizItem === 'string') {
+                quizId = quizItem;
+              } else if (quizItem && typeof quizItem === 'object') {
+                // If it's already a full quiz object, use it directly
+                if (quizItem.title && quizItem.questions) {
+                  console.log(`✅ Using existing quiz object: ${quizItem.title}`);
+                  fullQuizzes.push(quizItem);
+                  continue;
+                }
+                // If it has an ID, use that
+                quizId = quizItem._id || quizItem.id;
+              } else {
+                console.warn(`⚠️ Invalid quiz item:`, quizItem);
+                continue;
+              }
+              
+              if (!quizId) {
+                console.warn(`⚠️ No valid quiz ID found for item:`, quizItem);
+                continue;
+              }
+              
+              try {
+                const quizResponse = await fetch(`/api/instructor/quizzes/${quizId}`, {
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
                   }
                 });
                 
-                if (originalCount !== uniqueDiscussions.length) {
-                  console.log(`🧹 Cleaned up ${originalCount - uniqueDiscussions.length} duplicate discussions in module: ${module.title}`);
+                if (quizResponse.ok) {
+                  const quizData = await quizResponse.json();
+                  if (quizData.success && quizData.data && quizData.data.quiz) {
+                    fullQuizzes.push(quizData.data.quiz);
+                    console.log(`✅ Fetched quiz: ${quizData.data.quiz.title} with ${quizData.data.quiz.questions?.length || 0} questions`);
+                  } else {
+                    console.warn(`⚠️ Quiz data not found for ID: ${quizId}`);
+                    // Keep the ID as fallback
+                    fullQuizzes.push({ _id: quizId, title: `Quiz ${fullQuizzes.length + 1}` });
+                  }
+                } else {
+                  console.warn(`⚠️ Failed to fetch quiz ${quizId}: ${quizResponse.status}`);
+                  // Keep the ID as fallback
+                  fullQuizzes.push({ _id: quizId, title: `Quiz ${fullQuizzes.length + 1}` });
                 }
-                
-                return {
-                  ...module,
-                  discussions: uniqueDiscussions
-                };
+              } catch (quizError) {
+                console.error(`❌ Error fetching quiz ${quizId}:`, quizError);
+                // Keep the ID as fallback
+                fullQuizzes.push({ _id: quizId, title: `Quiz ${fullQuizzes.length + 1}` });
               }
-              return module;
-            });
-          } else {
-            console.log('No modules array found, setting empty array');
-            courseData.modules = [];
+            }
+            
+            safeModule.quizzes = fullQuizzes;
+            console.log(`✅ Populated ${fullQuizzes.length} quizzes with full data for module: ${safeModule.title}`);
+          }
+
+          // Fetch full discussion data for each discussion ID
+          if (safeModule.discussions && safeModule.discussions.length > 0) {
+            console.log(`🔍 Fetching full discussion data for ${safeModule.discussions.length} discussions in module: ${safeModule.title}`);
+            console.log(`🔍 Discussion items:`, safeModule.discussions);
+            const fullDiscussions = [];
+            
+            for (const discussionItem of safeModule.discussions) {
+              // Handle both string IDs and discussion objects
+              let discussionId;
+              if (typeof discussionItem === 'string') {
+                discussionId = discussionItem;
+              } else if (discussionItem && typeof discussionItem === 'object') {
+                // If it's already a full discussion object, use it directly
+                if (discussionItem.title && discussionItem.content) {
+                  console.log(`✅ Using existing discussion object: ${discussionItem.title}`);
+                  fullDiscussions.push(discussionItem);
+                  continue;
+                }
+                // If it has an ID, use that
+                discussionId = discussionItem._id || discussionItem.id;
+              } else {
+                console.warn(`⚠️ Invalid discussion item:`, discussionItem);
+                continue;
+              }
+              
+              if (!discussionId) {
+                console.warn(`⚠️ No valid discussion ID found for item:`, discussionItem);
+                continue;
+              }
+              
+              try {
+                const discussionResponse = await fetch(`/api/courses/discussions/${discussionId}`, {
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                  }
+                });
+                
+                if (discussionResponse.ok) {
+                  const discussionData = await discussionResponse.json();
+                  if (discussionData.success && discussionData.data && discussionData.data.discussion) {
+                    fullDiscussions.push(discussionData.data.discussion);
+                    console.log(`✅ Fetched discussion: ${discussionData.data.discussion.title}`);
+                  } else {
+                    console.warn(`⚠️ Discussion data not found for ID: ${discussionId}`);
+                    // Keep the ID as fallback
+                    fullDiscussions.push({ _id: discussionId, title: `Discussion ${fullDiscussions.length + 1}` });
+                  }
+                } else {
+                  console.warn(`⚠️ Failed to fetch discussion ${discussionId}: ${discussionResponse.status}`);
+                  // Keep the ID as fallback
+                  fullDiscussions.push({ _id: discussionId, title: `Discussion ${fullDiscussions.length + 1}` });
+                }
+              } catch (discussionError) {
+                console.error(`❌ Error fetching discussion ${discussionId}:`, discussionError);
+                // Keep the ID as fallback
+                fullDiscussions.push({ _id: discussionId, title: `Discussion ${fullDiscussions.length + 1}` });
+              }
+            }
+            
+            safeModule.discussions = fullDiscussions;
+            console.log(`✅ Populated ${fullDiscussions.length} discussions with full data for module: ${safeModule.title}`);
+            console.log(`🔍 Final discussions for module ${safeModule.title}:`, fullDiscussions.map(d => ({ _id: d._id, title: d.title })));
+          }
+
+          // Fetch full assessment data for each assessment ID
+          if (safeModule.assessments && safeModule.assessments.length > 0) {
+            console.log(`🔍 Fetching full assessment data for ${safeModule.assessments.length} assessments in module: ${safeModule.title}`);
+            console.log(`🔍 Assessment items:`, safeModule.assessments);
+            const fullAssessments = [];
+            
+            for (const assessmentItem of safeModule.assessments) {
+              // Handle both string IDs and assessment objects
+              let assessmentId;
+              if (typeof assessmentItem === 'string') {
+                assessmentId = assessmentItem;
+              } else if (assessmentItem && typeof assessmentItem === 'object') {
+                // If it's already a full assessment object, use it directly
+                if (assessmentItem.title && assessmentItem.questions) {
+                  console.log(`✅ Using existing assessment object: ${assessmentItem.title}`);
+                  fullAssessments.push(assessmentItem);
+                  continue;
+                }
+                // If it has an ID, use that
+                assessmentId = assessmentItem._id || assessmentItem.id;
+              } else {
+                console.warn(`⚠️ Invalid assessment item:`, assessmentItem);
+                continue;
+              }
+              
+              if (!assessmentId) {
+                console.warn(`⚠️ No valid assessment ID found for item:`, assessmentItem);
+                continue;
+              }
+              
+              try {
+                const assessmentResponse = await fetch(`/api/courses/modules/${safeModule._id}/assessments/${assessmentId}`, {
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                  }
+                });
+                
+                if (assessmentResponse.ok) {
+                  const assessmentData = await assessmentResponse.json();
+                  if (assessmentData.success && assessmentData.data && assessmentData.data.assessment) {
+                    fullAssessments.push(assessmentData.data.assessment);
+                    console.log(`✅ Fetched assessment: ${assessmentData.data.assessment.title} with ${assessmentData.data.assessment.questions?.length || 0} questions`);
+                  } else {
+                    console.warn(`⚠️ Assessment data not found for ID: ${assessmentId}`);
+                    // Keep the ID as fallback
+                    fullAssessments.push({ _id: assessmentId, title: `Assessment ${fullAssessments.length + 1}` });
+                  }
+                } else {
+                  console.warn(`⚠️ Failed to fetch assessment ${assessmentId}: ${assessmentResponse.status}`);
+                  // Keep the ID as fallback
+                  fullAssessments.push({ _id: assessmentId, title: `Assessment ${fullAssessments.length + 1}` });
+                }
+              } catch (assessmentError) {
+                console.error(`❌ Error fetching assessment ${assessmentId}:`, assessmentError);
+                // Keep the ID as fallback
+                fullAssessments.push({ _id: assessmentId, title: `Assessment ${fullAssessments.length + 1}` });
+              }
+            }
+            
+            safeModule.assessments = fullAssessments;
+            console.log(`✅ Populated ${fullAssessments.length} assessments with full data for module: ${safeModule.title}`);
           }
           
-          setCourse(courseData);
-        } else {
-          console.error('No course data available');
-          setError(isOnline ? 'Invalid course data received' : 'Course not available offline');
-        }
-      } catch (err) {
-        console.error('❌ Error fetching course:', err);
-        setError(`Network error: ${err.message}`);
-      } finally {
-        setLoading(false);
+          return safeModule;
+        }));
+        
+        const processedCourse = {
+          ...courseData,
+          modules: processedModules.filter(module => module !== null),
+          enrolledStudents: Array.isArray(courseData.enrolledStudents) ? courseData.enrolledStudents : []
+        };
+        
+        console.log('🔍 COURSE IMAGE DEBUG - Raw course data:', {
+          title: courseData.title,
+          hasImage: !!courseData.course_profile_picture,
+          imagePath: courseData.course_profile_picture,
+          courseId: courseData._id
+        });
+        
+        console.log('🔍 COURSE DATA DEBUG - Processed course modules:', processedCourse.modules?.map(m => ({
+          _id: m._id,
+          title: m.title,
+          discussionsCount: m.discussions?.length || 0,
+          discussions: m.discussions?.map(d => ({ _id: d._id, title: d.title, content: d.content })),
+          quizzesCount: m.quizzes?.length || 0,
+          quizzes: m.quizzes?.map(q => ({ _id: q._id, title: q.title }))
+        })));
+        
+        setCourse(processedCourse);
+        console.log('✅ Course data processed successfully');
+      } else {
+        setError('Invalid course data received');
       }
-    };
+    } catch (err) {
+      console.error('❌ Error fetching course:', err);
+      setError(err.message || 'Failed to fetch course');
+    } finally {
+      console.log('🏁 fetchCourse finally block - setting loading and processing to false');
+      setLoading(false);
+      setProcessing(false);
+    }
+  };
 
   const toggleModuleExpansion = (moduleId) => {
     setExpandedModules(prev => {
@@ -765,18 +1070,17 @@ export default function CourseOverview() {
     });
   };
 
+  const toggleOverviewExpansion = () => {
+    setOverviewExpanded(prev => !prev);
+  };
+
   const handleTogglePublish = async () => {
     try {
       const token = localStorage.getItem('token');
-      const isOnline = navigator.onLine;
-      const newPublishStatus = !course.isPublished;
       
-      let success = false;
-
-      if (isOnline) {
-        try {
-          // Try online course update first (preserving existing behavior)
-          console.log('🌐 Online mode: Updating course publish status...');
+      if (course.isPublished) {
+        // If already published, allow unpublishing
+        console.log('🔄 Unpublishing course...');
           
           const response = await fetch(`/api/courses/${courseId}`, {
             method: 'PUT',
@@ -785,53 +1089,36 @@ export default function CourseOverview() {
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              isPublished: newPublishStatus
+            isPublished: false
             })
           });
 
           if (response.ok) {
-            success = true;
-            console.log('✅ Course publish status updated successfully');
-            setCourse(prev => ({ ...prev, isPublished: newPublishStatus }));
-            alert(`Course ${newPublishStatus ? 'published' : 'unpublished'} successfully!`);
+          console.log('✅ Course unpublished successfully');
+          setCourse(prev => ({ ...prev, isPublished: false }));
+          alert('Course unpublished successfully!');
           } else {
-            throw new Error('Failed to update course status');
-          }
-        } catch (onlineError) {
-          console.warn('⚠️ Online course update failed, using offline:', onlineError);
-          // Fall back to offline course update
-          const offlineResult = await offlineIntegrationService.storeCourseUpdate(courseId, {
-            isPublished: newPublishStatus
-          });
-          
-          if (offlineResult.success) {
-            success = true;
-            console.log('✅ Course publish status update queued for offline sync');
-            setCourse(prev => ({ ...prev, isPublished: newPublishStatus }));
-            alert(`Course ${newPublishStatus ? 'published' : 'unpublished'} offline! Will sync when online.`);
-          } else {
-            throw new Error('Failed to update course status offline');
-          }
+          throw new Error('Failed to unpublish course');
         }
       } else {
-        // Offline course update
-        console.log('📴 Offline mode: Updating course publish status offline...');
-        const offlineResult = await offlineIntegrationService.storeCourseUpdate(courseId, {
-          isPublished: newPublishStatus
-        });
+        // If not published, request publication from admin
+        console.log('🔄 Requesting course publication...');
         
-        if (offlineResult.success) {
-          success = true;
-          console.log('✅ Course publish status update queued for offline sync');
-          setCourse(prev => ({ ...prev, isPublished: newPublishStatus }));
-          alert(`Course ${newPublishStatus ? 'published' : 'unpublished'} offline! Will sync when online.`);
-        } else {
-          throw new Error('Failed to update course status offline');
-        }
-      }
+        const response = await fetch(`/api/courses/${courseId}/request-publication`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
 
-      if (!success) {
-        alert('Failed to update course status');
+        if (response.ok) {
+          console.log('✅ Course publication requested successfully');
+          setCourse(prev => ({ ...prev, approvalStatus: 'pending' }));
+          alert('Course publication requested successfully! It will be reviewed by an admin.');
+        } else {
+          throw new Error('Failed to request course publication');
+        }
       }
     } catch (err) {
       console.error('❌ Error updating course:', err);
@@ -846,14 +1133,8 @@ export default function CourseOverview() {
 
     try {
       const token = localStorage.getItem('token');
-      const isOnline = navigator.onLine;
       
-      let success = false;
-
-      if (isOnline) {
-        try {
-          // Try online course deletion first (preserving existing behavior)
-          console.log('🌐 Online mode: Deleting course...');
+      console.log('🔄 Deleting course...');
           
           const response = await fetch(`/api/courses/${courseId}`, {
             method: 'DELETE',
@@ -864,44 +1145,11 @@ export default function CourseOverview() {
           });
 
           if (response.ok) {
-            success = true;
             console.log('✅ Course deleted successfully');
             alert('Course deleted successfully!');
             navigate('/instructor/courses');
           } else {
             throw new Error('Failed to delete course');
-          }
-        } catch (onlineError) {
-          console.warn('⚠️ Online course deletion failed, using offline:', onlineError);
-          // Fall back to offline course deletion
-          const offlineResult = await offlineIntegrationService.storeCourseDelete(courseId);
-          
-          if (offlineResult.success) {
-            success = true;
-            console.log('✅ Course deletion queued for offline sync');
-            alert('Course deleted offline! Will sync when online.');
-            navigate('/instructor/courses');
-          } else {
-            throw new Error('Failed to delete course offline');
-          }
-        }
-      } else {
-        // Offline course deletion
-        console.log('📴 Offline mode: Deleting course offline...');
-        const offlineResult = await offlineIntegrationService.storeCourseDelete(courseId);
-        
-        if (offlineResult.success) {
-          success = true;
-          console.log('✅ Course deletion queued for offline sync');
-          alert('Course deleted offline! Will sync when online.');
-          navigate('/instructor/courses');
-        } else {
-          throw new Error('Failed to delete course offline');
-        }
-      }
-
-      if (!success) {
-        alert('Failed to delete course');
       }
     } catch (err) {
       console.error('❌ Error deleting course:', err);
@@ -925,21 +1173,107 @@ export default function CourseOverview() {
     }
   };
 
-  if (loading) {
+  if (loading || processing || !course) {
+    console.log('🔄 Rendering loading state:', { loading, processing, hasCourse: !!course, error });
     return (
       <Container>
         <div style={{ textAlign: 'center', padding: '2rem' }}>
           <div>Loading course...</div>
+          <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.5rem' }}>
+            Loading: {loading ? 'Yes' : 'No'} | Processing: {processing ? 'Yes' : 'No'} | Has Course: {course ? 'Yes' : 'No'}
+          </div>
+          <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.5rem' }}>
+            Course ID: {courseId || 'Not found'}
+          </div>
+          {error && <div style={{ color: 'red', marginTop: '1rem' }}>Error: {error}</div>}
+          {!loading && !processing && !course && !error && (
+            <div style={{ color: 'orange', marginTop: '1rem' }}>
+              No course data and no loading state. Click to retry:
+              <button 
+                onClick={() => {
+                  console.log('🔄 Manual retry clicked');
+                  fetchCourse();
+                }}
+                style={{
+                  background: '#007BFF',
+                  color: 'white',
+                  border: 'none',
+                  padding: '0.5rem 1rem',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  marginLeft: '1rem'
+                }}
+              >
+                Retry Load
+              </button>
+            </div>
+          )}
         </div>
       </Container>
     );
   }
 
-  if (error || !course) {
+  if (error) {
     return (
       <Container>
         <div style={{ textAlign: 'center', padding: '2rem', color: 'red' }}>
-          <div>{error || 'Course not found'}</div>
+          <div style={{ marginBottom: '1rem' }}>{error}</div>
+          {(error.includes('401') || error.includes('Authentication') || error.includes('token')) ? (
+            <div>
+              <p style={{ marginBottom: '1rem' }}>Authentication issue detected. Please try logging out and back in.</p>
+              <button 
+                onClick={logout}
+                style={{
+                  background: '#007BFF',
+                  color: 'white',
+                  border: 'none',
+                  padding: '0.5rem 1rem',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                Logout and Return to Login
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </Container>
+    );
+  }
+
+  // Ensure course has default values for all properties
+  const safeCourse = {
+    title: course?.title || 'Untitled Course',
+    isPublished: course?.isPublished || false,
+    duration: course?.duration || 'Self-paced',
+    category: course?.category || 'General',
+    enrolledStudents: Array.isArray(course?.enrolledStudents) ? course.enrolledStudents : [],
+    modules: Array.isArray(course?.modules) ? course.modules : [],
+    overview: course?.overview || '',
+    learningOutcomes: course?.learningOutcomes || '',
+    course_profile_picture: course?.course_profile_picture || '',
+    ...course
+  };
+
+  // Additional safety check - ensure all modules are properly structured
+  if (!Array.isArray(safeCourse.modules)) {
+    console.error('Modules is not an array:', safeCourse.modules);
+    return (
+      <Container>
+        <div style={{ textAlign: 'center', padding: '2rem', color: 'red' }}>
+          <div>Invalid course data structure</div>
+        </div>
+      </Container>
+    );
+  }
+
+  // Final safety check - ensure all required properties exist
+  if (!safeCourse.title || !safeCourse._id) {
+    console.error('Missing required course properties:', safeCourse);
+    return (
+      <Container>
+        <div style={{ textAlign: 'center', padding: '2rem', color: 'red' }}>
+          <div>Course data is incomplete</div>
         </div>
       </Container>
     );
@@ -952,17 +1286,56 @@ export default function CourseOverview() {
       </BackButton>
 
       <CourseHeader>
-        {course.course_profile_picture && (
+        {(() => {
+          console.log('🔍 COURSE IMAGE DEBUG:', {
+            hasImage: !!safeCourse.course_profile_picture,
+            imagePath: safeCourse.course_profile_picture,
+            processedPath: safeCourse.course_profile_picture 
+              ? `/${safeCourse.course_profile_picture.replace(/^uploads\//, '')}` 
+              : '/logo512.png'
+          });
+          return (
           <CourseImage 
-            src={`/${course.course_profile_picture.replace(/^uploads\//, '')}`} 
-            alt={course.title}
+                src={(() => {
+                  if (!safeCourse.course_profile_picture) {
+                    return '/logo512.png';
+                  }
+                  
+                  // Handle different image path formats
+                  let imagePath = safeCourse.course_profile_picture;
+                  
+                  // If it's a full URL (starts with http), use it directly
+                  if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+                    return imagePath;
+                  }
+                  
+                  // If it's a local path starting with uploads/, construct the full URL
+                  if (imagePath.startsWith('uploads/')) {
+                    return `http://localhost:5001/${imagePath}`;
+                  }
+                  
+                  // If it's just a filename, assume it's in uploads/
+                  if (!imagePath.includes('/')) {
+                    return `http://localhost:5001/uploads/${imagePath}`;
+                  }
+                  
+                  // Default fallback
+                  return `/${imagePath}`;
+                })()}
+            alt={safeCourse.title}
+            onError={(e) => {
+              console.log('❌ Course image failed to load:', e.target.src);
+              e.target.src = '/logo512.png';
+            }}
           />
-        )}
+          );
+        })()}
         
         <CourseTitle>
-          {course.title}
-          <StatusBadge published={course.isPublished}>
-            {course.isPublished ? 'Published' : 'Unpublished'}
+          {safeCourse.title}
+          <StatusBadge published={safeCourse.isPublished}>
+            {safeCourse.isPublished ? 'Published' : 
+             safeCourse.approvalStatus === 'pending' ? 'Pending Approval' : 'Unpublished'}
           </StatusBadge>
         </CourseTitle>
         
@@ -973,7 +1346,7 @@ export default function CourseOverview() {
             </InfoIcon>
             <InfoContent>
               <InfoLabel>Duration</InfoLabel>
-              <InfoValue>{course.duration || 'Self-paced'}</InfoValue>
+              <InfoValue>{safeCourse.duration}</InfoValue>
             </InfoContent>
           </InfoCard>
           
@@ -983,7 +1356,7 @@ export default function CourseOverview() {
             </InfoIcon>
             <InfoContent>
               <InfoLabel>Category</InfoLabel>
-              <InfoValue>{course.category || 'General'}</InfoValue>
+              <InfoValue>{safeCourse.category}</InfoValue>
             </InfoContent>
           </InfoCard>
           
@@ -993,7 +1366,7 @@ export default function CourseOverview() {
             </InfoIcon>
             <InfoContent>
               <InfoLabel>Students Enrolled</InfoLabel>
-              <InfoValue>{course.enrolledStudents?.length || 0}</InfoValue>
+              <InfoValue>{safeCourse.enrolledStudents.length}</InfoValue>
             </InfoContent>
           </InfoCard>
           
@@ -1003,7 +1376,7 @@ export default function CourseOverview() {
             </InfoIcon>
             <InfoContent>
               <InfoLabel>Modules</InfoLabel>
-              <InfoValue>{course.modules?.length || 0}</InfoValue>
+              <InfoValue>{safeCourse.modules.length}</InfoValue>
             </InfoContent>
           </InfoCard>
         </CourseInfo>
@@ -1012,12 +1385,9 @@ export default function CourseOverview() {
           <ActionButton onClick={() => navigate(`/instructor/courses/${courseId}/edit`)} color="#007BFF">
             <Edit /> Edit Course
           </ActionButton>
-          <ActionButton onClick={() => navigate(`/instructor/courses/${courseId}/grades`)} color="#10b981">
-            <Assessment /> View Grades
-          </ActionButton>
-          <ActionButton onClick={handleTogglePublish} color={course.isPublished ? "#6c757d" : "#007BFF"}>
-            {course.isPublished ? <VisibilityOff /> : <Publish />}
-            {course.isPublished ? 'Unpublish' : 'Publish'}
+          <ActionButton onClick={handleTogglePublish} color={safeCourse.isPublished ? "#6c757d" : "#007BFF"}>
+            {safeCourse.isPublished ? <VisibilityOff /> : <Publish />}
+            {safeCourse.isPublished ? 'Unpublish' : 'Request Publication'}
           </ActionButton>
           <ActionButton onClick={handleDelete} color="#000000">
             <Delete /> Delete Course
@@ -1025,112 +1395,37 @@ export default function CourseOverview() {
         </ActionButtons>
       </CourseHeader>
 
-      {/* Quick Add Content Section */}
-      <Section style={{ marginTop: '1.5rem' }}>
-        <SectionTitle style={{ marginBottom: '1.5rem', color: '#007BFF' }}>
-          <Add style={{ marginRight: '0.5rem' }} />
-          Quick Add Content
-        </SectionTitle>
-        
-        <QuickActionsGrid>
-          <QuickActionCard 
-            onClick={() => navigate(`/instructor/courses/create/module`, {
-              state: {
-                courseData: {
-                  ...course,
-                  courseId,
-                  modules: course.modules || []
-                }
-              }
-            })}
-          >
-            <QuickActionIcon style={{ backgroundColor: '#007BFF' }}>
-              <PlayArrow style={{ color: 'white', fontSize: '1.5rem' }} />
-            </QuickActionIcon>
-            <QuickActionContent>
-              <QuickActionTitle>Add Module</QuickActionTitle>
-              <QuickActionDescription>Create new learning modules with content and activities</QuickActionDescription>
-            </QuickActionContent>
-          </QuickActionCard>
-
-          <QuickActionCard 
-            onClick={() => navigate('/instructor/assessments', { state: { courseId, courseName: course.title } })}
-          >
-            <QuickActionIcon style={{ backgroundColor: '#007BFF' }}>
-              <Assignment style={{ color: 'white', fontSize: '1.5rem' }} />
-            </QuickActionIcon>
-            <QuickActionContent>
-              <QuickActionTitle>Add Assessment</QuickActionTitle>
-              <QuickActionDescription>Create comprehensive assessments to evaluate student learning</QuickActionDescription>
-            </QuickActionContent>
-          </QuickActionCard>
-
-          <QuickActionCard 
-            onClick={() => navigate('/instructor/quizzes', { 
-              state: { courseId, courseName: course.title } 
-            })}
-          >
-            <QuickActionIcon style={{ backgroundColor: '#007BFF' }}>
-              <Quiz style={{ color: 'white', fontSize: '1.5rem' }} />
-            </QuickActionIcon>
-            <QuickActionContent>
-              <QuickActionTitle>Add Quiz</QuickActionTitle>
-              <QuickActionDescription>Create quick quizzes for knowledge checks and practice</QuickActionDescription>
-            </QuickActionContent>
-          </QuickActionCard>
-
-          <QuickActionCard 
-            onClick={() => navigate('/instructor/discussions', { 
-              state: { courseId, courseName: course.title } 
-            })}
-          >
-            <QuickActionIcon style={{ backgroundColor: '#6c757d' }}>
-              <Forum style={{ color: 'white', fontSize: '1.5rem' }} />
-            </QuickActionIcon>
-            <QuickActionContent>
-              <QuickActionTitle>Add Discussion</QuickActionTitle>
-              <QuickActionDescription>Start discussions to encourage student interaction</QuickActionDescription>
-            </QuickActionContent>
-          </QuickActionCard>
-
-          <QuickActionCard 
-            onClick={() => navigate('/instructor/groups', { 
-              state: { courseId, courseName: course.title } 
-            })}
-          >
-            <QuickActionIcon style={{ backgroundColor: '#000000' }}>
-              <People style={{ color: 'white', fontSize: '1.5rem' }} />
-            </QuickActionIcon>
-            <QuickActionContent>
-              <QuickActionTitle>Add Group</QuickActionTitle>
-              <QuickActionDescription>Create study groups for collaborative learning</QuickActionDescription>
-            </QuickActionContent>
-          </QuickActionCard>
-        </QuickActionsGrid>
-      </Section>
-
-      {course.overview && (
+      {safeCourse.overview && (
         <EnhancedOverviewSection>
           <OverviewHeader>
             <OverviewTitle>Course Overview</OverviewTitle>
           </OverviewHeader>
           <OverviewContent>
             <OverviewDescription>
-              {course.overview}
+              {overviewExpanded 
+                ? safeCourse.overview 
+                : safeCourse.overview.length > 200 
+                  ? `${safeCourse.overview.substring(0, 200)}...` 
+                  : safeCourse.overview
+              }
             </OverviewDescription>
-            <SeeMoreButton>See More</SeeMoreButton>
+            {safeCourse.overview.length > 200 && (
+              <SeeMoreButton onClick={toggleOverviewExpansion}>
+                {overviewExpanded ? 'See Less' : 'See More'}
+              </SeeMoreButton>
+            )}
           </OverviewContent>
         </EnhancedOverviewSection>
       )}
 
-      {course.learningOutcomes && (
+      {safeCourse.learningOutcomes && (
         <LearningOutcomesSection>
           <LearningOutcomesHeader>
             <LearningOutcomesTitle>Learning Outcomes</LearningOutcomesTitle>
           </LearningOutcomesHeader>
           <OutcomesContent>
             <OutcomesGrid>
-            {course.learningOutcomes.split('\n').filter(outcome => outcome.trim()).map((outcome, index) => (
+            {safeCourse.learningOutcomes.split('\n').filter(outcome => outcome.trim()).map((outcome, index) => (
               <OutcomeItem key={index}>
                   <OutcomeIcon>
                     <CheckCircle style={{ fontSize: '0.75rem' }} />
@@ -1143,294 +1438,345 @@ export default function CourseOverview() {
         </LearningOutcomesSection>
       )}
 
-      {course.modules && course.modules.length > 0 && (
+      {safeCourse.modules && safeCourse.modules.length > 0 && (
         <ModulesSection>
           <ModulesSectionHeader>
             <ModulesSectionTitle>Course Modules</ModulesSectionTitle>
           </ModulesSectionHeader>
           <ModulesContent>
-          {course.modules.map((module, index) => {
-            const isExpanded = expandedModules.has(module._id);
-            
-            // Count total items in module with breakdown
-            let totalItems = 0;
-            let itemBreakdown = [];
-            
-            if (module.content) {
-              totalItems++;
-              itemBreakdown.push('1 content');
-            }
-            if (module.videoUrl) {
-              totalItems++;
-              itemBreakdown.push('1 video');
-            }
-            if (module.contentItems && module.contentItems.length > 0) {
-              totalItems += module.contentItems.length;
-              itemBreakdown.push(`${module.contentItems.length} content item${module.contentItems.length > 1 ? 's' : ''}`);
-            }
-            if (module.resources && module.resources.length > 0) {
-              totalItems += module.resources.length;
-              itemBreakdown.push(`${module.resources.length} resource${module.resources.length > 1 ? 's' : ''}`);
-            }
-            if (module.assessments && module.assessments.length > 0) {
-              totalItems += module.assessments.length;
-              itemBreakdown.push(`${module.assessments.length} assessment${module.assessments.length > 1 ? 's' : ''}`);
-            }
-            if (module.quizzes && module.quizzes.length > 0) {
-              totalItems += module.quizzes.length;
-              itemBreakdown.push(`${module.quizzes.length} quiz${module.quizzes.length > 1 ? 'zes' : ''}`);
-            }
-            if (module.discussions && module.discussions.length > 0) {
-              // Count unique discussions only
-              const uniqueDiscussions = [];
-              const seenTitles = new Set();
-              module.discussions.forEach(discussion => {
-                if (!seenTitles.has(discussion.title)) {
-                  seenTitles.add(discussion.title);
-                  uniqueDiscussions.push(discussion);
-                }
-              });
+          {safeCourse.modules.filter(module => module !== null).map((module, index) => {
+            try {
+              // Ensure module has all required properties with safe defaults
+              const safeModule = {
+                _id: module._id || `module-${index}`,
+                title: module.title || `Module ${index + 1}`,
+                contentItems: Array.isArray(module.contentItems) ? module.contentItems : [],
+                resources: Array.isArray(module.resources) ? module.resources : [],
+                assessments: Array.isArray(module.assessments) ? module.assessments : [],
+                quizzes: Array.isArray(module.quizzes) ? module.quizzes : [],
+                discussions: Array.isArray(module.discussions) ? module.discussions : [],
+                videoUrl: module.videoUrl || null,
+                videoTitle: module.videoTitle || '',
+                content: module.content || null,
+                ...module
+              };
               
-              if (uniqueDiscussions.length > 0) {
+              // Ensure contentItems is always an array
+              if (!Array.isArray(safeModule.contentItems)) {
+                safeModule.contentItems = [];
+              }
+              
+              const isExpanded = expandedModules.has(safeModule._id);
+              
+              // Count total items in module with breakdown
+              let totalItems = 0;
+              let itemBreakdown = [];
+              
+              if (safeModule.content) {
+                totalItems++;
+                itemBreakdown.push('1 content');
+              }
+              
+              if (safeModule.videoUrl) {
+                totalItems++;
+                itemBreakdown.push('1 video');
+              }
+              
+              if (safeModule.contentItems && safeModule.contentItems.length > 0) {
+                totalItems += safeModule.contentItems.length;
+                itemBreakdown.push(`${safeModule.contentItems.length} content item${safeModule.contentItems.length > 1 ? 's' : ''}`);
+              }
+              
+              if (safeModule.resources && safeModule.resources.length > 0) {
+                totalItems += safeModule.resources.length;
+                itemBreakdown.push(`${safeModule.resources.length} resource${safeModule.resources.length > 1 ? 's' : ''}`);
+              }
+              
+              if (safeModule.assessments && safeModule.assessments.length > 0) {
+                totalItems += safeModule.assessments.length;
+                itemBreakdown.push(`${safeModule.assessments.length} assessment${safeModule.assessments.length > 1 ? 's' : ''}`);
+              }
+              
+              if (safeModule.quizzes && safeModule.quizzes.length > 0) {
+                totalItems += safeModule.quizzes.length;
+                itemBreakdown.push(`${safeModule.quizzes.length} quiz${safeModule.quizzes.length > 1 ? 'zes' : ''}`);
+              }
+              
+              if (safeModule.discussions && safeModule.discussions.length > 0) {
+                // Remove duplicate discussions by title
+                const uniqueDiscussions = [];
+                const seenTitles = new Set();
+                
+                safeModule.discussions.forEach(discussion => {
+                  if (!seenTitles.has(discussion.title)) {
+                    seenTitles.add(discussion.title);
+                    uniqueDiscussions.push(discussion);
+                  }
+                });
+                
                 totalItems += uniqueDiscussions.length;
                 itemBreakdown.push(`${uniqueDiscussions.length} discussion${uniqueDiscussions.length > 1 ? 's' : ''}`);
               }
-            }
-            
-            return (
-              <ModuleCard key={module._id || index}>
-                <ModuleHeader 
-                  expanded={isExpanded}
-                  onClick={() => toggleModuleExpansion(module._id)}
-                >
+              
+              return (
+                <ModuleCard key={safeModule._id}>
+                  <ModuleHeader 
+                    expanded={isExpanded}
+                    onClick={() => toggleModuleExpansion(safeModule._id)}
+                  >
                     <ModuleHeaderContent>
                       <ModuleNumber>{index + 1}</ModuleNumber>
                       <ModuleTitleContainer>
-                  <ModuleTitle>
-                          Module {index + 1}: {module.title}
+                        <ModuleTitle>
+                          Module {index + 1}: {safeModule.title}
                           <ModuleItemCount>({totalItems} items)</ModuleItemCount>
-                  </ModuleTitle>
+                        </ModuleTitle>
                       </ModuleTitleContainer>
                     </ModuleHeaderContent>
-                  <ExpandIcon expanded={isExpanded}>
+                    <ExpandIcon expanded={isExpanded}>
                       <Add />
-                  </ExpandIcon>
-                </ModuleHeader>
-
-                {isExpanded && (
-                  <ModuleContent>
-                    {/* Step 1: Content/Lessons - Always show first */}
-                    {module.content && (
+                    </ExpandIcon>
+                  </ModuleHeader>
+                  
+                                    {isExpanded && (
+                    <ModuleContent>
+                      {/* Step 1: Content/Lessons - Always show first */}
+                      {safeModule.content && (
                         <ContentItem onClick={(e) => {
                           e.stopPropagation();
-                        navigate(`/instructor/courses/${courseId}/modules/${module._id}/content`);
+                          navigate(`/instructor/courses/${courseId}/modules/${safeModule._id}/content`);
                         }}>
                           <ContentItemIcon type="content">
-                          <Description />
+                            <Description />
                           </ContentItemIcon>
                           <ContentItemInfo>
-                          <ContentItemTitle>Content</ContentItemTitle>
-                          <ContentItemMeta>View • Reading Materials</ContentItemMeta>
+                            <ContentItemTitle>Content</ContentItemTitle>
+                            <ContentItemMeta>View • Reading Materials</ContentItemMeta>
                           </ContentItemInfo>
-                          <ContentItemAction>
-                          <RadioButtonUnchecked />
-                          </ContentItemAction>
                         </ContentItem>
-                    )}
+                      )}
 
-                    {module.videoUrl && (
+                      {safeModule.videoUrl && (
                         <ContentItem onClick={(e) => {
                           e.stopPropagation();
-                        navigate(`/instructor/courses/${courseId}/modules/${module._id}/video`);
+                          navigate(`/instructor/courses/${courseId}/modules/${safeModule._id}/video`);
                         }}>
                           <ContentItemIcon type="video">
-                          <VideoLibrary />
+                            <VideoLibrary />
                           </ContentItemIcon>
                           <ContentItemInfo>
-                          <ContentItemTitle>Video Lecture: {module.videoTitle || 'Lecture Video'}</ContentItemTitle>
-                          <ContentItemMeta>Watch • Video Content</ContentItemMeta>
+                            <ContentItemTitle>Video Lecture: {safeModule.videoTitle || 'Lecture Video'}</ContentItemTitle>
+                            <ContentItemMeta>Watch • Video Content</ContentItemMeta>
                           </ContentItemInfo>
-                          <ContentItemAction>
-                          <RadioButtonUnchecked />
-                          </ContentItemAction>
                         </ContentItem>
-                    )}
+                      )}
 
-                    {/* Content Items */}
-                    {module.contentItems && module.contentItems.map((item, idx) => (
-                      <ContentItem 
-                        key={`content-item-${idx}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          // Navigate to internal content viewer for all content items
-                          navigate(`/instructor/courses/${courseId}/modules/${module._id}/content-item/${idx}`, {
-                            state: { 
-                              contentItem: item,
-                              module: module,
-                              course: course,
-                              returnUrl: `/instructor/courses/${courseId}/overview`
-                            }
-                          });
-                        }}
-                      >
-                          <ContentItemIcon type={item.type}>
-                          {item.type === 'article' && <Article />}
-                          {item.type === 'video' && <VideoLibrary />}
-                          {item.type === 'audio' && <AudioFile />}
-                          {item.type === 'file' && <AttachFile />}
-                          </ContentItemIcon>
-                          <ContentItemInfo>
-                          <ContentItemTitle>{item.title}</ContentItemTitle>
-                          <ContentItemMeta>
-                            {item.type === 'article' && 'Read • Article'}
-                            {item.type === 'video' && 'Watch • Video'}
-                            {item.type === 'audio' && 'Listen • Audio'}
-                            {item.type === 'file' && 'View • File'}
-                            {item.url && ' • External Link'}
-                            {item.fileName && ` • ${item.fileName}`}
-                          </ContentItemMeta>
-                          </ContentItemInfo>
-                          <ContentItemAction>
-                          <RadioButtonUnchecked />
-                          </ContentItemAction>
-                        </ContentItem>
-                    ))}
-
-                    {module.resources && module.resources.map((resource, idx) => (
-                      <ContentItem 
-                        key={`resource-${idx}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          // Open external resource in new tab if it's a URL
-                          if (resource.url) {
-                            window.open(resource.url, '_blank');
-                          } else {
-                            navigate(`/instructor/courses/${courseId}/modules/${module._id}/resource/${idx}`);
-                          }
-                        }}
-                      >
-                          <ContentItemIcon type="resource">
-                          <Link />
-                          </ContentItemIcon>
-                          <ContentItemInfo>
-                          <ContentItemTitle>Resource: {resource.title || `Resource ${idx + 1}`}</ContentItemTitle>
-                          <ContentItemMeta>View • {resource.type || 'Resource'}</ContentItemMeta>
-                          </ContentItemInfo>
-                          <ContentItemAction>
-                          <RadioButtonUnchecked />
-                          </ContentItemAction>
-                        </ContentItem>
-                    ))}
-
-                    {/* Step 2: Assignments/Assessments - Show after content */}
-                    {module.assessments && module.assessments.map((assessment, idx) => (
-                      <ContentItem 
-                        key={`assessment-${idx}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigate(`/instructor/courses/${courseId}/modules/${module._id}/assessment/${idx}`);
-                        }}
-                      >
-                          <ContentItemIcon type="assessment">
-                          <Assignment />
-                          </ContentItemIcon>
-                          <ContentItemInfo>
-                          <ContentItemTitle>Assignment {idx + 1}{assessment.title ? `: ${assessment.title}` : ''}</ContentItemTitle>
-                            <ContentItemMeta>
-                            {assessment.totalPoints || '20'}pts • Submit Assignment
-                            </ContentItemMeta>
-                          </ContentItemInfo>
-                          <ContentItemAction>
-                          <RadioButtonUnchecked />
-                          </ContentItemAction>
-                        </ContentItem>
-                    ))}
-
-                    {/* Step 3: Quizzes - Show after assignments */}
-                    {module.quizzes && module.quizzes.map((quiz, idx) => (
-                      <ContentItem 
-                        key={`quiz-${idx}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigate(`/instructor/courses/${courseId}/modules/${module._id}/quiz/${idx}`);
-                        }}
-                      >
-                          <ContentItemIcon type="quiz">
-                          <Quiz />
-                          </ContentItemIcon>
-                          <ContentItemInfo>
-                          <ContentItemTitle>Quiz {idx + 1}{quiz.title ? `: ${quiz.title}` : ''}</ContentItemTitle>
-                            <ContentItemMeta>
-                            {quiz.totalPoints || '10'}pts • Take Quiz
-                            </ContentItemMeta>
-                          </ContentItemInfo>
-                          <ContentItemAction>
-                          <RadioButtonUnchecked />
-                          </ContentItemAction>
-                        </ContentItem>
-                    ))}
-
-                    {/* Step 4: Discussions - Show last (optional) with deduplication */}
-                    {module.discussions && (() => {
-                      // Remove duplicate discussions by title
-                      const uniqueDiscussions = [];
-                      const seenTitles = new Set();
-                      
-                      module.discussions.forEach(discussion => {
-                        if (!seenTitles.has(discussion.title)) {
-                          seenTitles.add(discussion.title);
-                          uniqueDiscussions.push(discussion);
-                        }
-                      });
-                      
-                      return uniqueDiscussions.map((discussion, idx) => (
+                      {/* Content Items */}
+                      {safeModule.contentItems && safeModule.contentItems.map((item, idx) => (
                         <ContentItem 
-                          key={`discussion-${discussion._id || idx}`}
+                          key={`content-item-${idx}`}
                           onClick={(e) => {
-                          e.stopPropagation();
-                            navigate(`/instructor/courses/${courseId}/modules/${module._id}/discussion/${idx}`);
+                            e.stopPropagation();
+                            // Navigate to internal content viewer for all content items
+                            navigate(`/instructor/courses/${courseId}/modules/${safeModule._id}/content-item/${idx}`, {
+                              state: { 
+                                contentItem: item,
+                                module: safeModule,
+                                course: safeCourse,
+                                returnUrl: `/instructor/courses/${courseId}/overview`
+                              }
+                            });
                           }}
                         >
-                          <ContentItemIcon type="discussion">
-                            <Forum />
+                          <ContentItemIcon type={item.type}>
+                            {item.type === 'article' && <Article />}
+                            {item.type === 'video' && <VideoLibrary />}
+                            {item.type === 'audio' && <AudioFile />}
+                            {item.type === 'file' && <AttachFile />}
                           </ContentItemIcon>
                           <ContentItemInfo>
-                            <ContentItemTitle>Discussion {idx + 1}: {discussion.title || `Discussion ${idx + 1}`}</ContentItemTitle>
-                            <ContentItemMeta>Participate • Forum Discussion</ContentItemMeta>
+                            <ContentItemTitle>{item.title}</ContentItemTitle>
+                            <ContentItemMeta>
+                              {item.type === 'article' && 'Read • Article'}
+                              {item.type === 'video' && 'Watch • Video'}
+                              {item.type === 'audio' && 'Listen • Audio'}
+                              {item.type === 'file' && 'View • File'}
+                              {item.url && ' • External Link'}
+                              {item.fileName && ` • ${item.fileName}`}
+                            </ContentItemMeta>
                           </ContentItemInfo>
-                          <ContentItemAction>
-                            <RadioButtonUnchecked />
-                          </ContentItemAction>
                         </ContentItem>
-                      ));
-                    })()}
+                      ))}
 
-                    {/* Edit Module Item */}
-                    <ContentItem onClick={(e) => {
-                      e.stopPropagation();
-                      handleEditModule(index);
-                    }}>
-                      <ContentItemIcon type="edit">
-                        <Edit />
-                      </ContentItemIcon>
-                      <ContentItemInfo>
-                        <ContentItemTitle>Edit Module</ContentItemTitle>
-                        <ContentItemMeta>Modify module content and settings</ContentItemMeta>
-                      </ContentItemInfo>
-                      <ContentItemAction>
-                        <ArrowBack style={{ transform: 'rotate(180deg)' }} />
-                      </ContentItemAction>
-                    </ContentItem>
-                  </ModuleContent>
-                )}
-              </ModuleCard>
-            );
+                      {safeModule.resources && safeModule.resources.map((resource, idx) => (
+                        <ContentItem 
+                          key={`resource-${idx}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            // Open external resource in new tab if it's a URL
+                            if (resource.url) {
+                              window.open(resource.url, '_blank');
+                            } else {
+                              navigate(`/instructor/courses/${courseId}/modules/${safeModule._id}/resource/${idx}`);
+                            }
+                          }}
+                        >
+                          <ContentItemIcon type="resource">
+                            <Link />
+                          </ContentItemIcon>
+                          <ContentItemInfo>
+                            <ContentItemTitle>Resource: {resource.title || `Resource ${idx + 1}`}</ContentItemTitle>
+                            <ContentItemMeta>View • {resource.type || 'Resource'}</ContentItemMeta>
+                          </ContentItemInfo>
+                        </ContentItem>
+                      ))}
+
+                      {/* Step 2: Assignments/Assessments - Show after content */}
+                      {safeModule.assessments && safeModule.assessments.length > 0 && safeModule.assessments.map((assessment, idx) => (
+                        <ContentItem 
+                          key={`assessment-${idx}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/instructor/courses/${courseId}/modules/${safeModule._id}/assessment/${idx}`);
+                          }}
+                        >
+                            <ContentItemIcon type="assessment">
+                            <Assignment />
+                            </ContentItemIcon>
+                            <ContentItemInfo>
+                            <ContentItemTitle>Assignment {idx + 1}{assessment.title ? `: ${assessment.title}` : ''}</ContentItemTitle>
+                              <ContentItemMeta>
+                              {assessment.totalPoints || '20'}pts • Submit Assignment
+                              </ContentItemMeta>
+                            </ContentItemInfo>
+                          </ContentItem>
+                      ))}
+
+                      {/* Step 3: Quizzes - Show after assignments */}
+                      {safeModule.quizzes && safeModule.quizzes.length > 0 && safeModule.quizzes.map((quiz, idx) => {
+                        // Debug quiz data
+                        console.log(`🔍 Quiz ${idx + 1} data:`, {
+                          title: quiz.title,
+                          totalPoints: quiz.totalPoints,
+                          hasQuestions: !!quiz.questions,
+                          questionsLength: quiz.questions?.length || 0,
+                          questions: quiz.questions?.map(q => ({ points: q.points, type: q.type })) || [],
+                          calculatedPoints: quiz.totalPoints || (quiz.questions && quiz.questions.length > 0 ? quiz.questions.reduce((sum, q) => sum + (q.points || 1), 0) : 0)
+                        });
+                        
+                        return (
+                        <ContentItem 
+                          key={`quiz-${idx}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            // Use the actual quiz ID instead of index
+                            const quizId = quiz._id || quiz.id || idx;
+                            navigate(`/instructor/courses/${courseId}/modules/${safeModule._id}/quiz/${quizId}`);
+                          }}
+                        >
+                            <ContentItemIcon type="quiz">
+                            <Quiz />
+                            </ContentItemIcon>
+                            <ContentItemInfo>
+                            <ContentItemTitle>Quiz {idx + 1}{quiz.title ? `: ${quiz.title}` : ''}</ContentItemTitle>
+                              <ContentItemMeta>
+                              {quiz.totalPoints || (quiz.questions && quiz.questions.length > 0 ? quiz.questions.reduce((sum, q) => sum + (q.points || 1), 0) : 0)}pts • Take Quiz
+                              </ContentItemMeta>
+                            </ContentItemInfo>
+                          </ContentItem>
+                        );
+                      })}
+
+                      {/* Step 4: Discussions - Show last (optional) with deduplication */}
+                      {(() => {
+                        console.log('🔍 COURSE OVERVIEW - Module discussions:', {
+                          moduleTitle: safeModule.title,
+                          moduleId: safeModule._id,
+                          hasDiscussions: !!safeModule.discussions,
+                          discussionsLength: safeModule.discussions?.length || 0,
+                          discussions: safeModule.discussions,
+                          discussionsType: typeof safeModule.discussions,
+                          isArray: Array.isArray(safeModule.discussions)
+                        });
+                        
+                        if (!safeModule.discussions || safeModule.discussions.length === 0) {
+                          console.log('🔍 COURSE OVERVIEW - No discussions found for module:', safeModule.title);
+                          return null;
+                        }
+                        
+                        // Remove duplicate discussions by title
+                        const uniqueDiscussions = [];
+                        const seenTitles = new Set();
+                        
+                        safeModule.discussions.forEach(discussion => {
+                          if (!seenTitles.has(discussion.title)) {
+                            seenTitles.add(discussion.title);
+                            uniqueDiscussions.push(discussion);
+                          }
+                        });
+                        
+                        console.log('🔍 COURSE OVERVIEW - Unique discussions to render:', uniqueDiscussions.length);
+                        
+                        return uniqueDiscussions.map((discussion, idx) => (
+                          <ContentItem 
+                            key={`discussion-${discussion._id || idx}`}
+                            onClick={(e) => {
+                            e.stopPropagation();
+                              // Use the actual discussion ID instead of index
+                              const discussionId = discussion._id || discussion.id || idx;
+                              navigate(`/instructor/courses/${courseId}/modules/${safeModule._id}/discussion/${discussionId}`);
+                            }}
+                          >
+                            <ContentItemIcon type="discussion">
+                              <Forum />
+                            </ContentItemIcon>
+                            <ContentItemInfo>
+                              <ContentItemTitle>Discussion {idx + 1}: {discussion.title || `Discussion ${idx + 1}`}</ContentItemTitle>
+                              <ContentItemMeta>Participate • Forum Discussion</ContentItemMeta>
+                            </ContentItemInfo>
+                          </ContentItem>
+                        ));
+                      })()}
+
+                      {/* Edit Module Item */}
+                      <ContentItem onClick={(e) => {
+                        e.stopPropagation();
+                        handleEditModule(index);
+                      }}>
+                        <ContentItemIcon type="edit">
+                          <Edit />
+                        </ContentItemIcon>
+                        <ContentItemInfo>
+                          <ContentItemTitle>Edit Module</ContentItemTitle>
+                          <ContentItemMeta>Modify module content and settings</ContentItemMeta>
+                        </ContentItemInfo>
+                        <ContentItemAction>
+                          <ArrowBack style={{ transform: 'rotate(180deg)' }} />
+                        </ContentItemAction>
+                      </ContentItem>
+                    </ModuleContent>
+                  )}
+                </ModuleCard>
+              );
+            } catch (moduleError) {
+              console.error('Error rendering module:', moduleError);
+              return (
+                <ModuleCard key={`error-module-${index}`}>
+                  <ModuleHeader>
+                    <ModuleHeaderContent>
+                      <ModuleNumber>{index + 1}</ModuleNumber>
+                      <ModuleTitleContainer>
+                        <ModuleTitle>Error Loading Module</ModuleTitle>
+                      </ModuleTitleContainer>
+                    </ModuleHeaderContent>
+                  </ModuleHeader>
+                </ModuleCard>
+              );
+            }
           })}
           </ModulesContent>
         </ModulesSection>
       )}
-
-
     </Container>
   );
 } 

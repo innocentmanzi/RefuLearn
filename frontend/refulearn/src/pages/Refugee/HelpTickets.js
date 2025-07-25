@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
+import { useTranslation } from 'react-i18next';
 import offlineIntegrationService from '../../services/offlineIntegrationService';
 
 const Container = styled.div`
@@ -220,6 +221,7 @@ const NewTicketButton = styled.button`
 `;
 
 const HelpTickets = () => {
+  const { t } = useTranslation();
   const [tickets, setTickets] = useState([]);
   const [filteredTickets, setFilteredTickets] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -332,8 +334,8 @@ const HelpTickets = () => {
               ticketsData = [
                 {
                   _id: 'sample_1',
-                  title: 'Cannot access course materials',
-                  description: 'I am having trouble accessing the video content in my enrolled courses.',
+                  title: t('help.sampleTickets.courseAccessTitle', 'Cannot access course materials'),
+                  description: t('help.sampleTickets.courseAccessDescription', 'I am having trouble accessing the video content in my enrolled courses.'),
                   category: 'technical',
                   priority: 'medium',
                   status: 'open',
@@ -344,8 +346,8 @@ const HelpTickets = () => {
                 },
                 {
                   _id: 'sample_2', 
-                  title: 'Job application status',
-                  description: 'I applied for a position last week and wanted to check the status.',
+                  title: t('help.sampleTickets.jobApplicationTitle', 'Job application status'),
+                  description: t('help.sampleTickets.jobApplicationDescription', 'I applied for a position last week and wanted to check the status.'),
                   category: 'general',
                   priority: 'low',
                   status: 'resolved',
@@ -354,13 +356,13 @@ const HelpTickets = () => {
                   messages: [
                     {
                       author: 'admin',
-                      message: 'Your application has been forwarded to the employer.',
+                      message: t('help.sampleTickets.jobApplicationResponse', 'Your application has been forwarded to the employer.'),
                       timestamp: new Date('2024-01-12').toISOString()
                     }
                   ],
                   user: 'string_string',
                   resolvedAt: new Date('2024-01-12').toISOString(),
-                  response: 'Your application has been forwarded to the employer. They will contact you directly if selected.'
+                  response: t('help.sampleTickets.jobApplicationResponse', 'Your application has been forwarded to the employer. They will contact you directly if selected.')
                 }
               ];
               console.log('✅ Populated sample tickets for demonstration');
@@ -566,69 +568,82 @@ const HelpTickets = () => {
     setStatusFilter(status);
   };
 
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'open': return '#e74c3c'; // Red for Open
+      case 'in_progress': return '#f39c12'; // Orange for In Progress
+      case 'resolved': return '#27ae60'; // Green for Resolved
+      case 'closed': return '#95a5a6'; // Gray for Closed
+      default: return '#95a5a6'; // Default for other statuses
+    }
+  };
+
   return (
     <Container>
-      <Title>My Requests</Title>
+      <Title>{t('help.title', 'My Requests')}</Title>
       <Subtitle>
-        Track the status of your help requests and view responses from instructors and support staff.
+        {t('help.subtitle', 'Track the status of your help requests and view responses from instructors and support staff.')}
       </Subtitle>
 
-      <NewTicketButton onClick={handleNewTicket}>
-        + Submit New Request
-      </NewTicketButton>
+      <button onClick={handleNewTicket} style={{ 
+          background: '#007bff', 
+          color: 'white', 
+          border: 'none', 
+          padding: '0.8rem 1.5rem', 
+          borderRadius: '8px', 
+          cursor: 'pointer',
+          fontSize: '1rem',
+          marginBottom: '2rem'
+        }}>
+          + {t('help.submitNewRequest', 'Submit New Request')}
+        </button>
 
       <StatsGrid>
-        <StatCard onClick={() => handleStatCardClick('all')}>
-          <StatNumber color="#3498db">{stats.total}</StatNumber>
-          <StatLabel>Total Requests</StatLabel>
+        <StatCard onClick={() => handleStatCardClick('total')}>
+          <StatNumber color="#007bff">{stats.total}</StatNumber>
+          <StatLabel>{t('help.totalRequests', 'Total Requests')}</StatLabel>
         </StatCard>
         <StatCard onClick={() => handleStatCardClick('open')}>
           <StatNumber color="#e74c3c">{stats.open}</StatNumber>
-          <StatLabel>Open</StatLabel>
+          <StatLabel>{t('help.open', 'Open')}</StatLabel>
         </StatCard>
         <StatCard onClick={() => handleStatCardClick('in_progress')}>
           <StatNumber color="#f39c12">{stats.inProgress}</StatNumber>
-          <StatLabel>In Progress</StatLabel>
+          <StatLabel>{t('help.inProgress', 'In Progress')}</StatLabel>
         </StatCard>
         <StatCard onClick={() => handleStatCardClick('resolved')}>
           <StatNumber color="#27ae60">{stats.resolved}</StatNumber>
-          <StatLabel>Resolved</StatLabel>
+          <StatLabel>{t('help.resolved', 'Resolved')}</StatLabel>
         </StatCard>
       </StatsGrid>
 
       <FilterBar>
         <SearchInput
-          placeholder="Search your tickets..."
+          type="text"
+          placeholder={t('help.searchTickets', 'Search your tickets...')}
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
-        <FilterSelect
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-        >
-          <option value="all">All Status</option>
-          <option value="open">Open</option>
-          <option value="in_progress">In Progress</option>
-          <option value="resolved">Resolved</option>
-          <option value="closed">Closed</option>
-        </FilterSelect>
-        <FilterSelect
-          value={assignedToFilter}
-          onChange={(e) => setAssignedToFilter(e.target.value)}
-        >
-          <option value="all">All Assignees</option>
-          <option value="admin">Admin</option>
-          <option value="instructor">Instructor</option>
-        </FilterSelect>
+        <FilterSelect value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <option value="all">{t('help.allStatus', 'All Status')}</option>
+            <option value="open">{t('help.open', 'Open')}</option>
+            <option value="in_progress">{t('help.inProgress', 'In Progress')}</option>
+            <option value="resolved">{t('help.resolved', 'Resolved')}</option>
+          </FilterSelect>
+          <FilterSelect value={assignedToFilter} onChange={(e) => setAssignedToFilter(e.target.value)}>
+            <option value="all">{t('help.allAssignees', 'All Assignees')}</option>
+            <option value="instructor">{t('help.instructor', 'Instructor')}</option>
+            <option value="admin">{t('help.admin', 'Admin')}</option>
+          </FilterSelect>
       </FilterBar>
 
       <TicketsList>
-        {loading ? (
-          <NoTickets>
-            <h3>Loading tickets...</h3>
-            <p>Please wait while we fetch your help tickets.</p>
-          </NoTickets>
-        ) : error ? (
+        {loading && (
+          <div style={{ textAlign: 'center', padding: '2rem' }}>
+            <h3>{t('help.loadingTickets', 'Loading tickets...')}</h3>
+          </div>
+        )}
+        {error ? (
           <NoTickets>
             <h3>Error</h3>
             <p>{error}</p>
@@ -638,25 +653,38 @@ const HelpTickets = () => {
             <TicketCard key={ticket._id || ticket.id}>
               <TicketHeader>
                 <TicketTitle>{ticket.title}</TicketTitle>
-                <StatusBadge status={ticket.status}>
-                  {ticket.status ? ticket.status.replace('_', ' ').toUpperCase() : ''}
-                </StatusBadge>
+                <div style={{ 
+                  padding: '0.5rem 1rem', 
+                  borderRadius: '20px', 
+                  fontSize: '0.8rem', 
+                  fontWeight: 'bold',
+                  color: 'white',
+                  backgroundColor: getStatusColor(ticket.status),
+                  display: 'inline-block',
+                  marginBottom: '1rem'
+                }}>
+                  {t(`help.${ticket.status}`, ticket.status.toUpperCase())}
+                </div>
               </TicketHeader>
               <TicketMeta>
-                <span>Submitted: {ticket.createdAt ? new Date(ticket.createdAt).toLocaleDateString() : ''}</span>
-                <span>• Assigned to: {ticket.assignedTo || ticket.assigned_to || ticket.assignedToRole || ''}</span>
-                <span>• Priority: {ticket.priority}</span>
-                {ticket.course && <span>• Course: {ticket.course}</span>}
+                <span>{t('help.submitted', 'Submitted')}: {ticket.createdAt ? new Date(ticket.createdAt).toLocaleDateString() : ''}</span>
+                <span>• {t('help.assignedTo', 'Assigned to')}: {ticket.assignedTo || ticket.assigned_to || ticket.assignedToRole || ''}</span>
+                <span>• {t('help.priority', 'Priority')}: {t(`help.${ticket.priority}`, ticket.priority)}</span>
+                {ticket.course && <span>• {t('help.course', 'Course')}: {ticket.course}</span>}
               </TicketMeta>
               <TicketContent>
                 {ticket.description}
               </TicketContent>
               {ticket.attachments && ticket.attachments.length > 0 && (
-                <div style={{marginBottom:'0.5rem'}}>
-                  <strong>Attachments:</strong>
-                  <ul>
+                <div style={{ marginTop: '1rem' }}>
+                  <strong>{t('help.attachments', 'Attachments')}:</strong>
+                  <ul style={{ marginTop: '0.5rem', paddingLeft: '1.5rem' }}>
                     {ticket.attachments.map((file, idx) => (
-                      <li key={idx}><a href={file} target="_blank" rel="noopener noreferrer">Attachment {idx+1}</a></li>
+                      <li key={idx}>
+                        <a href={file} target="_blank" rel="noopener noreferrer">
+                          {t('help.attachment', 'Attachment')} {idx+1}
+                        </a>
+                      </li>
                     ))}
                   </ul>
                 </div>
@@ -669,8 +697,8 @@ const HelpTickets = () => {
               {ticket.response && (
                 <ResponseSection>
                   <ResponseHeader>
-                    <ResponseTitle>Response from {ticket.resolvedBy || ticket.assignedTo}</ResponseTitle>
-                    <ResponseDate>Resolved on {ticket.resolvedDate}</ResponseDate>
+                    <ResponseTitle>{t('help.responseFrom', 'Response from')} {ticket.resolvedBy || ticket.assignedTo}</ResponseTitle>
+                    <ResponseDate>{t('help.resolvedOn', 'Resolved on')} {ticket.resolvedDate}</ResponseDate>
                   </ResponseHeader>
                   <ResponseContent>{ticket.response}</ResponseContent>
                 </ResponseSection>
@@ -678,10 +706,11 @@ const HelpTickets = () => {
             </TicketCard>
           ))
         ) : (
-          <NoTickets>
-            <h3>No Help Requests Found</h3>
-            <p>You haven't submitted any help requests yet. Click "Submit New Request" to get help from instructors and support staff.</p>
-          </NoTickets>
+          !loading && filteredTickets.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+              <p>{t('help.noTicketsYet', 'You haven\'t submitted any help requests yet. Click "Submit New Request" to get help from instructors and support staff.')}</p>
+            </div>
+          )
         )}
       </TicketsList>
 
@@ -708,140 +737,108 @@ const HelpTickets = () => {
             maxHeight: '80vh',
             overflow: 'auto'
           }}>
-            <h2 style={{ marginTop: 0, color: '#1e88e5' }}>Submit New Help Request</h2>
+            <h2 style={{ marginTop: 0, color: '#1e88e5' }}>{t('help.submitNewHelpRequest', 'Submit New Help Request')}</h2>
             
             <div style={{ marginBottom: '1rem' }}>
               <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
-                Title *
+                {t('help.title', 'Title')}*
               </label>
               <input
                 type="text"
                 value={newTicket.title}
                 onChange={(e) => setNewTicket({...newTicket, title: e.target.value})}
-                placeholder="Brief description of your issue"
-                style={{
-                  width: '100%',
-                  padding: '0.8rem',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  fontSize: '1rem'
-                }}
+                placeholder={t('help.briefDescription', 'Brief description of your issue')}
+                style={{ width: '100%', padding: '0.8rem', border: '1px solid #ddd', borderRadius: '8px', marginBottom: '1rem' }}
               />
             </div>
 
             <div style={{ marginBottom: '1rem' }}>
               <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
-                Description *
+                {t('help.description', 'Description')}*
               </label>
               <textarea
                 value={newTicket.description}
                 onChange={(e) => setNewTicket({...newTicket, description: e.target.value})}
-                placeholder="Detailed description of your issue or question"
+                placeholder={t('help.detailedDescription', 'Detailed description of your issue or question')}
                 rows={4}
-                style={{
-                  width: '100%',
-                  padding: '0.8rem',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  fontSize: '1rem',
-                  resize: 'vertical'
-                }}
+                style={{ width: '100%', padding: '0.8rem', border: '1px solid #ddd', borderRadius: '4px', fontSize: '1rem', resize: 'vertical' }}
               />
             </div>
 
             <div style={{ marginBottom: '1rem' }}>
               <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
-                Category
+                {t('help.category', 'Category')}
               </label>
               <select
                 value={newTicket.category}
                 onChange={(e) => setNewTicket({...newTicket, category: e.target.value})}
-                style={{
-                  width: '100%',
-                  padding: '0.8rem',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  fontSize: '1rem'
-                }}
+                style={{ width: '100%', padding: '0.8rem', border: '1px solid #ddd', borderRadius: '4px', fontSize: '1rem' }}
               >
-                <option value="technical">Technical Issue</option>
-                <option value="account">Account Problem</option>
-                <option value="course">Course Related</option>
-                <option value="general">General Question</option>
-                <option value="payment">Payment Issue</option>
+                <option value="technical">{t('help.technicalIssue', 'Technical Issue')}</option>
+                <option value="course">{t('help.courseIssue', 'Course Issue')}</option>
+                <option value="account">{t('help.accountIssue', 'Account Issue')}</option>
+                <option value="general">{t('help.generalInquiry', 'General Inquiry')}</option>
               </select>
             </div>
 
             <div style={{ marginBottom: '1rem' }}>
               <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
-                Priority
+                {t('help.priority', 'Priority')}
               </label>
               <select
                 value={newTicket.priority}
                 onChange={(e) => setNewTicket({...newTicket, priority: e.target.value})}
-                style={{
-                  width: '100%',
-                  padding: '0.8rem',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  fontSize: '1rem'
-                }}
+                style={{ width: '100%', padding: '0.8rem', border: '1px solid #ddd', borderRadius: '4px', fontSize: '1rem' }}
               >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="urgent">Urgent</option>
+                <option value="low">{t('help.low', 'Low')}</option>
+                <option value="medium">{t('help.medium', 'Medium')}</option>
+                <option value="high">{t('help.high', 'High')}</option>
+                <option value="urgent">{t('help.urgent', 'Urgent')}</option>
               </select>
             </div>
 
-            <div style={{ marginBottom: '1.5rem' }}>
+            <div style={{ marginBottom: '1rem' }}>
               <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
-                Assign To
+                {t('help.assignTo', 'Assign To')}
               </label>
               <select
                 value={newTicket.assignedTo}
                 onChange={(e) => setNewTicket({...newTicket, assignedTo: e.target.value})}
-                style={{
-                  width: '100%',
-                  padding: '0.8rem',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  fontSize: '1rem'
-                }}
+                style={{ width: '100%', padding: '0.8rem', border: '1px solid #ddd', borderRadius: '4px', fontSize: '1rem' }}
               >
-                <option value="admin">Admin Support</option>
-                <option value="instructor">Instructor</option>
-                <option value="employer">Employer Support</option>
+                <option value="instructor">{t('help.instructor', 'Instructor')}</option>
+                <option value="admin">{t('help.adminSupport', 'Admin Support')}</option>
               </select>
             </div>
 
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
               <button
                 onClick={() => setShowNewTicketModal(false)}
-                style={{
-                  padding: '0.8rem 1.5rem',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  backgroundColor: 'white',
-                  cursor: 'pointer'
+                style={{ 
+                  padding: '0.8rem 1.5rem', 
+                  border: '1px solid #ddd', 
+                  borderRadius: '8px', 
+                  background: 'white', 
+                  cursor: 'pointer',
+                  marginRight: '1rem'
                 }}
               >
-                Cancel
+                {t('help.cancel', 'Cancel')}
               </button>
               <button
                 onClick={handleSubmitNewTicket}
-                disabled={loading}
-                style={{
-                  padding: '0.8rem 1.5rem',
-                  border: 'none',
-                  borderRadius: '4px',
-                  backgroundColor: '#1e88e5',
-                  color: 'white',
+                disabled={loading || !newTicket.title || !newTicket.description}
+                style={{ 
+                  padding: '0.8rem 1.5rem', 
+                  border: 'none', 
+                  borderRadius: '8px', 
+                  background: '#007bff', 
+                  color: 'white', 
                   cursor: loading ? 'not-allowed' : 'pointer',
-                  opacity: loading ? 0.6 : 1
+                  opacity: loading ? 0.7 : 1
                 }}
               >
-                {loading ? 'Submitting...' : 'Submit Request'}
+                {loading ? t('help.submitting', 'Submitting...') : t('help.submitRequest', 'Submit Request')}
               </button>
             </div>
           </div>

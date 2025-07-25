@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowBack, Download, Person, Assessment, Quiz } from '@mui/icons-material';
-import offlineIntegrationService from '../../services/offlineIntegrationService';
+
 
 const Container = styled.div`
   max-width: 1200px;
@@ -203,70 +203,41 @@ export default function Grades() {
         setError('');
         
         const token = localStorage.getItem('token');
-        const isOnline = navigator.onLine;
+        console.log('🔄 Fetching grades...');
         
         let gradesData = [];
         let courseData = null;
-
-        if (isOnline) {
-          try {
-            // Try online API calls first (preserving existing behavior)
-            console.log('🌐 Online mode: Fetching grades from API...');
-            
-            // Fetch grades
-            const gradesResponse = await fetch(`/api/instructor/courses/${courseId}/grades`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-              }
-            });
-
-            if (gradesResponse.ok) {
-              const gradesApiData = await gradesResponse.json();
-              gradesData = gradesApiData.data.grades || [];
-              console.log('✅ Grades data received:', gradesData.length);
-              
-              // Store grades for offline use
-              await offlineIntegrationService.storeGrades(courseId, gradesData);
-            } else {
-              throw new Error('Failed to fetch grades');
-            }
-
-            // Fetch course info
-            const courseResponse = await fetch(`/api/courses/${courseId}`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-              }
-            });
-
-            if (courseResponse.ok) {
-              const courseApiData = await courseResponse.json();
-              courseData = courseApiData.data.course;
-              console.log('✅ Course info received');
-              
-              // Store course data for offline use
-              await offlineIntegrationService.storeCourseData(courseId, courseData);
-            } else {
-              throw new Error('Failed to fetch course info');
-            }
-
-          } catch (onlineError) {
-            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
-            
-            // Fall back to offline data if online fails
-            gradesData = await offlineIntegrationService.getGrades(courseId);
-            courseData = await offlineIntegrationService.getCourseData(courseId);
-            
-            if (!gradesData) {
-              throw onlineError;
-            }
+        
+        // Fetch grades
+        const gradesResponse = await fetch(`/api/instructor/courses/${courseId}/grades`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
           }
+        });
+
+        if (gradesResponse.ok) {
+          const gradesApiData = await gradesResponse.json();
+          gradesData = gradesApiData.data.grades || [];
+          console.log('✅ Grades data received:', gradesData.length);
         } else {
-          // Offline mode: use offline services
-          console.log('📴 Offline mode: Using offline grades data...');
-          gradesData = await offlineIntegrationService.getGrades(courseId);
-          courseData = await offlineIntegrationService.getCourseData(courseId);
+          throw new Error('Failed to fetch grades');
+        }
+
+        // Fetch course info
+        const courseResponse = await fetch(`/api/courses/${courseId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (courseResponse.ok) {
+          const courseApiData = await courseResponse.json();
+          courseData = courseApiData.data.course;
+          console.log('✅ Course info received');
+        } else {
+          throw new Error('Failed to fetch course info');
         }
 
         setGrades(gradesData);

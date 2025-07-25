@@ -26,7 +26,7 @@ import { body } from 'express-validator';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { validate } from '../middleware/validation';
 import { asyncHandler } from '../middleware/errorHandler';
-import upload from '../middleware/upload';
+import { uploadProfilePic } from '../middleware/upload';
 import PouchDB from 'pouchdb';
 import PouchDBFind from 'pouchdb-find';
 
@@ -247,30 +247,50 @@ router.put('/profile', authenticateToken, [
 }));
 
 // Upload profile picture
-router.post('/profile-picture', authenticateToken, upload.single('profilePic'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  if (!req.file) {
-    res.status(400).json({
-      success: false,
-      message: 'Please upload a profile picture'
-    });
-    return;
-  }
-  
+router.post('/profile-picture', authenticateToken, uploadProfilePic, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { userId } = ensureAuth(req);
-  const user = await db.get(userId) as UserDoc;
-  user.profilePic = req.file.path;
-  user.updatedAt = new Date();
   
-  const latest = await db.get(user._id);
-  user._rev = latest._rev;
-  await db.put(user);
-  
-  const { password, ...userWithoutPassword } = user;
-  res.json({
-    success: true,
-    message: 'Profile picture uploaded successfully',
-    data: { user: userWithoutPassword }
-  });
+  try {
+    // Get uploaded file info from Supabase middleware
+    const uploadedFiles = (req as any).uploadedFiles;
+    if (!uploadedFiles || uploadedFiles.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please upload a profile picture'
+      });
+    }
+    
+    const uploadedFile = uploadedFiles[0];
+    
+    // Update user profile with Supabase URL
+    const user = await db.get(userId) as UserDoc;
+    user.profilePic = uploadedFile.publicUrl; // Use Supabase public URL
+    user.updatedAt = new Date();
+    
+    const latest = await db.get(user._id);
+    user._rev = latest._rev;
+    await db.put(user);
+    
+    const { password, ...userWithoutPassword } = user;
+    res.json({
+      success: true,
+      message: 'Profile picture uploaded successfully',
+      data: { 
+        user: userWithoutPassword,
+        fileInfo: {
+          url: uploadedFile.publicUrl,
+          path: uploadedFile.path,
+          bucket: uploadedFile.bucket
+        }
+      }
+    });
+  } catch (error: any) {
+    console.error('Error uploading profile picture:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to upload profile picture'
+    });
+  }
 }));
 
 // Add education

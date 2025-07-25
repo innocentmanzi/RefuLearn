@@ -72,11 +72,12 @@ const CourseHeader = styled.div`
   }
 `;
 
-const CourseImage = styled.img`
+const CourseImage = styled.div`
   width: 200px;
   height: 150px;
-  object-fit: cover;
+  background: ${({ image }) => `url(${image}) center/cover`};
   border-radius: 12px;
+  background-color: #f8f9fa;
   
   @media (max-width: 768px) {
     width: 100%;
@@ -117,7 +118,8 @@ const ProgressFill = styled.div`
   background: #007BFF;
   height: 100%;
   width: ${({ width }) => width}%;
-  transition: width 0.3s ease;
+  transition: width 0.5s ease-out;
+  will-change: width;
 `;
 
 const ActionButtons = styled.div`
@@ -549,6 +551,7 @@ const StudentCourseOverview = () => {
   const [showGradesModal, setShowGradesModal] = useState(false);
   const [courseCompleted, setCourseCompleted] = useState(false); // Always start as false - only set true when genuinely completed
   const [isMarkingComplete, setIsMarkingComplete] = useState(false); // Prevent rapid clicking
+  const [overviewExpanded, setOverviewExpanded] = useState(false); // For See More/Less functionality
 
   // Debounce utility function
   const debounce = (func, delay) => {
@@ -558,6 +561,11 @@ const StudentCourseOverview = () => {
       timeoutId = setTimeout(() => func.apply(null, args), delay);
     };
   };
+
+  // Debounced progress update to prevent rapid changes
+  const debouncedProgressUpdate = debounce((newProgress) => {
+    setProgress(newProgress);
+  }, 300);
 
   // Ensure all modules start collapsed and clear fake completion data when component mounts or course changes
   useEffect(() => {
@@ -634,6 +642,57 @@ const StudentCourseOverview = () => {
         let courseData = null;
         let enrollmentStatus = false;
         let progressData = null;
+        
+        // Check for cached course data first for instant loading
+        const cachedCourseData = localStorage.getItem(`course_${courseId}`);
+        const cacheTimestamp = localStorage.getItem(`course_${courseId}_timestamp`);
+        const now = Date.now();
+        const cacheAge = cacheTimestamp ? now - parseInt(cacheTimestamp) : Infinity;
+        const cacheValid = cacheAge < 5 * 60 * 1000; // 5 minutes cache validity
+        
+        if (cachedCourseData && cacheValid) {
+          try {
+            const parsedCourseData = JSON.parse(cachedCourseData);
+            if (parsedCourseData && parsedCourseData.modules) {
+              console.log('✅ Using cached course data for instant loading (cache age:', Math.round(cacheAge / 1000), 'seconds)');
+              courseData = parsedCourseData;
+              setCourse(courseData);
+              
+              // Auto-expand all modules
+              if (courseData.modules && courseData.modules.length > 0) {
+                const allModuleIds = courseData.modules.map(module => module._id).filter(id => id);
+                setExpandedModules(new Set(allModuleIds));
+              }
+              
+              // Load enrollment and progress in background
+              Promise.all([
+                fetch(`/api/courses/${courseId}/enrollment-status`, {
+                  headers: { 'Authorization': `Bearer ${token}` }
+                }).then(r => r.json()).catch(() => ({ enrolled: false })),
+                fetch(`/api/courses/${courseId}/progress`, {
+                  headers: { 'Authorization': `Bearer ${token}` }
+                }).then(r => r.json()).catch(() => ({ progress: 0 }))
+              ]).then(([enrollmentRes, progressRes]) => {
+                if (enrollmentRes.enrolled !== undefined) {
+                  setIsEnrolled(enrollmentRes.enrolled);
+                }
+                if (progressRes.progress !== undefined) {
+                  setProgress(progressRes.progress);
+                }
+              });
+              
+              setLoading(false);
+              return; // Exit early - course loaded from cache
+            }
+          } catch (e) {
+            console.log('Cache parsing failed, continuing with API call');
+          }
+        } else if (cachedCourseData && !cacheValid) {
+          console.log('🔄 Cache expired, fetching fresh data from server');
+          // Clear expired cache
+          localStorage.removeItem(`course_${courseId}`);
+          localStorage.removeItem(`course_${courseId}_timestamp`);
+        }
 
         // Helper function to fetch offline data
         const fetchOfflineData = async () => {
@@ -697,13 +756,37 @@ const StudentCourseOverview = () => {
                   console.log(`    Quizzes: ${module.quizzes?.length || 0}`);
                   console.log(`    Discussions: ${module.discussions?.length || 0}`);
                   console.log(`    Resources: ${module.resources?.length || 0}`);
+                  
+                  // Enhanced quiz debugging
+                  if (module.quizzes && module.quizzes.length > 0) {
+                    console.log(`    📝 Quiz details for module ${index + 1}:`);
+                    module.quizzes.forEach((quiz, quizIndex) => {
+                      console.log(`      Quiz ${quizIndex + 1}:`);
+                      console.log(`        Title: ${quiz.title || 'No title'}`);
+                      console.log(`        ID: ${quiz._id || 'NO ID!'}`);
+                      console.log(`        Questions: ${quiz.questions?.length || 0}`);
+                      console.log(`        Status: ${quiz.status || 'No status'}`);
+                      console.log(`        Full quiz object:`, quiz);
+                    });
+                  } else {
+                    console.log(`    📝 No quizzes in module ${index + 1}`);
+                  }
                 });
               } else {
                 console.log('❌ No modules found in course data');
               }
               
-              // Store course data for offline use
+              // Store course data for offline use and local caching
               await offlineIntegrationService.storeStudentCourseOverview(courseId, courseData);
+              
+              // Cache course data for instant loading next time
+              try {
+                localStorage.setItem(`course_${courseId}`, JSON.stringify(courseData));
+                localStorage.setItem(`course_${courseId}_timestamp`, Date.now().toString());
+                console.log('💾 Course data cached for instant loading with timestamp');
+              } catch (e) {
+                console.log('Failed to cache course data:', e);
+              }
               
               // Automatically expand ALL modules for better UX (like instructor view)
               if (courseData.modules && courseData.modules.length > 0) {
@@ -736,6 +819,29 @@ const StudentCourseOverview = () => {
 
         // Set course data
         if (courseData) {
+          // Validate and fix quiz data before setting course
+          if (courseData.modules && courseData.modules.length > 0) {
+            console.log('🔍 Validating quiz data in modules...');
+            courseData.modules.forEach((module, moduleIndex) => {
+              if (module.quizzes && module.quizzes.length > 0) {
+                console.log(`🔍 Validating quizzes in module ${moduleIndex + 1}: ${module.title}`);
+                module.quizzes.forEach((quiz, quizIndex) => {
+                  if (!quiz._id) {
+                    console.warn(`⚠️ Quiz ${quizIndex + 1} in module ${moduleIndex + 1} has no ID:`, quiz);
+                    // Try to find a quiz with the same title that has an ID
+                    const quizWithId = module.quizzes.find(q => q.title === quiz.title && q._id);
+                    if (quizWithId) {
+                      console.log(`✅ Found quiz with ID for "${quiz.title}":`, quizWithId._id);
+                      quiz._id = quizWithId._id;
+                    } else {
+                      console.error(`❌ Could not find quiz with ID for "${quiz.title}"`);
+                    }
+                  }
+                });
+              }
+            });
+          }
+          
           setCourse(courseData);
           
           // Automatically expand ALL modules for better UX
@@ -751,7 +857,7 @@ const StudentCourseOverview = () => {
         // Handle enrollment and progress for online mode
         if (isOnline && courseData) {
           try {
-            // Check enrollment status
+            // Check enrollment status - use the original working endpoint
             const enrollmentResponse = await fetch(`/api/courses/enrolled/courses/${courseId}`, {
               headers: {
                 'Authorization': `Bearer ${token}`,
@@ -777,15 +883,21 @@ const StudentCourseOverview = () => {
 
               if (progressResponse.ok) {
                 const progressApiData = await progressResponse.json();
-                progressData = progressApiData.data;
+                progressData = progressApiData.data || progressApiData;
                 console.log('🔄 Progress response from backend:', progressData);
                 
                 // Store progress data for offline use
                 await offlineIntegrationService.storeCourseProgress(courseId, progressData);
                 
-                setProgress(Math.min(progressData.progressPercentage || 0, 100));
+                // Handle different progress data structures
+                const progressPercentage = progressData.progressPercentage || progressData.progress || 0;
+                const finalProgress = Math.min(progressPercentage, 100);
+                setProgress(finalProgress);
                 
-                // Set completed items from progress data - ALWAYS use backend as source of truth
+                // Save progress percentage to localStorage
+                localStorage.setItem(`course_progress_${courseId}`, finalProgress.toString());
+                
+                // Set completed items from progress data
                 const completedSet = new Set();
                 if (progressData.allCompletedItems) {
                   progressData.allCompletedItems.forEach(item => completedSet.add(item));
@@ -800,15 +912,23 @@ const StudentCourseOverview = () => {
                   });
                 }
                 
-                // Always update localStorage with backend data
+                // Update localStorage with backend data
                 const completionsArray = Array.from(completedSet);
                 localStorage.setItem(`course_completions_${courseId}`, JSON.stringify(completionsArray));
                 
                 setCompletedItems(completedSet);
                 
-                // REMOVED: Don't auto-set completion based on potentially fake API data
-                // Course completion will be determined by actual user interaction and real progress tracking
-                console.log('ℹ️ Progress data received but not auto-setting completion (preventing fake completions)');
+                // Set course completion based on progress data
+                if (progressPercentage >= 100) {
+                  setCourseCompleted(true);
+                  console.log('🎉 Course completed based on progress data');
+                }
+                
+                console.log('✅ Progress loaded successfully:', {
+                  percentage: progressPercentage,
+                  completedItems: Array.from(completedSet),
+                  enrollmentStatus: true
+                });
               }
             }
                       } catch (enrollmentError) {
@@ -879,6 +999,12 @@ const StudentCourseOverview = () => {
       testBackend(); // Test backend first
       testProgressAPI(); // Test progress API
       fetchCourseData();
+      
+      // Auto-load progress data after a short delay to ensure course data is loaded
+      setTimeout(() => {
+        console.log('🔄 Auto-loading progress data...');
+        window.refreshProgressData();
+      }, 2000);
     }
   }, [courseId]); // ONLY depend on courseId to prevent infinite loops
 
@@ -956,12 +1082,22 @@ const StudentCourseOverview = () => {
         const completionsArray = JSON.parse(savedCompletions);
         setCompletedItems(new Set(completionsArray));
         console.log('📱 Loaded completion data from localStorage:', completionsArray.length, 'items');
+        
+        // Also load progress percentage from localStorage
+        const savedProgress = localStorage.getItem(`course_progress_${courseId}`);
+        if (savedProgress) {
+          const progressValue = parseFloat(savedProgress);
+          setProgress(progressValue);
+          console.log('📱 Loaded progress percentage from localStorage:', progressValue);
+        }
       } catch (error) {
         console.error('❌ Error loading completion data from localStorage:', error);
       }
     }
-    
-    // Add debugging functions to window for testing
+  }, [courseId]);
+  
+  // Add debugging functions to window for testing
+  useEffect(() => {
     window.debugCompletionData = () => {
       console.log('🔍 Current completion data:', {
         completedItems: Array.from(completedItems),
@@ -1022,6 +1158,294 @@ const StudentCourseOverview = () => {
       }
     };
     
+    // Add function to test quiz data
+    window.testQuizData = () => {
+      console.log('🔍 Testing quiz data...');
+      if (course && course.modules) {
+        course.modules.forEach((module, moduleIndex) => {
+          console.log(`📋 Module ${moduleIndex + 1}: ${module.title}`);
+          if (module.quizzes && module.quizzes.length > 0) {
+            module.quizzes.forEach((quiz, quizIndex) => {
+              console.log(`  Quiz ${quizIndex + 1}: "${quiz.title}" - ID: ${quiz._id || 'MISSING!'}`);
+              if (!quiz._id) {
+                console.error(`    ❌ Quiz "${quiz.title}" has no ID!`);
+                console.error(`    ❌ Quiz object:`, quiz);
+              }
+            });
+          } else {
+            console.log(`  No quizzes in module ${moduleIndex + 1}`);
+          }
+        });
+      } else {
+        console.log('❌ No course or modules data available');
+      }
+    };
+    
+    // Add function to show current completion status
+    window.showCompletionStatus = () => {
+      console.log('📊 Current completion status:');
+      console.log('📋 Completed items:', Array.from(completedItems));
+      console.log('📈 Progress percentage:', progress);
+      console.log('🎯 Course completed:', courseCompleted);
+      
+      if (course && course.modules) {
+        course.modules.forEach((module, moduleIndex) => {
+          console.log(`📋 Module ${moduleIndex + 1}: ${module.title}`);
+          
+          // Check description
+          if (module.description) {
+            const descIndex = calculateItemIndex(module, 'description');
+            const descKey = getCompletionKey(module, 'description', descIndex);
+            const descCompleted = completedItems.has(descKey);
+            console.log(`  Description - Completed: ${descCompleted} (Key: ${descKey})`);
+          }
+          
+          // Check content
+          if (module.content) {
+            const contentIndex = calculateItemIndex(module, 'content');
+            const contentKey = getCompletionKey(module, 'content', contentIndex);
+            const contentCompleted = completedItems.has(contentKey);
+            console.log(`  Content - Completed: ${contentCompleted} (Key: ${contentKey})`);
+          }
+          
+          // Check quizzes
+          if (module.quizzes && module.quizzes.length > 0) {
+            module.quizzes.forEach((quiz, quizIdx) => {
+              const quizItemIndex = calculateItemIndex(module, 'quiz', quizIdx);
+              const quizKey = getCompletionKey(module, 'quiz', quizItemIndex);
+              const quizCompleted = completedItems.has(quizKey);
+              console.log(`  Quiz ${quizIdx + 1}: "${quiz.title}" - Completed: ${quizCompleted} (Key: ${quizKey})`);
+            });
+          }
+          
+          // Check discussions
+          if (module.discussions && module.discussions.length > 0) {
+            module.discussions.forEach((discussion, discussionIdx) => {
+              const discussionItemIndex = calculateItemIndex(module, 'discussion', discussionIdx);
+              const discussionKey = getCompletionKey(module, 'discussion', discussionItemIndex);
+              const discussionCompleted = completedItems.has(discussionKey);
+              console.log(`  Discussion ${discussionIdx + 1}: "${discussion.title}" - Completed: ${discussionCompleted} (Key: ${discussionKey})`);
+            });
+          }
+        });
+      }
+    };
+    
+    // Add function to debug completion key generation
+    window.debugCompletionKeys = () => {
+      console.log('🔍 Debugging completion key generation...');
+      
+      if (course && course.modules) {
+        course.modules.forEach((module, moduleIndex) => {
+          console.log(`\n📋 Module ${moduleIndex + 1}: ${module.title}`);
+          
+          let itemIndex = 0;
+          
+          // Description
+          if (module.description) {
+            const key = getCompletionKey(module, 'description', itemIndex);
+            console.log(`  Item ${itemIndex}: description - Key: "${key}"`);
+            itemIndex++;
+          }
+          
+          // Content
+          if (module.content) {
+            const key = getCompletionKey(module, 'content', itemIndex);
+            console.log(`  Item ${itemIndex}: content - Key: "${key}"`);
+            itemIndex++;
+          }
+          
+          // Content Items
+          if (module.contentItems) {
+            module.contentItems.forEach((item, idx) => {
+              const key = getCompletionKey(module, 'content-item', itemIndex);
+              console.log(`  Item ${itemIndex}: content-item - Key: "${key}"`);
+              itemIndex++;
+            });
+          }
+          
+          // Quizzes
+          if (module.quizzes) {
+            module.quizzes.forEach((quiz, idx) => {
+              const key = getCompletionKey(module, 'quiz', itemIndex);
+              console.log(`  Item ${itemIndex}: quiz "${quiz.title}" - Key: "${key}"`);
+              itemIndex++;
+            });
+          }
+          
+          // Discussions
+          if (module.discussions) {
+            module.discussions.forEach((discussion, idx) => {
+              const key = getCompletionKey(module, 'discussion', itemIndex);
+              console.log(`  Item ${itemIndex}: discussion "${discussion.title}" - Key: "${key}"`);
+              itemIndex++;
+            });
+          }
+        });
+      }
+    };
+    
+    // Add function to force refresh quiz data
+    window.refreshQuizData = async () => {
+      console.log('🔄 Force refreshing quiz data...');
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/courses/${courseId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const refreshedCourse = data.data?.course;
+          if (refreshedCourse && refreshedCourse.modules) {
+            console.log('✅ Refreshed course data received');
+            setCourse(refreshedCourse);
+            console.log('🔄 Course data updated, please try clicking the quiz again');
+          } else {
+            console.error('❌ Invalid refreshed course data');
+          }
+        } else {
+          console.error('❌ Failed to refresh course data');
+        }
+      } catch (error) {
+        console.error('❌ Error refreshing quiz data:', error);
+      }
+    };
+    
+    // REMOVED: Auto-refresh progress data function to prevent constant refreshing
+    // Progress will only update when user completes items or manually refreshes
+    
+    // Add function to refresh progress data
+    window.refreshProgressData = async () => {
+      console.log('🔄 Force refreshing progress data...');
+      try {
+        const token = localStorage.getItem('token');
+        
+        // Check enrollment status using the original working endpoint
+        const enrollmentResponse = await fetch(`/api/courses/enrolled/courses/${courseId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (enrollmentResponse.ok) {
+          console.log('📊 User is enrolled in course');
+          
+          // Fetch progress data
+          const progressResponse = await fetch(`/api/courses/${courseId}/progress?t=${Date.now()}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+              'Cache-Control': 'no-cache'
+            }
+          });
+          
+          if (progressResponse.ok) {
+            const progressData = await progressResponse.json();
+            console.log('📊 Progress data received:', progressData);
+            
+            // Update progress state
+            setProgress(Math.min(progressData.data?.progressPercentage || 0, 100));
+            
+            // Update completed items
+            const completedSet = new Set();
+            if (progressData.data?.allCompletedItems) {
+              progressData.data.allCompletedItems.forEach(item => completedSet.add(item));
+            }
+            
+            if (progressData.data?.modulesProgress) {
+              Object.values(progressData.data.modulesProgress).forEach(moduleProgress => {
+                if (moduleProgress.completedItems) {
+                  moduleProgress.completedItems.forEach(item => completedSet.add(item));
+                }
+              });
+            }
+            
+            setCompletedItems(completedSet);
+            console.log('✅ Progress data refreshed successfully');
+            console.log('📋 Completed items:', Array.from(completedSet));
+          } else {
+            console.error('❌ Failed to fetch progress data');
+          }
+        } else {
+          console.log('⚠️ User not enrolled, cannot fetch progress');
+        }
+      } catch (error) {
+        console.error('❌ Error refreshing progress data:', error);
+      }
+    };
+    
+    // Auto-refresh progress on page load
+    window.autoRefreshProgress = () => {
+      console.log('🔄 Auto-refreshing progress on page load...');
+      setTimeout(() => {
+        window.refreshProgressData();
+      }, 1000);
+    };
+    
+    // Force load progress immediately
+    window.forceLoadProgress = () => {
+      console.log('🔄 Force loading progress immediately...');
+      window.refreshProgressData();
+    };
+    
+    // Show progress bar and check status
+    window.showProgressBar = () => {
+      console.log('📊 Current status:');
+      console.log('  - isEnrolled:', isEnrolled);
+      console.log('  - progress:', progress);
+      console.log('  - completedItems size:', completedItems.size);
+      console.log('  - completedItems:', Array.from(completedItems));
+      
+      // Force show progress bar by setting enrollment to true
+      setIsEnrolled(true);
+      console.log('✅ Set enrollment to true - progress bar should now show');
+    };
+    
+    // Add function to test quiz navigation
+    window.testQuizNavigation = () => {
+      console.log('🧪 Testing quiz navigation...');
+      if (course && course.modules && course.modules.length > 0) {
+        const module = course.modules[0];
+        if (module.quizzes && module.quizzes.length > 0) {
+          const quiz = module.quizzes[0];
+          console.log('🎯 Testing navigation to quiz:', quiz.title);
+          console.log('🎯 Quiz ID:', quiz._id);
+          console.log('🎯 Course ID:', courseId);
+          console.log('🎯 Module ID:', module._id);
+          
+          const navigationUrl = `/courses/${courseId}/modules/${module._id}/quiz/${quiz._id}?v=${Date.now()}`;
+          console.log('🚀 Navigation URL:', navigationUrl);
+          
+          // Test the navigation
+          window.location.href = navigationUrl;
+        } else {
+          console.log('❌ No quizzes found in first module');
+        }
+      } else {
+        console.log('❌ No course or modules data available');
+      }
+    };
+    
+    // Add function to force hard refresh
+    window.forceHardRefresh = () => {
+      console.log('🔄 Force hard refresh...');
+      // Clear all caches
+      if ('caches' in window) {
+        caches.keys().then(names => {
+          names.forEach(name => {
+            caches.delete(name);
+          });
+        });
+      }
+      // Force reload without cache
+      window.location.reload(true);
+    };
+    
     // Add function to test click events
     window.testClicks = () => {
       console.log('🔍 Testing click events...');
@@ -1063,7 +1487,11 @@ const StudentCourseOverview = () => {
         const module = course.modules[0];
         const quiz = module.quizzes[0];
         console.log('🚀 Force navigating to quiz:', quiz.title);
-        handleContentClick(module, 'quiz', quiz);
+        
+        // Use the correct URL pattern for quiz navigation
+        const navigationUrl = `/courses/${courseId}/modules/${module._id}/quiz/${quiz._id}?v=${Date.now()}`;
+        console.log('🚀 Navigation URL:', navigationUrl);
+        window.location.href = navigationUrl;
       } else {
         console.log('❌ No quiz found to navigate to');
       }
@@ -1106,8 +1534,6 @@ const StudentCourseOverview = () => {
       }
     }
   }, [completedItems, course]);
-
-
 
   const handleEnroll = async () => {
     try {
@@ -1158,6 +1584,10 @@ const StudentCourseOverview = () => {
     setExpandedModules(newExpanded);
     
     console.log('🔄 Updated expanded modules:', Array.from(newExpanded));
+  };
+
+  const toggleOverviewExpansion = () => {
+    setOverviewExpanded(!overviewExpanded);
   };
 
   // Helper function to get completion key in ModuleContent format
@@ -1505,12 +1935,16 @@ const StudentCourseOverview = () => {
         break;
       case 'quiz':
         if (contentData && contentData._id) {
-          console.log('🎯 QUIZ CLICK: Using force navigation bypass');
+          console.log('🎯 QUIZ CLICK: Using correct URL pattern');
           console.log('🎯 Quiz ID:', contentData._id);
           console.log('🎯 Course ID:', courseId);
+          console.log('🎯 Item Index:', itemIndex);
           
-          // Use the bypass function to avoid all authentication middleware
-          forceNavigateToQuiz(contentData._id);
+          // Use the correct URL pattern for quiz navigation with cache busting
+          const returnUrl = `/courses/${courseId}/overview`;
+          const navigationUrl = `/courses/${courseId}/modules/${module._id}/quiz/${contentData._id}?return=${encodeURIComponent(returnUrl)}&v=${Date.now()}`;
+          console.log('🎯 Navigating to quiz:', navigationUrl);
+          window.location.href = navigationUrl;
         } else {
           console.error('❌ Quiz navigation failed - no quiz ID:', contentData);
           console.log('🔍 Available contentData:', contentData);
@@ -1533,12 +1967,16 @@ const StudentCourseOverview = () => {
         break;
       case 'discussion':
         if (contentData && contentData._id) {
-          console.log('💬 DISCUSSION CLICK: Using force navigation bypass');
+          console.log('💬 DISCUSSION CLICK: Using correct URL pattern');
           console.log('💬 Discussion ID:', contentData._id);
           console.log('💬 Course ID:', courseId);
+          console.log('💬 Item Index:', itemIndex);
           
-          // Use the bypass function to avoid all authentication middleware
-          forceNavigateToDiscussion(contentData._id);
+          // Use the correct URL pattern for discussion navigation
+          const returnUrl = `/courses/${courseId}/overview`;
+          const navigationUrl = `/courses/${courseId}/modules/${module._id}/discussion/${contentData._id}?return=${encodeURIComponent(returnUrl)}`;
+          console.log('💬 Navigating to discussion:', navigationUrl);
+          window.location.href = navigationUrl;
         } else {
           console.error('❌ Discussion navigation failed - no discussion ID:', contentData);
           console.log('🔍 Available contentData:', contentData);
@@ -1671,19 +2109,24 @@ const StudentCourseOverview = () => {
       userRole: userRole
     });
     
-    // Try multiple URL patterns - with and without modules
-    const urlWithoutModule = `/courses/${courseId}/quiz/${quizId}`;
-    const urlWithModule = moduleId ? `/courses/${courseId}/modules/${moduleId}/quiz/${quizId}` : null;
-    
-    console.log('🚀 FORCE NAVIGATE: Trying URL patterns:');
-    console.log('  - Without module:', urlWithoutModule);
-    if (urlWithModule) {
-      console.log('  - With module:', urlWithModule);
+    // Find the quiz index in the module
+    let quizIndex = 0;
+    if (moduleId) {
+      const module = course.modules?.find(m => m._id === moduleId);
+      if (module && module.quizzes) {
+        const quizIndexFound = module.quizzes.findIndex(q => q._id === quizId);
+        if (quizIndexFound !== -1) {
+          quizIndex = quizIndexFound;
+        }
+      }
     }
     
-    // Try the simpler pattern first
-    console.log('🚀 FORCE NAVIGATE: Using simple pattern (no modules)');
-    window.location.replace(urlWithoutModule);
+    // Use the correct URL pattern for quiz navigation
+    const navigationUrl = `/courses/${courseId}/modules/${moduleId || course.modules?.[0]?._id}/quiz/${quizId}`;
+    
+    console.log('🚀 FORCE NAVIGATE: Using correct URL pattern:', navigationUrl);
+    console.log('🎯 Quiz ID:', quizId, 'Quiz Index:', quizIndex);
+    window.location.replace(navigationUrl);
   };
 
   const forceNavigateToDiscussion = (discussionId, moduleId = null) => {
@@ -1693,19 +2136,24 @@ const StudentCourseOverview = () => {
     sessionStorage.clear();
     localStorage.removeItem('redirectAfterLogin');
     
-    // Try multiple URL patterns - with and without modules
-    const urlWithoutModule = `/courses/${courseId}/discussion/${discussionId}`;
-    const urlWithModule = moduleId ? `/courses/${courseId}/modules/${moduleId}/discussion/${discussionId}` : null;
-    
-    console.log('🚀 FORCE NAVIGATE: Trying discussion URL patterns:');
-    console.log('  - Without module:', urlWithoutModule);
-    if (urlWithModule) {
-      console.log('  - With module:', urlWithModule);
+    // Find the discussion index in the module
+    let discussionIndex = 0;
+    if (moduleId) {
+      const module = course.modules?.find(m => m._id === moduleId);
+      if (module && module.discussions) {
+        const discussionIndexFound = module.discussions.findIndex(d => d._id === discussionId);
+        if (discussionIndexFound !== -1) {
+          discussionIndex = discussionIndexFound;
+        }
+      }
     }
     
-    // Try the simpler pattern first
-    console.log('🚀 FORCE NAVIGATE: Using simple pattern (no modules)');
-    window.location.replace(urlWithoutModule);
+    // Use the correct URL pattern for discussion navigation
+    const navigationUrl = `/courses/${courseId}/modules/${moduleId || course.modules?.[0]?._id}/discussion/${discussionId}`;
+    
+    console.log('🚀 FORCE NAVIGATE: Using correct URL pattern:', navigationUrl);
+    console.log('💬 Discussion ID:', discussionId, 'Discussion Index:', discussionIndex);
+    window.location.replace(navigationUrl);
   };
 
   if (loading) {
@@ -1773,7 +2221,8 @@ const StudentCourseOverview = () => {
           cursor: 'pointer',
           padding: '8px',
           fontSize: '1.1rem',
-          fontWeight: 600
+        fontWeight: 600,
+        marginBottom: '1rem'
         }}
       >
         <ArrowBack style={{ marginRight: 6 }} /> Back to Courses
@@ -1787,37 +2236,8 @@ const StudentCourseOverview = () => {
           <BannerTitle>🎉 Congratulations!</BannerTitle>
           <BannerText>You have successfully completed this course!</BannerText>
           <ModalButtons>
-            <ActionButton 
-              primary 
-              onClick={async (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('🎓 View Certificate clicked - generating certificate and navigating...');
-                
-                try {
-                  console.log('📜 Generating certificate for JavaScript course...');
-                  await generateCertificate();
-                  console.log('✅ Certificate generation completed, waiting before navigation...');
-                  
-                  // Wait a moment for the certificate to be saved in database
-                  await new Promise(resolve => setTimeout(resolve, 1000));
-                } catch (error) {
-                  console.warn('⚠️ Certificate generation error (continuing anyway):', error);
-                }
-                
-                console.log('🚀 Navigating to certificates page...');
-                window.location.href = '/certificates';
-              }}
-              style={{
-                zIndex: 9999,
-                position: 'relative',
-                pointerEvents: 'auto'
-              }}
-            >
-              View Certificate
-            </ActionButton>
             <ActionButton primary onClick={() => setShowGradesModal(true)}>
-              View Grades
+              View Grades & Get Certificate
             </ActionButton>
           </ModalButtons>
         </CompletionBanner>
@@ -1846,12 +2266,53 @@ const StudentCourseOverview = () => {
       })()} */}
 
       <CourseHeader>
-        {course.course_profile_picture && (
-          <CourseImage 
-            src={`/${course.course_profile_picture.replace(/^uploads\//, '')}`} 
-            alt={course.title}
-          />
-        )}
+        {(() => {
+          console.log('🔍 Course image debug:', {
+            course_profile_picture: course.course_profile_picture,
+            course_image: course.image,
+            has_profile_picture: !!course.course_profile_picture,
+            has_image: !!course.image
+          });
+          
+          let imagePath = null;
+          if (course.course_profile_picture) {
+            // Convert Windows backslashes to forward slashes
+            const normalizedPath = course.course_profile_picture.replace(/\\/g, '/');
+            
+            if (normalizedPath.startsWith('http://') || normalizedPath.startsWith('https://')) {
+              imagePath = normalizedPath;
+            } else if (normalizedPath.startsWith('/uploads/')) {
+              imagePath = normalizedPath;
+            } else if (normalizedPath.startsWith('uploads/')) {
+              imagePath = `/${normalizedPath}`;
+            } else {
+              imagePath = `/uploads/${normalizedPath}`;
+            }
+          } else if (course.image) {
+            imagePath = course.image;
+          }
+          
+          console.log('🔍 Final image path:', imagePath);
+          
+          return imagePath ? (
+            <CourseImage image={imagePath} />
+          ) : (
+            <div style={{
+              width: '200px',
+              height: '150px',
+              backgroundColor: '#f0f0f0',
+              borderRadius: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#666',
+              fontSize: '0.9rem',
+              textAlign: 'center'
+            }}>
+              No Image Available
+            </div>
+          );
+        })()}
         
         <div>
           <CourseTitle>
@@ -1863,10 +2324,11 @@ const StudentCourseOverview = () => {
             )}
           </CourseTitle>
 
-          {isEnrolled && (
+          {/* Progress Bar - Show if enrolled OR if there's progress data */}
+          {(isEnrolled || progress > 0 || completedItems.size > 0) && (
             <div>
               <div style={{ fontSize: '0.9rem', color: '#666', marginBottom: '0.5rem' }}>
-                Your Progress
+                Your Progress: {Math.round(progress)}%
               </div>
               <ProgressBar>
                 <ProgressFill width={progress} />
@@ -1898,9 +2360,13 @@ const StudentCourseOverview = () => {
           </OverviewHeader>
           <OverviewContent>
             <OverviewDescription>
-              {course.overview}
+              {overviewExpanded ? course.overview : course.overview?.substring(0, 300) + (course.overview?.length > 300 ? '...' : '')}
             </OverviewDescription>
-            <SeeMoreButton>See More</SeeMoreButton>
+            {course.overview && course.overview.length > 300 && (
+              <SeeMoreButton onClick={toggleOverviewExpansion}>
+                {overviewExpanded ? 'See Less' : 'See More'}
+              </SeeMoreButton>
+            )}
           </OverviewContent>
         </EnhancedOverviewSection>
       )}
@@ -1999,7 +2465,6 @@ const StudentCourseOverview = () => {
                       {module.description && (
                         <ContentItem 
                           className="content-item-clickable"
-                          style={{ cursor: 'pointer' }}
                           onClick={(e) => {
                             console.log('🎯 MODULE DESCRIPTION CLICK EVENT:', e);
                             console.log('🎯 MODULE DESCRIPTION CLICK:', module.title);
@@ -2028,7 +2493,6 @@ const StudentCourseOverview = () => {
                               alert('Error navigating to module description. Check console for details.');
                             }
                           }}
-                          style={{ cursor: 'pointer', transition: 'background-color 0.2s' }}
                         >
                           <ContentItemIcon type="description">
                             <Description />
@@ -2101,7 +2565,6 @@ const StudentCourseOverview = () => {
                               alert('Error navigating to module content. Check console for details.');
                             }
                           }}
-                          style={{ cursor: 'pointer', transition: 'background-color 0.2s' }}
                         >
                           <ContentItemIcon type="content">
                             <Description />
@@ -2146,7 +2609,6 @@ const StudentCourseOverview = () => {
                             key={`content-item-${idx}`}
                             data-testid="content-item"
                             className="content-item-clickable"
-                            style={{ cursor: 'pointer' }}
                             onClick={(e) => {
                               e.stopPropagation();
                               console.log('🎯 CONTENT ITEM CLICK:', item.title);
@@ -2184,7 +2646,6 @@ const StudentCourseOverview = () => {
                                 {item.type === 'audio' && 'Listen • Audio'}  
                                 {item.type === 'file' && 'View • File'}
                                 {item.url && ' • External Link'}
-                                {item.fileName && ` • ${item.fileName}`}
                               </ContentItemMeta>
                             </ContentItemInfo>
                             <ContentItemAction>
@@ -2222,7 +2683,6 @@ const StudentCourseOverview = () => {
                       {module.videoUrl && (
                         <ContentItem 
                           className="content-item-clickable"
-                          style={{ cursor: 'pointer' }}
                           onClick={() => handleContentClick(module, 'video')}>
                           <ContentItemIcon type="video">
                             <VideoLibrary />
@@ -2274,7 +2734,6 @@ const StudentCourseOverview = () => {
                         <ContentItem 
                           key={`resource-${idx}`}
                           className="content-item-clickable"
-                          style={{ cursor: 'pointer' }}
                           onClick={() => {
                             if (resource.url) {
                               window.open(resource.url, '_blank');
@@ -2332,27 +2791,99 @@ const StudentCourseOverview = () => {
                           key={`quiz-${idx}`}
                           data-testid="quiz-item"
                           className="content-item-clickable"
-                          style={{ cursor: 'pointer' }}
-                          onClick={(e) => {
+                          onClick={async (e) => {
                             console.log('🎯 DIRECT Quiz click event:', e);
                             console.log('🎯 DIRECT Quiz click:', quiz.title, 'ID:', quiz._id);
                             console.log('🎯 Full quiz object:', quiz);
+                            console.log('🎯 Module object:', module);
+                            console.log('🎯 Course ID:', courseId);
+                            console.log('🎯 Quiz index:', idx);
                             console.log('🎯 Navigation URL will be:', `/courses/${courseId}/modules/${module._id}/quiz/${quiz._id}`);
                             
                             // Prevent any default behavior
                             e.preventDefault();
                             e.stopPropagation();
                             
+                            // Enhanced debugging for quiz data
+                            console.log('🔍 Quiz data validation:');
+                            console.log('  - Quiz object type:', typeof quiz);
+                            console.log('  - Quiz keys:', Object.keys(quiz || {}));
+                            console.log('  - Quiz _id:', quiz._id);
+                            console.log('  - Quiz title:', quiz.title);
+                            console.log('  - Quiz questions:', quiz.questions?.length || 0);
+                            
+                            if (!quiz) {
+                              console.error('❌ Quiz object is null or undefined');
+                              alert('Quiz data is missing. Please refresh the page and try again.');
+                              return;
+                            }
+                            
                             if (!quiz._id) {
                               console.error('❌ Quiz has no _id:', quiz);
+                              console.error('❌ Available quiz properties:', Object.keys(quiz));
+                              
+                              // Try to find the quiz by title in the module's quiz array
+                              if (quiz.title && module.quizzes) {
+                                console.log('⚠️ Attempting to find quiz by title:', quiz.title);
+                                const foundQuiz = module.quizzes.find(q => q.title === quiz.title && q._id);
+                                if (foundQuiz) {
+                                  console.log('✅ Found quiz with ID:', foundQuiz._id);
+                                  // Use the found quiz instead
+                                  quiz._id = foundQuiz._id;
+                                } else {
+                                  console.log('❌ Could not find quiz with ID by title');
+                                  
+                                  // Try to fetch the quiz data from the backend
+                                  console.log('🔄 Attempting to fetch quiz data from backend...');
+                                  try {
+                                    const token = localStorage.getItem('token');
+                                    const response = await fetch(`/api/courses/${courseId}/assessments`, {
+                                      headers: {
+                                        'Authorization': `Bearer ${token}`,
+                                        'Content-Type': 'application/json'
+                                      }
+                                    });
+                                    
+                                    if (response.ok) {
+                                      const data = await response.json();
+                                      const assessments = data.data?.assessments || [];
+                                      const matchingQuiz = assessments.find(a => 
+                                        a.type === 'quiz' && 
+                                        a.title === quiz.title && 
+                                        a.moduleId === module._id
+                                      );
+                                      
+                                      if (matchingQuiz && matchingQuiz._id) {
+                                        console.log('✅ Found quiz in backend:', matchingQuiz._id);
+                                        quiz._id = matchingQuiz._id;
+                                      } else {
+                                        console.error('❌ Quiz not found in backend assessments');
+                                        alert(`Quiz "${quiz.title}" is missing its ID. This might be a data loading issue. Please refresh the page and try again.`);
+                                        return;
+                                      }
+                                    } else {
+                                      console.error('❌ Failed to fetch assessments from backend');
+                                      alert(`Quiz "${quiz.title}" is missing its ID. This might be a data loading issue. Please refresh the page and try again.`);
+                                      return;
+                                    }
+                                  } catch (error) {
+                                    console.error('❌ Error fetching quiz data:', error);
+                                    alert(`Quiz "${quiz.title}" is missing its ID. This might be a data loading issue. Please refresh the page and try again.`);
+                                    return;
+                                  }
+                                }
+                              } else {
                               alert('Quiz ID missing. Please refresh the page and try again.');
                               return;
+                              }
                             }
                             
                             try {
                               const returnUrl = `/courses/${courseId}/overview`;
-                              const navigationUrl = `/courses/${courseId}/modules/${module._id}/quiz/${quiz._id}?return=${encodeURIComponent(returnUrl)}`;
+                              // Use the correct URL pattern for quiz navigation with cache busting
+                              const navigationUrl = `/courses/${courseId}/modules/${module._id}/quiz/${quiz._id}?return=${encodeURIComponent(returnUrl)}&v=${Date.now()}`;
                               console.log('🚀 Attempting navigation to:', navigationUrl);
+                              console.log('🎯 Quiz index:', idx, 'Quiz ID:', quiz._id);
                               window.location.href = navigationUrl;
                               console.log('✅ Navigate command executed successfully');
                             } catch (error) {
@@ -2494,7 +3025,6 @@ const StudentCourseOverview = () => {
                           key={`discussion-${idx}`}
                           data-testid="discussion-item"
                           className="content-item-clickable"
-                          style={{ cursor: 'pointer' }}
                           onClick={(e) => {
                             console.log('🎯 DIRECT Discussion click event:', e);
                             console.log('🎯 DIRECT Discussion click:', discussion.title, 'ID:', discussion._id);
@@ -2738,10 +3268,23 @@ const StudentCourseOverview = () => {
                 Close
               </ModalButton>
               {isCourseCompleted() && (
-                <ModalButton className="primary" onClick={() => {
+                <ModalButton className="primary" onClick={async () => {
                   setShowGradesModal(false);
-                  generateCertificate();
-                  navigate('/certificates');
+                  
+                  try {
+                    console.log('🎓 Get Certificate clicked - generating certificate...');
+                    await generateCertificate();
+                    console.log('✅ Certificate generation completed, navigating to certificates page...');
+                    
+                    // Wait a moment for the certificate to be saved in database
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    console.log('🚀 Navigating to certificates page...');
+                    window.location.href = '/certificates';
+                  } catch (error) {
+                    console.error('❌ Error getting certificate:', error);
+                    alert('Error generating certificate. Please try again.');
+                  }
                 }}>
                   Get Certificate
                 </ModalButton>

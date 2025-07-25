@@ -1,5 +1,7 @@
 import express, { Request, Response } from 'express';
 
+
+
 // Use proper authenticated request type
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -29,7 +31,7 @@ import { authenticateToken, authorizeSelfOrAdmin, authorizeRoles, blacklistedAcc
 import { validate } from '../middleware/validation';
 import { asyncHandler } from '../middleware/errorHandler';
 import { sendOTPEmail } from '../config/email';
-import multer from 'multer';
+import { uploadProfilePic } from '../middleware/upload';
 import PouchDB from 'pouchdb';
 import PouchDBFind from 'pouchdb-find';
 import { getRedisClient } from '../config/redis';
@@ -639,7 +641,7 @@ router.get('/settings', authenticateToken, asyncHandler(async (req: Authenticate
 // Update user settings
 router.put('/settings', authenticateToken, [
   body('email').optional().isEmail().withMessage('Invalid email format'),
-  body('language').optional().isIn(['en', 'fr', 'ar', 'sw']).withMessage('Invalid language'),
+  body('language').optional().isIn(['en', 'fr', 'rw', 'sw']).withMessage('Invalid language'),
   body('timezone').optional().isString().withMessage('Invalid timezone'),
   body('notifications').optional().isObject().withMessage('Notifications must be an object'),
   body('privacy').optional().isObject().withMessage('Privacy must be an object')
@@ -709,8 +711,7 @@ router.put('/settings', authenticateToken, [
 }));
 
 // Profile update (PATCH, multipart/form-data)
-const upload = multer({ dest: 'uploads/' });
-router.patch('/profile', authenticateToken, upload.single('profile_picture'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+router.patch('/profile', authenticateToken, uploadProfilePic, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { userId } = ensureAuth(req);
   const database = await ensureDb();
   const user = await database.get(userId) as UserDoc;
@@ -727,8 +728,9 @@ router.patch('/profile', authenticateToken, upload.single('profile_picture'), as
   });
 
   // Handle profile picture upload
-  if (req.file) {
-    user.profilePic = req.file.path;
+  const uploadedFiles = (req as any).uploadedFiles;
+  if (uploadedFiles && uploadedFiles.length > 0) {
+    user.profilePic = uploadedFiles[0].publicUrl;
   }
 
   user.updatedAt = new Date();

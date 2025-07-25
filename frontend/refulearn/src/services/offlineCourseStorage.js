@@ -102,7 +102,7 @@ class OfflineCourseStorage {
       const storedMetadata = localStorage.getItem('offlineContentMetadata');
       if (storedMetadata) {
         const metadata = JSON.parse(storedMetadata);
-        this.offlineContent = new Map(Object.entries(metadata));
+        this.offlineContent = new Map(Object.entries(metadata || {}));
         console.log(`📊 Loaded metadata for ${this.offlineContent.size} offline items`);
       }
     } catch (error) {

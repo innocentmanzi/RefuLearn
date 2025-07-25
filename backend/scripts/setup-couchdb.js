@@ -1,8 +1,8 @@
 const nano = require('nano');
 
 const COUCHDB_URL = process.env.COUCHDB_URL || 'http://localhost:5984';
-const COUCHDB_USERNAME = process.env.COUCHDB_USERNAME || 'admin';
-const COUCHDB_PASSWORD = process.env.COUCHDB_PASSWORD || 'password';
+const COUCHDB_USERNAME = process.env.COUCHDB_USERNAME || 'Manzi';
+const COUCHDB_PASSWORD = process.env.COUCHDB_PASSWORD || 'Clarisse101';
 const COUCHDB_DATABASE = process.env.COUCHDB_DATABASE || 'refulearn';
 
 async function setupCouchDB() {

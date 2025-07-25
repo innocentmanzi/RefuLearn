@@ -337,7 +337,7 @@ const AssessmentPage = () => {
           console.warn('⚠️ Online submission failed, using offline:', onlineError);
           
           // Fall back to offline submission
-          const result = await offlineIntegrationService.submitAssessmentOffline(submissionData);
+          const result = await offlineIntegrationService.submitAssessmentOffline(assessmentId, submissionData);
           
           if (result.success) {
             success = true;
@@ -352,7 +352,7 @@ const AssessmentPage = () => {
       } else {
         // Offline assessment submission
         console.log('📴 Offline mode: Submitting assessment offline...');
-        const result = await offlineIntegrationService.submitAssessmentOffline(submissionData);
+        const result = await offlineIntegrationService.submitAssessmentOffline(assessmentId, submissionData);
         
         if (result.success) {
           success = true;

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 // Stunning Animations
 const fadeInUp = keyframes`
@@ -210,14 +212,25 @@ const FloatingElement = styled.div`
 
 const Landing = () => {
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation();
+  const { currentLanguage, changeLanguage, availableLanguages } = useLanguage();
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
     setIsLoaded(true);
-  }, []);
+    
+    // Ensure English is set as default if no language is selected
+    if (!localStorage.getItem('selectedLanguage')) {
+      changeLanguage('en');
+    }
+  }, [changeLanguage]);
 
   const handleContinue = () => {
     navigate('/register');
+  };
+
+  const handleLanguageChange = (e) => {
+    changeLanguage(e.target.value);
   };
 
   return (
@@ -236,22 +249,23 @@ const Landing = () => {
       
       <Header>
                   <Logo>RefuLearn</Logo>
-        <LanguageSelector>
-          <option value="en">English</option>
-          <option value="fr">French</option>
-          <option value="rw">Kinyarwanda</option>
-          <option value="sw">Swahili</option>
+        <LanguageSelector value={currentLanguage} onChange={handleLanguageChange}>
+          {availableLanguages.map((lang) => (
+            <option key={lang.code} value={lang.code}>
+              {lang.name}
+            </option>
+          ))}
         </LanguageSelector>
       </Header>
       
       <MainContent>
-        <HeroTitle>Welcome to RefuLearn</HeroTitle>
+        <HeroTitle>{t('welcome')}</HeroTitle>
         <HeroSubtitle>
-          Empowering refugees through world-class education,<br />
-          building bridges to brighter futures
+          {t('empowering')},<br />
+          {t('bridgesFutures')}
         </HeroSubtitle>
         <CTAButton onClick={handleContinue}>
-          Begin Your Journey
+          {t('beginJourney')}
         </CTAButton>
       </MainContent>
 

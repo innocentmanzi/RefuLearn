@@ -205,6 +205,7 @@ const PasswordToggle = styled.button`
 `;
 
 const Register = () => {
+  const { t } = useTranslation();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -404,27 +405,27 @@ const Register = () => {
           <Logo />
         </LogoAbsolute>
         <CenterWrapper>
-          <Form onSubmit={handleOTPVerification}>
-            <Title>Verify Email</Title>
+                  <Form onSubmit={handleOTPVerification}>
+          <Title>{t('verifyEmail')}</Title>
             {error && <Error>{error}</Error>}
             {success && <Success>{success}</Success>}
             
             <OTPContainer>
-              <OTPInput
-                type="text"
-                placeholder="Enter 6-digit OTP"
-                value={otp}
-                onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                disabled={otpLoading}
-                maxLength={6}
-                required
-              />
+                          <OTPInput
+              type="text"
+              placeholder={t('enterSixDigitOtp')}
+              value={otp}
+              onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              disabled={otpLoading}
+              maxLength={6}
+              required
+            />
             </OTPContainer>
             
-            <Button type="submit" disabled={otpLoading}>
-              {otpLoading && <LoadingSpinner />}
-              {otpLoading ? 'Verifying...' : 'Verify OTP'}
-            </Button>
+                      <Button type="submit" disabled={otpLoading}>
+            {otpLoading && <LoadingSpinner />}
+            {otpLoading ? t('verifying') : t('verifyOtp')}
+          </Button>
             
             <div style={{ marginTop: '1rem', textAlign: 'center' }}>
               <button 
@@ -439,12 +440,12 @@ const Register = () => {
                   cursor: 'pointer'
                 }}
               >
-                Resend OTP
+                {t('resendOtp')}
               </button>
             </div>
             
             <div style={{ marginTop: '1rem', textAlign: 'center' }}>
-              <Link to="/login">Back to Login</Link>
+              <Link to="/login">{t('backToLogin')}</Link>
             </div>
           </Form>
         </CenterWrapper>
@@ -459,13 +460,13 @@ const Register = () => {
       </LogoAbsolute>
       <CenterWrapper>
         <Form onSubmit={handleSubmit}>
-          <Title>Register</Title>
+          <Title>{t('register')}</Title>
           {error && <Error>{error}</Error>}
           {success && <Success>{success}</Success>}
           
           <Input
             type="text"
-            placeholder="First Name"
+            placeholder={t('firstName')}
             value={firstName}
             onChange={e => setFirstName(e.target.value)}
             disabled={loading}
@@ -473,7 +474,7 @@ const Register = () => {
           />
           <Input
             type="text"
-            placeholder="Last Name"
+            placeholder={t('lastName')}
             value={lastName}
             onChange={e => setLastName(e.target.value)}
             disabled={loading}
@@ -481,7 +482,7 @@ const Register = () => {
           />
           <Input
             type="email"
-            placeholder="Email"
+            placeholder={t('email')}
             value={email}
             onChange={e => setEmail(e.target.value)}
             disabled={loading}
@@ -490,7 +491,7 @@ const Register = () => {
           <PasswordWrapper>
             <PasswordInput
               type={showPassword ? "text" : "password"}
-              placeholder="Password"
+              placeholder={t('password')}
               value={password}
               onChange={e => setPassword(e.target.value)}
               disabled={loading}
@@ -507,7 +508,7 @@ const Register = () => {
           <PasswordWrapper>
             <PasswordInput
               type={showConfirmPassword ? "text" : "password"}
-              placeholder="Confirm Password"
+              placeholder={t('confirmPassword')}
               value={confirmPassword}
               onChange={e => setConfirmPassword(e.target.value)}
               disabled={loading}
@@ -526,18 +527,18 @@ const Register = () => {
             onChange={e => setRole(e.target.value)}
             disabled={loading}
           >
-            <option value="refugee">Refugee</option>
-            <option value="instructor">Instructor</option>
-            <option value="employer">Employer</option>
+            <option value="refugee">{t('refugee')}</option>
+            <option value="instructor">{t('instructor')}</option>
+            <option value="employer">{t('employer')}</option>
           </Select>
           
           <Button type="submit" disabled={loading}>
             {loading && <LoadingSpinner />}
-            {loading ? 'Registering...' : 'Register'}
+            {loading ? t('registering') : t('register')}
           </Button>
           
           <div style={{ marginTop: '1rem', textAlign: 'center' }}>
-            Already have an account? <Link to="/login">Login</Link>
+            {t('alreadyHaveAccount')} <Link to="/login">{t('login.submit')}</Link>
           </div>
         </Form>
       </CenterWrapper>

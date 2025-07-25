@@ -13,8 +13,8 @@ const CourseManagerContainer = styled.div`
 
 const CourseGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0;
   margin-top: 1rem;
 `;
 

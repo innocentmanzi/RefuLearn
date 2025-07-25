@@ -9,7 +9,7 @@ export interface CouchDBConfig {
 }
 
 export class CouchDBConnection {
-  private static instance: CouchDBConnection;
+  private static instance: CouchDBConnection | null = null;
   private nano: nano.ServerScope;
   private db!: nano.DocumentScope<any>;
   private config: CouchDBConfig;
@@ -23,20 +23,17 @@ export class CouchDBConnection {
     if (!CouchDBConnection.instance && config) {
       CouchDBConnection.instance = new CouchDBConnection(config);
     }
+    if (!CouchDBConnection.instance) {
+      throw new Error('CouchDBConnection not initialized. Call getInstance(config) first.');
+    }
     return CouchDBConnection.instance;
   }
 
   public async connect(): Promise<void> {
     try {
       // Authenticate with CouchDB
-      try {
-        await this.nano.auth(this.config.username, this.config.password);
-        logger.info(`Successfully authenticated with CouchDB using user: ${this.config.username}`);
-      } catch (authError: any) {
-        logger.error(`CouchDB authentication failed for user ${this.config.username}:`, authError.message);
-        // Try without authentication for development
-        logger.info('Attempting to connect without authentication...');
-      }
+      await this.nano.auth(this.config.username, this.config.password);
+      logger.info(`Successfully authenticated with CouchDB using user: ${this.config.username}`);
       
       // Get or create database
       const dbName = this.config.database;
@@ -82,6 +79,13 @@ export class CouchDBConnection {
     if (!this.db) {
       throw new Error('CouchDB not connected. Call connect() first.');
     }
+    
+    // Add debugging to check what methods are available
+    if (!this.db.get || !this.db.insert || !this.db.destroy) {
+      logger.error('CouchDB database object is missing required methods');
+      throw new Error('Invalid CouchDB database object');
+    }
+    
     return this.db;
   }
 
@@ -127,20 +131,28 @@ export class CouchDBConnection {
 }
 
 export const connectCouchDB = async (): Promise<CouchDBConnection> => {
-  const config: CouchDBConfig = {
+  const config = {
     url: 'http://localhost:5984',
     username: 'Manzi',
     password: 'Clarisse101',
     database: 'refulearn'
   };
 
-  const connection = CouchDBConnection.getInstance(config);
-  await connection.connect();
-  
-  // Create necessary design documents and indexes
-  await setupDesignDocuments(connection);
-  
-  return connection;
+  try {
+    logger.info(`Attempting to connect with username: ${config.username}`);
+    
+    const connection = CouchDBConnection.getInstance(config);
+    await connection.connect();
+    
+    // Create necessary design documents and indexes
+    await setupDesignDocuments(connection);
+    
+    logger.info(`Successfully connected to CouchDB with username: ${config.username}`);
+    return connection;
+  } catch (error: any) {
+    logger.error('CouchDB connection failed:', error.message || error);
+    throw error;
+  }
 };
 
 const setupDesignDocuments = async (connection: CouchDBConnection): Promise<void> => {

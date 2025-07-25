@@ -1,12 +1,14 @@
 import { Request, Response, Router } from 'express';
 import { body } from 'express-validator';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
-import upload from '../middleware/upload';
-import { handleValidationErrors } from '../middleware/validation';
+import upload, { uploadCourseProfilePic, uploadAny } from '../middleware/upload';
+import { handleValidationErrors, validate } from '../middleware/validation';
 import { asyncHandler } from '../middleware/errorHandler';
 import PouchDB from 'pouchdb';
 import { connectCouchDB } from '../config/couchdb';
 import { sendCourseCompletionEmail } from '../config/email';
+
+
 
 // Use proper authenticated request type
 interface AuthenticatedRequest extends Request {
@@ -61,6 +63,27 @@ router.get('/debug-test', (req: Request, res: Response) => {
   console.log('🔍 DEBUG TEST ROUTE HIT');
   res.json({ message: 'Debug test route working', timestamp: new Date().toISOString() });
 });
+
+// Upload individual file for content items
+router.post('/upload/file', authenticateToken, uploadAny, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const uploadedFiles = (req as any).uploadedFiles;
+    if (!uploadedFiles || uploadedFiles.length === 0) {
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+
+    const uploadedFile = uploadedFiles[0];
+    res.json({
+      success: true,
+      url: uploadedFile.publicUrl,
+      path: uploadedFile.path,
+      fileName: uploadedFile.originalName
+    });
+  } catch (error) {
+    console.error('Error uploading file:', error);
+    res.status(500).json({ success: false, message: 'Failed to upload file' });
+  }
+}));
 
 // File download route - PLACED AT THE VERY TOP TO AVOID ANY CONFLICTS
 router.get('/file-download/:submissionId', authenticateToken, authorizeRoles('instructor', 'admin'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
@@ -151,23 +174,12 @@ router.get('/file-download/:submissionId', authenticateToken, authorizeRoles('in
     res.status(500).json({
       success: false,
       message: 'Failed to download file',
-      error: error.message
+      error: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 }));
 
-// Add debugging middleware to log all requests
-router.use((req, res, next) => {
-  console.log('🔍 COURSE ROUTER - Request:', req.method, req.originalUrl, req.path);
-  console.log('🔍 COURSE ROUTER - Full URL breakdown:', {
-    originalUrl: req.originalUrl,
-    path: req.path,
-    baseUrl: req.baseUrl,
-    params: req.params,
-    query: req.query
-  });
-  next();
-});
+// Removed excessive debugging middleware to prevent continuous terminal output
 
 // Helper function to ensure database is available
 const ensureDb = async (): Promise<any> => {
@@ -185,7 +197,22 @@ const ensureDb = async (): Promise<any> => {
     if (!database) {
       console.log('❌ Database object is null, reinitializing...');
       couchConnection = await connectCouchDB();
-      return couchConnection.getDatabase();
+          const retryDatabase = couchConnection.getDatabase();
+    if (!retryDatabase || (typeof (retryDatabase as any).allDocs !== 'function' && typeof (retryDatabase as any).list !== 'function')) {
+      throw new Error('Database object is not properly initialized');
+    }
+    return retryDatabase;
+    }
+    
+    // Verify the database object has required methods
+    if (typeof (database as any).allDocs !== 'function' && typeof (database as any).list !== 'function') {
+      console.log('❌ Database object missing allDocs/list method, reinitializing...');
+      couchConnection = await connectCouchDB();
+      const retryDatabase = couchConnection.getDatabase();
+      if (!retryDatabase || (typeof (retryDatabase as any).allDocs !== 'function' && typeof (retryDatabase as any).list !== 'function')) {
+        throw new Error('Database object is not properly initialized');
+      }
+      return retryDatabase;
     }
     
     return database;
@@ -194,7 +221,11 @@ const ensureDb = async (): Promise<any> => {
     // Try to reconnect
     try {
       couchConnection = await connectCouchDB();
-      return couchConnection.getDatabase();
+      const retryDatabase = couchConnection.getDatabase();
+      if (!retryDatabase || (typeof (retryDatabase as any).allDocs !== 'function' && typeof (retryDatabase as any).list !== 'function')) {
+        throw new Error('Database object is not properly initialized after retry');
+      }
+      return retryDatabase;
     } catch (retryError) {
       console.error('❌ Database retry failed:', retryError);
       throw new Error('Database connection failed after retry');
@@ -415,6 +446,8 @@ interface DiscussionDoc {
   user: string;
   title: string;
   content: string;
+  likes?: number;
+  likedBy?: string[];
   replies?: Array<{
     _id?: string;
     user: string;
@@ -449,6 +482,8 @@ interface ModuleDoc {
     title: string;
     description?: string;
     url?: string;
+    fileUrl?: string;
+    publicUrl?: string;
     file?: any;
     fileName?: string;
     dateAdded?: string;
@@ -465,6 +500,7 @@ interface ModuleDoc {
   assignments?: any[];
   assessments?: any[];
   quizzes?: any[];
+  discussions?: any[];
   learningObjectives?: any[];
   prerequisites?: any[];
   tags?: any[];
@@ -877,11 +913,15 @@ router.put('/:courseId/progress', authenticateToken, authorizeRoles('instructor'
     });
   }
 
-  // Check if user is enrolled
-  if (!course.enrolledStudents?.includes(userId)) {
+  // Check if user is enrolled OR is the instructor of the course
+  const isEnrolled = course.enrolledStudents?.includes(userId);
+  const isInstructor = course.instructor === userId || course.instructor_id === userId;
+  const userRole = req.user?.role;
+  
+  if (!isEnrolled && !isInstructor && userRole !== 'admin') {
     return res.status(400).json({
       success: false,
-      message: 'You must be enrolled to update progress'
+      message: 'You must be enrolled or be the instructor to update progress'
     });
   }
 
@@ -1044,6 +1084,8 @@ router.put('/:courseId/progress', authenticateToken, authorizeRoles('instructor'
 
   console.log('✅ Progress updated successfully');
 
+
+
   res.json({
     success: true,
     message: 'Progress updated successfully',
@@ -1062,7 +1104,7 @@ router.get('/:courseId/progress', authenticateToken, authorizeRoles('instructor'
   const { courseId } = req.params;
   const { userId } = ensureAuth(req);
 
-  console.log('📊 Fetching progress for:', { courseId, userId });
+  // Removed excessive logging to prevent continuous terminal output
 
   const database = await ensureDb();
   let course = await database.get(courseId) as CourseDoc;
@@ -1077,7 +1119,7 @@ router.get('/:courseId/progress', authenticateToken, authorizeRoles('instructor'
     (p: any) => p.student === userId
   ) || [];
 
-  console.log('📈 User progress found:', userProgress.length, 'modules');
+  // Removed excessive logging to prevent continuous terminal output
 
   // Calculate progress based on ALL items in ALL modules (same logic as PUT endpoint)
   let totalItemsInCourse = 0;
@@ -1129,7 +1171,7 @@ router.get('/:courseId/progress', authenticateToken, authorizeRoles('instructor'
     return acc;
   }, []);
 
-  console.log('🎯 All completed items:', allCompletedItems);
+  // Removed excessive logging to prevent continuous terminal output
 
   // Create modules progress mapping
   const modulesProgress = userProgress.reduce((acc: any, moduleProgress: any) => {
@@ -1142,14 +1184,7 @@ router.get('/:courseId/progress', authenticateToken, authorizeRoles('instructor'
     return acc;
   }, {});
 
-  console.log('📊 Progress summary:', {
-    totalModules,
-    completedModules,
-    totalItemsInCourse,
-    completedItemsInCourse,
-    progressPercentage: Math.round(progressPercentage * 100) / 100, // Round to 2 decimal places
-    totalCompletedItems: allCompletedItems.length
-  });
+  // Removed excessive logging to prevent continuous terminal output
 
   res.json({
     success: true,
@@ -1294,7 +1329,7 @@ router.get('/recommendations', authenticateToken, asyncHandler(async (req: Authe
 }));
 
 // Create a new course with modules (instructor, admin)
-router.post('/', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), upload.single('course_profile_picture'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+router.post('/', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), uploadCourseProfilePic, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const database = await ensureDb();
     
@@ -1348,23 +1383,22 @@ router.post('/', authenticateToken, authorizeRoles('instructor', 'admin', 'user'
       });
     }
 
-    if (!req.file) {
+    // Get uploaded file info from Supabase middleware
+    const uploadedFiles = (req as any).uploadedFiles;
+    if (!uploadedFiles || uploadedFiles.length === 0) {
       return res.status(400).json({
         success: false,
         message: 'Course profile picture is required'
       });
     }
 
+    const uploadedFile = uploadedFiles[0];
     console.log('📸 Course image upload:', {
-      originalName: req.file.originalname,
-      filename: req.file.filename,
-      path: req.file.path,
-      size: req.file.size
+      originalName: uploadedFile.originalName,
+      path: uploadedFile.path,
+      size: uploadedFile.size,
+      publicUrl: uploadedFile.publicUrl
     });
-
-    // Normalize the file path to use forward slashes for web compatibility
-    const normalizedPath = req.file.path.replace(/\\/g, '/');
-    console.log('📸 Normalized path:', normalizedPath);
 
     // Create course document
     const courseData: any = {
@@ -1379,8 +1413,9 @@ router.post('/', authenticateToken, authorizeRoles('instructor', 'admin', 'user'
       difficult_level: level || 'Beginner', // Keep for backward compatibility
       instructor: ensureAuth(req).userId,
       instructor_id: ensureAuth(req).userId,
-      course_profile_picture: normalizedPath,
+      course_profile_picture: uploadedFile.publicUrl,
       isPublished: false, // Default to unpublished
+      approvalStatus: 'draft', // Default to draft status
       is_active: true,
       enrolledStudents: [],
       students: 0,
@@ -1429,6 +1464,7 @@ router.post('/', authenticateToken, authorizeRoles('instructor', 'admin', 'user'
         assignments: moduleData.assignments || [],
         assessments: moduleData.assessments || [],
         quizzes: moduleData.quizzes || [],
+        discussions: moduleData.discussions || [],
         learningObjectives: moduleData.learningObjectives || [],
         prerequisites: moduleData.prerequisites || [],
         tags: moduleData.tags || [],
@@ -1478,12 +1514,50 @@ router.post('/', authenticateToken, authorizeRoles('instructor', 'admin', 'user'
   }
 }));
 
+// Request course publication (instructor only)
+router.post('/:courseId/request-publication', authenticateToken, authorizeRoles('instructor'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { courseId } = req.params;
+  const { userId } = ensureAuth(req);
+  const database = await ensureDb();
+  
+  try {
+    const course = await database.get(courseId) as CourseDoc;
+    if (!course) {
+      return res.status(404).json({ success: false, message: 'Course not found' });
+    }
+    
+    // Check if user is the instructor who created this course
+    if (course.instructor !== userId) {
+      return res.status(403).json({ success: false, message: 'Not authorized to request publication for this course' });
+    }
+    
+    // Set course to pending approval
+    course.isPublished = false;
+    course.approvalStatus = 'pending';
+    course.publicationRequestedAt = new Date();
+    course.updatedAt = new Date();
+    
+    const latest = await database.get(course._id);
+    course._rev = latest._rev;
+    await database.insert(course);
+    
+    res.json({
+      success: true,
+      message: 'Course publication requested successfully. It will be reviewed by an admin.',
+      data: { course }
+    });
+  } catch (error) {
+    console.error('Error requesting course publication:', error);
+    res.status(500).json({ success: false, message: 'Failed to request course publication' });
+  }
+}));
+
 // Update a course (instructor, admin)
-router.put('/:courseId', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), upload.single('course_profile_picture'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+router.put('/:courseId', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), uploadCourseProfilePic, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { courseId } = req.params;
   const database = await ensureDb();
   const allowedFields = [
-    'title', 'category', 'level', 'description', 'overview', 'learningOutcomes', 'instructor_id', 'duration', 'difficult_level', 'is_active', 'isPublished'
+    'title', 'category', 'level', 'description', 'overview', 'learningOutcomes', 'instructor_id', 'duration', 'difficult_level', 'is_active'
   ];
   let course = await database.get(courseId) as CourseDoc;
   if (!course) {
@@ -1507,8 +1581,10 @@ router.put('/:courseId', authenticateToken, authorizeRoles('instructor', 'admin'
     }
   });
   
-  if (req.file) {
-          course.course_profile_picture = req.file.path.replace(/\\/g, '/');
+  // Handle course image upload
+  const uploadedFiles = (req as any).uploadedFiles;
+  if (uploadedFiles && uploadedFiles.length > 0) {
+    course.course_profile_picture = uploadedFiles[0].publicUrl;
   }
 
   // Handle modules update
@@ -1890,22 +1966,38 @@ router.post('/discussions', authenticateToken, authorizeRoles('instructor', 'adm
   body('title').notEmpty().withMessage('Title is required'),
   body('content').notEmpty().withMessage('Content is required'),
   body('author').notEmpty().withMessage('Author is required'),
+  body('moduleId').optional().isString().withMessage('Module ID must be a string'),
   body('status').optional().isString().withMessage('Status must be a string')
 ], handleValidationErrors, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  console.log('🔄 DISCUSSION CREATION - Request received:', req.body);
+  console.log('🔄 DISCUSSION CREATION - User:', req.user);
+  
+  try {
   const database = await ensureDb();
-  const { course, title, content, author, status } = req.body;
+    const { course, title, content, author, moduleId, status } = req.body;
   const discussionId = `discussion_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    console.log('🔄 DISCUSSION CREATION - Creating discussion with ID:', discussionId);
+    
   const newDiscussion = await database.insert({
     _id: discussionId,
     type: 'discussion',
     course,
     title,
     content,
-    author,
+    user: author, // Use 'user' field to match DiscussionDoc interface
+      moduleId: moduleId || null, // Include moduleId if provided
     status: status || 'submitted',
     createdAt: new Date().toISOString()
   });
+    
+    console.log('✅ DISCUSSION CREATION - Discussion created successfully:', newDiscussion);
   res.status(201).json({ success: true, message: 'Discussion created', data: { discussion: newDiscussion } });
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('❌ DISCUSSION CREATION - Error:', errorMessage);
+    res.status(500).json({ success: false, message: 'Failed to create discussion', error: errorMessage });
+  }
 }));
 
 // Get discussion by ID
@@ -1923,7 +2015,7 @@ router.patch('/discussions/:discussionId', authenticateToken, authorizeRoles('in
   body('course').optional().notEmpty().withMessage('Course is required'),
   body('title').optional().notEmpty().withMessage('Title is required'),
   body('content').optional().notEmpty().withMessage('Content is required'),
-  body('author').optional().notEmpty().withMessage('Author is required'),
+  body('user').optional().notEmpty().withMessage('User is required'),
   body('status').optional().isString().withMessage('Status must be a string')
 ], handleValidationErrors, asyncHandler(async (req: Request, res: Response) => {
   const database = await ensureDb();
@@ -1974,6 +2066,12 @@ router.post('/discussions/:discussionId/replies', authenticateToken, authorizeRo
   const reply = {
     _id: `reply_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     user: userId,
+    author: {
+      _id: userId,
+      name: req.user?.name || req.user?.fullName || `${req.user?.firstName || ''} ${req.user?.lastName || ''}`.trim() || 'Anonymous',
+      email: req.user?.email,
+      profilePic: req.user?.profilePic
+    },
     content: req.body.content,
     likes: 0,
     likedBy: [],
@@ -2235,6 +2333,90 @@ router.delete('/enrollments/:enrollmentId', authenticateToken, authorizeRoles('i
   
   await database.destroy(req.params.enrollmentId, enrollment._rev);
   res.json({ success: true, message: 'Unenrolled successfully' });
+}));
+
+// Get enrollment status for a specific course and user
+router.get('/:courseId/enrollment-status', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { courseId } = req.params;
+    const { userId } = ensureAuth(req);
+    
+    console.log('🔍 Checking enrollment status:', { userId, courseId });
+    
+    const database = await ensureDb();
+    
+    // Check if user is enrolled in this course
+    const enrollments = await database.find({
+      selector: {
+        type: 'enrollment',
+        user: userId,
+        course: courseId
+      }
+    });
+    
+    const isEnrolled = enrollments.docs.length > 0;
+    
+    console.log('📊 Enrollment status result:', { isEnrolled, enrollmentCount: enrollments.docs.length });
+    
+    res.json({
+      success: true,
+      enrolled: isEnrolled,
+      data: {
+        enrolled: isEnrolled,
+        enrollmentCount: enrollments.docs.length,
+        enrollment: isEnrolled ? enrollments.docs[0] : null
+      }
+    });
+  } catch (error: any) {
+    console.error('Error checking enrollment status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check enrollment status',
+      enrolled: false
+    });
+  }
+}));
+
+// Get enrollment status for a specific course and user
+router.get('/:courseId/enrollment-status', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { courseId } = req.params;
+    const { userId } = ensureAuth(req);
+    
+    console.log('🔍 Checking enrollment status:', { userId, courseId });
+    
+    const database = await ensureDb();
+    
+    // Check if user is enrolled in this course
+    const enrollments = await database.find({
+      selector: {
+        type: 'enrollment',
+        user: userId,
+        course: courseId
+      }
+    });
+    
+    const isEnrolled = enrollments.docs.length > 0;
+    
+    console.log('📊 Enrollment status result:', { isEnrolled, enrollmentCount: enrollments.docs.length });
+    
+    res.json({
+      success: true,
+      enrolled: isEnrolled,
+      data: {
+        enrolled: isEnrolled,
+        enrollmentCount: enrollments.docs.length,
+        enrollment: isEnrolled ? enrollments.docs[0] : null
+      }
+    });
+  } catch (error: any) {
+    console.error('Error checking enrollment status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check enrollment status',
+      enrolled: false
+    });
+  }
 }));
 
 // --- ASSESSMENT ENDPOINTS ---
@@ -2550,12 +2732,81 @@ router.get('/:courseId/discussions/:discussionId', authenticateToken, authorizeR
       });
     }
     
-    console.log('🔍 DISCUSSION DEBUG - Discussion title:', discussion.title);
-    console.log('🔍 DISCUSSION DEBUG - Replies count:', discussion.replies?.length || 0);
+    // Populate user information for discussion author
+    let populatedDiscussion = { ...discussion };
+    try {
+      const discussionAuthor = await database.get(discussion.user);
+      if (discussionAuthor && discussionAuthor.type === 'user') {
+        populatedDiscussion.author = {
+          _id: discussionAuthor._id,
+          name: discussionAuthor.name || discussionAuthor.firstName + ' ' + discussionAuthor.lastName || 'Anonymous',
+          email: discussionAuthor.email,
+          profilePic: discussionAuthor.profilePic
+        };
+      } else {
+        populatedDiscussion.author = {
+          _id: discussion.user,
+          name: 'Anonymous',
+          email: null,
+          profilePic: null
+        };
+      }
+    } catch (userError) {
+      console.warn('⚠️ Could not fetch discussion author:', userError);
+      populatedDiscussion.author = {
+        _id: discussion.user,
+        name: 'Anonymous',
+        email: null,
+        profilePic: null
+      };
+    }
+    
+    // Populate user information for replies
+    if (discussion.replies && Array.isArray(discussion.replies)) {
+      populatedDiscussion.replies = await Promise.all(discussion.replies.map(async (reply: any, index: number) => {
+        const populatedReply = { ...reply };
+        
+              // Log if reply is missing _id (should be fixed by database script)
+      if (!populatedReply._id) {
+        console.warn('⚠️ Reply missing _id field:', { reply: populatedReply, index });
+      }
+        
+        try {
+          const replyAuthor = await database.get(reply.user);
+          if (replyAuthor && replyAuthor.type === 'user') {
+            populatedReply.author = {
+              _id: replyAuthor._id,
+              name: replyAuthor.name || replyAuthor.firstName + ' ' + replyAuthor.lastName || 'Anonymous',
+              email: replyAuthor.email,
+              profilePic: replyAuthor.profilePic
+            };
+          } else {
+            populatedReply.author = {
+              _id: reply.user,
+              name: 'Anonymous',
+              email: null,
+              profilePic: null
+            };
+          }
+        } catch (userError) {
+          console.warn('⚠️ Could not fetch reply author:', userError);
+          populatedReply.author = {
+            _id: reply.user,
+            name: 'Anonymous',
+            email: null,
+            profilePic: null
+          };
+        }
+        return populatedReply;
+      }));
+    }
+    
+    console.log('🔍 DISCUSSION DEBUG - Discussion title:', populatedDiscussion.title);
+    console.log('🔍 DISCUSSION DEBUG - Replies count:', populatedDiscussion.replies?.length || 0);
     
     res.json({ 
       success: true, 
-      data: { discussion } 
+      data: { discussion: populatedDiscussion } 
     });
   } catch (err) {
     console.error('Error fetching course discussion:', err instanceof Error ? err.message : 'Unknown error');
@@ -2591,11 +2842,50 @@ router.get('/:courseId/discussions/:discussionId/replies', authenticateToken, au
     }
     
     const replies = discussion.replies || [];
-    console.log('🔍 DISCUSSION REPLIES DEBUG - Replies count:', replies.length);
+    
+    // Populate user information for replies
+    const populatedReplies = await Promise.all(replies.map(async (reply: any, index: number) => {
+      const populatedReply = { ...reply };
+      
+      // Log if reply is missing _id (should be fixed by database script)
+      if (!populatedReply._id) {
+        console.warn('⚠️ Reply missing _id field:', { reply: populatedReply, index });
+      }
+      
+      try {
+        const replyAuthor = await database.get(reply.user);
+        if (replyAuthor && replyAuthor.type === 'user') {
+          populatedReply.author = {
+            _id: replyAuthor._id,
+            name: replyAuthor.name || replyAuthor.firstName + ' ' + replyAuthor.lastName || 'Anonymous',
+            email: replyAuthor.email,
+            profilePic: replyAuthor.profilePic
+          };
+        } else {
+          populatedReply.author = {
+            _id: reply.user,
+            name: 'Anonymous',
+            email: null,
+            profilePic: null
+          };
+        }
+      } catch (userError) {
+        console.warn('⚠️ Could not fetch reply author:', userError);
+        populatedReply.author = {
+          _id: reply.user,
+          name: 'Anonymous',
+          email: null,
+          profilePic: null
+        };
+      }
+      return populatedReply;
+    }));
+    
+    console.log('🔍 DISCUSSION REPLIES DEBUG - Replies count:', populatedReplies.length);
     
     res.json({ 
       success: true, 
-      data: { replies } 
+      data: { replies: populatedReplies } 
     });
   } catch (err) {
     console.error('Error fetching discussion replies:', err instanceof Error ? err.message : 'Unknown error');
@@ -2635,11 +2925,16 @@ router.post('/:courseId/discussions/:discussionId/replies', authenticateToken, a
       });
     }
     
-    // Create new reply
+    // Create new reply with comprehensive author information
     const newReply = {
       _id: `reply_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       user: userId,
-      author: author || user.name || user.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Anonymous',
+      author: {
+        _id: userId,
+        name: user.name || user.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Anonymous',
+        email: user.email,
+        profilePic: user.profilePic
+      },
       content: content.trim(),
       likes: 0,
       likedBy: [],
@@ -2767,6 +3062,79 @@ router.post('/:courseId/discussions/:discussionId/replies/:replyId/like', authen
   }
 }));
 
+// Like/Unlike a discussion
+router.post('/:courseId/discussions/:discussionId/like', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), [
+  body('action').optional().isIn(['like', 'unlike']).withMessage('Action must be like or unlike')
+], handleValidationErrors, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { courseId, discussionId } = req.params;
+  const { action } = req.body;
+  
+  try {
+    const { userId } = ensureAuth(req);
+    const database = await ensureDb();
+    const discussion = await database.get(discussionId) as DiscussionDoc;
+    
+    if (!discussion || discussion.type !== 'discussion') {
+      return res.status(404).json({
+        success: false,
+        message: 'Discussion not found'
+      });
+    }
+    
+    // Verify discussion belongs to the specified course
+    if (discussion.courseId !== courseId && discussion.course !== courseId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Discussion not found in this course'
+      });
+    }
+    
+    // Initialize likes fields if they don't exist
+    if (!discussion.likes) discussion.likes = 0;
+    if (!discussion.likedBy) discussion.likedBy = [];
+    
+    // Check if user has already liked this discussion
+    const hasLiked = discussion.likedBy.includes(userId);
+    
+    // Determine action (toggle if not specified)
+    const shouldLike = action === 'like' ? true : action === 'unlike' ? false : !hasLiked;
+    
+    if (shouldLike && !hasLiked) {
+      // Add like
+      discussion.likes += 1;
+      discussion.likedBy.push(userId);
+    } else if (!shouldLike && hasLiked) {
+      // Remove like
+      discussion.likes = Math.max(0, discussion.likes - 1);
+      discussion.likedBy = discussion.likedBy.filter((id: string) => id !== userId);
+    }
+    
+    discussion.updatedAt = new Date();
+    
+    // Save updated discussion
+    const updatedDiscussion = await database.insert(discussion);
+    
+    console.log('✅ DISCUSSION LIKE UPDATED - Discussion ID:', discussionId);
+    console.log('✅ DISCUSSION LIKE UPDATED - Likes:', discussion.likes, 'Action:', shouldLike ? 'liked' : 'unliked');
+    
+    res.json({
+      success: true,
+      message: shouldLike ? 'Discussion liked successfully' : 'Discussion unliked successfully',
+      data: { 
+        discussion: updatedDiscussion,
+        likes: discussion.likes,
+        hasLiked: discussion.likedBy.includes(userId)
+      }
+    });
+  } catch (err) {
+    console.error('Error updating discussion like:', err instanceof Error ? err.message : 'Unknown error');
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update like'
+    });
+  }
+}));
+
 // --- MODULE ENDPOINTS ---
 // List all modules (optionally filter by course)
 router.get('/modules', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), asyncHandler(async (req: Request, res: Response) => {
@@ -2802,7 +3170,7 @@ router.get('/modules', authenticateToken, authorizeRoles('instructor', 'admin', 
 }));
 
 // Create a comprehensive module (instructor/admin only)
-router.post('/modules/comprehensive', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), upload.any(), [
+router.post('/modules/comprehensive', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), uploadAny, [
   body('courseId').notEmpty().withMessage('Course ID is required'),
   body('title').trim().notEmpty().withMessage('Title is required'),
   body('description').trim().notEmpty().withMessage('Description is required'),
@@ -2860,28 +3228,25 @@ router.post('/modules/comprehensive', authenticateToken, authorizeRoles('instruc
       contentDetails.hasText = true;
       console.log('✅ Text content processed, length:', content.length);
     } else {
-      // File upload
-      if (!req.files || (Array.isArray(req.files) && req.files.length === 0) || (!Array.isArray(req.files) && !('content_file' in req.files))) {
+      // File upload - check for Supabase uploaded files
+      const uploadedFiles = (req as any).uploadedFiles;
+      if (!uploadedFiles || uploadedFiles.length === 0) {
         return res.status(400).json({ success: false, message: 'content_file is required for this content type' });
       }
-      let file: Express.Multer.File;
-      if (Array.isArray(req.files)) {
-        file = req.files[0];
-      } else {
-        const filesObj = req.files as { [fieldname: string]: Express.Multer.File[] };
-        file = Array.isArray(filesObj['content_file']) ? filesObj['content_file'][0] : filesObj['content_file'];
-      }
-      content = file.path || file.filename || '';
-      contentDetails.hasFile = true;
-      contentDetails.filePath = file.path || '';
-      contentDetails.fileName = file.originalname || file.filename || '';
       
-      console.log('✅ File content processed:', {
-        originalName: file.originalname,
-        fileName: file.filename,
-        path: file.path,
-        size: file.size,
-        mimetype: file.mimetype
+      const uploadedFile = uploadedFiles[0];
+      content = uploadedFile.publicUrl || uploadedFile.url || '';
+      contentDetails.hasFile = true;
+      contentDetails.filePath = uploadedFile.path || '';
+      contentDetails.fileName = uploadedFile.originalName || '';
+      
+      console.log('✅ Supabase file content processed:', {
+        originalName: uploadedFile.originalName,
+        fileName: uploadedFile.fieldname,
+        path: uploadedFile.path,
+        publicUrl: uploadedFile.publicUrl,
+        size: uploadedFile.size,
+        mimetype: uploadedFile.mimetype
       });
     }
     
@@ -2903,6 +3268,19 @@ router.post('/modules/comprehensive', authenticateToken, authorizeRoles('instruc
       try {
         parsedContentItems = JSON.parse(contentItems);
         console.log('✅ ContentItems parsed:', parsedContentItems.length, 'items');
+        console.log('📄 ContentItems details:', parsedContentItems.map((item, idx) => ({
+          index: idx,
+          type: item.type,
+          title: item.title,
+          hasFile: !!item.file,
+          hasFileUrl: !!item.fileUrl,
+          hasPublicUrl: !!item.publicUrl,
+          hasUrl: !!item.url,
+          fileName: item.fileName,
+          fileUrl: item.fileUrl,
+          publicUrl: item.publicUrl,
+          url: item.url
+        })));
       } catch (e) {
         console.warn('Failed to parse contentItems:', e);
       }
@@ -2936,6 +3314,7 @@ router.post('/modules/comprehensive', authenticateToken, authorizeRoles('instruc
       assignments: parseArrayField(assignments),
       assessments: parseArrayField(assessments),
       quizzes: parseArrayField(quizzes),
+      discussions: parseArrayField(discussions),
       learningObjectives: parseArrayField(learningObjectives),
       prerequisites: parseArrayField(prerequisites),
       tags: parseArrayField(tags),
@@ -2962,6 +3341,15 @@ router.post('/modules/comprehensive', authenticateToken, authorizeRoles('instruc
     });
     
     // Save the module
+    console.log('💾 Saving module with contentItems:', module.contentItems?.map((item, idx) => ({
+      index: idx,
+      type: item.type,
+      title: item.title,
+      hasFileUrl: !!item.fileUrl,
+      hasPublicUrl: !!item.publicUrl,
+      hasUrl: !!item.url,
+      fileName: item.fileName
+    })));
     const moduleResult = await database.insert(module);
     console.log('✅ Module created successfully:', moduleResult.id);
     
@@ -3129,26 +3517,78 @@ router.post('/modules', authenticateToken, authorizeRoles('instructor', 'admin',
   res.status(201).json({ success: true, message: 'Module created', data: { module: result } });
 }));
 
-// Get module by ID with enhanced content info
+// Get module by ID with enhanced content info and populated quizzes/discussions
 router.get('/modules/:moduleId', authenticateToken, authorizeRoles('instructor', 'admin', 'user'), asyncHandler(async (req: Request, res: Response) => {
   const database = await ensureDb();
-  const module = await database.get(req.params.moduleId);
+  const moduleId = req.params.moduleId;
+  
+  const module = await database.get(moduleId);
   if (!module) {
     return res.status(404).json({ success: false, message: 'Module not found' });
   }
   
-  // Log content details for debugging
-  console.log('📚 Retrieved module content:', {
-    title: module.title,
-    content_type: module.content_type,
-    hasContent: !!module.content,
-    contentLength: module.content ? module.content.length : 0,
-    contentDetails: module.contentDetails || 'none',
-    videoUrl: module.videoUrl || 'none',
-    resourcesCount: module.resources?.length || 0
-  });
+  // Populate quizzes for this module
+  let quizzes: any[] = [];
+  try {
+    if (database) {
+      // Try allDocs first, then list as fallback
+      let allDocs: any;
+      if (typeof (database as any).allDocs === 'function') {
+        allDocs = await (database as any).allDocs({ include_docs: true });
+      } else if (typeof (database as any).list === 'function') {
+        allDocs = await (database as any).list({ include_docs: true });
+      } else {
+        console.error('❌ Database object is not properly initialized or missing allDocs/list method');
+        return;
+      }
+      
+      quizzes = allDocs.rows
+        .map((row: any) => row.doc)
+        .filter((doc: any) => doc && doc.type === 'quiz' && doc.moduleId === moduleId);
+    } else {
+      console.error('❌ Database object is null');
+    }
+  } catch (error) {
+    console.error('❌ Error fetching quizzes:', error);
+  }
   
-  res.json({ success: true, data: { module } });
+  // Populate discussions for this module
+  let discussions: any[] = [];
+  try {
+    if (database) {
+      // Try allDocs first, then list as fallback
+      let allDocs: any;
+      if (typeof (database as any).allDocs === 'function') {
+        allDocs = await (database as any).allDocs({ include_docs: true });
+      } else if (typeof (database as any).list === 'function') {
+        allDocs = await (database as any).list({ include_docs: true });
+      } else {
+        console.error('❌ Database object is not properly initialized or missing allDocs/list method');
+        return;
+      }
+      
+      const allDiscussions = allDocs.rows
+        .map((row: any) => row.doc)
+        .filter((doc: any) => doc && doc.type === 'discussion');
+      
+      discussions = allDiscussions.filter((doc: any) => doc.moduleId === moduleId);
+    } else {
+      console.error('❌ Database object is null');
+    }
+  } catch (error) {
+    console.error('❌ Error fetching discussions:', error);
+  }
+  
+  // Add populated data to module
+  const populatedModule = {
+    ...module,
+    quizzes: quizzes,
+    discussions: discussions
+  };
+  
+  // Removed excessive debug logging to prevent continuous terminal output
+  
+  res.json({ success: true, data: { module: populatedModule } });
 }));
 
 // Test endpoint to check if content files exist
@@ -3188,13 +3628,19 @@ router.get('/modules/:moduleId/content-check', authenticateToken, authorizeRoles
 
 // Update module (instructor/admin only, full update, multipart/form-data)
 router.put('/modules/:moduleId', authenticateToken, authorizeRoles('instructor', 'admin', 'user', 'refugee'), upload.any(), asyncHandler(async (req: Request, res: Response) => {
+  console.log('🔧 MODULE UPDATE - Request received for module:', req.params.moduleId);
+  console.log('🔧 MODULE UPDATE - Request body:', req.body);
+  
+  try {
   const database = await ensureDb();
   const moduleId = req.params.moduleId;
   let module = await database.get(moduleId) as ModuleDoc;
   if (!module) {
+      console.log('❌ MODULE UPDATE - Module not found:', moduleId);
     return res.status(404).json({ success: false, message: 'Module not found' });
   }
-  const { courseId, title, description, content_type, duration, isMandatory, order, content_text, contentItems } = req.body;
+    console.log('✅ MODULE UPDATE - Found existing module:', module.title);
+  const { courseId, title, description, content_type, duration, isMandatory, order, content_text, contentItems, quizzes, assessments, discussions, resources } = req.body;
   let content = (module as ModuleDoc).content;
   if (content_type === 'text content') {
     if (content_text) {
@@ -3220,6 +3666,99 @@ router.put('/modules/:moduleId', authenticateToken, authorizeRoles('instructor',
       console.warn('Failed to parse contentItems:', e);
     }
   }
+
+  // Parse quizzes if provided
+  let parsedQuizzes: any[] = [];
+  if (quizzes) {
+    if (Array.isArray(quizzes)) {
+      // If quizzes is already an array, use it directly
+      parsedQuizzes = quizzes;
+      console.log('✅ Using quizzes array directly:', parsedQuizzes.length, 'quizzes');
+    } else {
+      // Try to parse as JSON string
+      try {
+        parsedQuizzes = JSON.parse(quizzes);
+        console.log('✅ Parsed quizzes from JSON string:', parsedQuizzes.length, 'quizzes');
+      } catch (e) {
+        console.warn('Failed to parse quizzes:', e);
+      }
+    }
+  } else {
+    // Fallback to existing module quizzes if no new quizzes provided
+    parsedQuizzes = (module as ModuleDoc).quizzes || [];
+    console.log('📋 Using existing module quizzes:', parsedQuizzes.length, 'quizzes');
+  }
+
+  // Ensure all quizzes have proper _id fields
+  parsedQuizzes = parsedQuizzes.map((quiz, index) => {
+    if (!quiz._id) {
+      quiz._id = `quiz_${Date.now()}_${index}_${Math.random().toString(36).substr(2, 9)}`;
+      console.log(`🔧 Generated quiz ID for quiz ${index + 1}:`, quiz._id);
+    }
+    return quiz;
+  });
+
+  // Parse assessments if provided
+  let parsedAssessments: any[] = (module as ModuleDoc).assessments || [];
+  if (assessments) {
+    try {
+      parsedAssessments = JSON.parse(assessments);
+      console.log('✅ Parsed assessments:', parsedAssessments.length, 'assessments');
+    } catch (e) {
+      console.warn('Failed to parse assessments:', e);
+    }
+  }
+
+  // Ensure all assessments have proper _id fields
+  parsedAssessments = parsedAssessments.map((assessment, index) => {
+    if (!assessment._id) {
+      assessment._id = `assessment_${Date.now()}_${index}_${Math.random().toString(36).substr(2, 9)}`;
+      console.log(`🔧 Generated assessment ID for assessment ${index + 1}:`, assessment._id);
+    }
+    return assessment;
+  });
+
+  // Parse discussions if provided
+  let parsedDiscussions: any[] = (module as ModuleDoc).discussions || [];
+  if (discussions) {
+    if (Array.isArray(discussions)) {
+      // If discussions is already an array, use it directly
+      parsedDiscussions = discussions;
+      console.log('✅ Using discussions array directly:', parsedDiscussions.length, 'discussions');
+    } else {
+      // Try to parse as JSON string
+      try {
+        parsedDiscussions = JSON.parse(discussions);
+        console.log('✅ Parsed discussions from JSON string:', parsedDiscussions.length, 'discussions');
+      } catch (e) {
+        console.warn('Failed to parse discussions:', e);
+      }
+    }
+  }
+
+  // Ensure all discussions have proper _id fields
+  parsedDiscussions = parsedDiscussions.map((discussion, index) => {
+    if (!discussion._id) {
+      discussion._id = `discussion_${Date.now()}_${index}_${Math.random().toString(36).substr(2, 9)}`;
+      console.log(`🔧 Generated discussion ID for discussion ${index + 1}:`, discussion._id);
+    }
+    return discussion;
+  });
+
+  // Parse resources if provided
+  let parsedResources: any[] = (module as ModuleDoc).resources || [];
+  if (resources) {
+    try {
+      parsedResources = JSON.parse(resources);
+      console.log('✅ Parsed resources:', parsedResources.length, 'resources');
+    } catch (e) {
+      console.warn('Failed to parse resources:', e);
+    }
+  }
+  
+  console.log('🔧 MODULE UPDATE - Received quizzes:', quizzes);
+  console.log('🔧 MODULE UPDATE - Parsed quizzes:', parsedQuizzes.length, 'quizzes');
+  console.log('🔧 MODULE UPDATE - Parsed contentItems:', parsedContentItems.length, 'items');
   
   const updatedModule: ModuleDoc = {
     ...module as ModuleDoc,
@@ -3231,12 +3770,23 @@ router.put('/modules/:moduleId', authenticateToken, authorizeRoles('instructor',
     content_type: content_type ?? (module as ModuleDoc).content_type,
     content,
     contentItems: parsedContentItems,
+    quizzes: parsedQuizzes,
+    assessments: parsedAssessments,
+    discussions: parsedDiscussions,
+    resources: parsedResources,
     duration: duration ?? (module as ModuleDoc).duration,
     isMandatory: isMandatory !== undefined ? (isMandatory === 'true' || isMandatory === true) : (module as ModuleDoc).isMandatory,
-    order: order !== undefined ? Number(order) : (module as ModuleDoc).order
+    order: order !== undefined ? Number(order) : (module as ModuleDoc).order,
+    updatedAt: new Date()
   };
   const result = await database.insert(updatedModule);
+  console.log('✅ MODULE UPDATE - Module updated successfully:', result.id);
   res.json({ success: true, message: 'Module updated', data: { module: result } });
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('❌ MODULE UPDATE - Error updating module:', errorMessage);
+    res.status(500).json({ success: false, message: 'Failed to update module', error: errorMessage });
+  }
 }));
 
 // Delete module (instructor/admin only)
@@ -3616,11 +4166,20 @@ router.get('/user/:userId/stats', authenticateToken, asyncHandler(async (req: Au
   }
 }));
 
+// Health check endpoint (no authentication required)
+router.get('/health', asyncHandler(async (req: Request, res: Response) => {
+  res.json({ 
+    success: true, 
+    message: 'Course API is healthy',
+    timestamp: new Date().toISOString()
+  });
+}));
+
 // Get course by ID with modules - MOVED TO BOTTOM TO AVOID ROUTE SHADOWING
 router.get('/:courseId', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
   try {
     const courseId = req.params['courseId'];
-    console.log('🔍 Fetching course with ID:', courseId);
+    // Removed excessive logging to prevent continuous terminal output
     
     const database = await ensureDb();
 
@@ -3645,7 +4204,7 @@ router.get('/:courseId', authenticateToken, asyncHandler(async (req: Request, re
     // Get modules for this course
     let modules: any[] = [];
     try {
-      console.log('🔧 Fetching modules for course:', courseId);
+      // Removed excessive logging to prevent continuous terminal output
       
       // Get all documents to find modules
       const allDocsResult = await database.list({ include_docs: true });
@@ -3678,24 +4237,40 @@ router.get('/:courseId', authenticateToken, asyncHandler(async (req: Request, re
           isActive: assessment.isActive
         }));
         
-        // Populate quizzes  
+        // Populate quizzes - always ensure we have proper quiz data with _id fields
+        const allQuizzes = allDocs.filter((doc: any) => doc && doc.type === 'quiz');
         const quizzes = allDocs.filter((doc: any) => 
           doc && doc.type === 'quiz' && doc.moduleId === module._id);
-        module.quizzes = quizzes.map((quiz: any) => ({
-          _id: quiz._id,
-          title: quiz.title,
-          description: quiz.description,
-          totalPoints: quiz.totalPoints,
-          duration: quiz.duration,  // ✅ INCLUDE DURATION (TIME LIMIT)
-          dueDate: quiz.dueDate,  // ✅ INCLUDE DUE DATE
-          isPublished: quiz.isPublished,
-          isActive: quiz.isActive,
-          questions: quiz.questions || []  // ✅ INCLUDE QUIZ QUESTIONS
-        }));
+        
+        // Always populate quizzes from database to ensure proper _id fields
+        module.quizzes = quizzes.map((quiz: any) => {
+          const quizObj = {
+            _id: quiz._id,
+            title: quiz.title,
+            description: quiz.description,
+            totalPoints: quiz.totalPoints,
+            duration: quiz.duration,  // ✅ INCLUDE DURATION (TIME LIMIT)
+            dueDate: quiz.dueDate,  // ✅ INCLUDE DUE DATE
+            isPublished: quiz.status === 'published',  // ✅ FIX: Use status field
+            isActive: quiz.status === 'published',  // ✅ FIX: Use status field
+            questions: quiz.questions || [],  // ✅ INCLUDE QUIZ QUESTIONS
+            status: quiz.status,  // ✅ INCLUDE STATUS FIELD
+            instructorId: quiz.instructorId,  // ✅ INCLUDE INSTRUCTOR ID
+            courseId: quiz.courseId  // ✅ INCLUDE COURSE ID
+          };
+          
+          // Debug logging for each quiz
+          console.log(`🔍 Quiz "${quiz.title}" - ID: ${quiz._id || 'MISSING!'} - Questions: ${quiz.questions?.length || 0}`);
+          
+          return quizObj;
+        });
+        console.log('🔍 Populated quizzes from database:', module.quizzes.length, 'quizzes');
         
         // Populate discussions
+        const allDiscussions = allDocs.filter((doc: any) => doc && doc.type === 'discussion');
         const discussions = allDocs.filter((doc: any) => 
           doc && doc.type === 'discussion' && doc.moduleId === module._id);
+        
         module.discussions = discussions.map((discussion: any) => ({
           _id: discussion._id,
           title: discussion.title,
@@ -3898,12 +4473,13 @@ router.get('/submissions/:submissionId/download', authenticateToken, authorizeRo
     const fileStream = fs.createReadStream(filePath);
     fileStream.pipe(res);
 
-  } catch (error: any) {
-    console.error('❌ Error viewing submission file:', error);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('❌ Error viewing submission file:', errorMessage);
     res.status(500).json({
       success: false,
       message: 'Failed to view file',
-      error: error.message
+      error: errorMessage
     });
   }
 }));
@@ -4153,7 +4729,7 @@ router.post('/:courseId/quiz/:quizId/submit', authenticateToken, authorizeRoles(
 
   // Create a quiz session record
   const sessionDoc = {
-    _id: `quiz_session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    _id: `quiz-session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     type: 'quiz_session',
     userId,
     quizId,
@@ -4226,8 +4802,9 @@ router.post('/:courseId/quiz/:quizId/submit', authenticateToken, authorizeRoles(
         }
       }
     }
-  } catch (progressError: any) {
-    console.error('⚠️ Failed to update course progress:', progressError.message);
+  } catch (progressError: unknown) {
+    const errorMessage = progressError instanceof Error ? progressError.message : 'Unknown error';
+    console.error('⚠️ Failed to update course progress:', errorMessage);
   }
 
   res.json({
@@ -4242,5 +4819,8 @@ router.post('/:courseId/quiz/:quizId/submit', authenticateToken, authorizeRoles(
     }
   });
 }));
+
+// Course-based quiz submission (fallback for when quiz session is not available)
+// REMOVED: Duplicate quiz submit endpoint - keeping only the first one above
 
 export default router;

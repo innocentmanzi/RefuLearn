@@ -47,7 +47,9 @@ const AssessmentInfo = styled.div`
 `;
 
 const CourseContentPage = () => {
-  const { id } = useParams();
+  console.log('🎬 CourseContentPage component starting...');
+  
+  const { courseId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
   const [course, setCourse] = useState(location.state);
@@ -61,16 +63,57 @@ const CourseContentPage = () => {
   const [selectedAssessment, setSelectedAssessment] = useState(null);
   const [isEnrolled, setIsEnrolled] = useState(false);
 
+  console.log('🎬 CourseContentPage component rendered with courseId:', courseId);
+  console.log('🎬 Location state:', location.state);
+  console.log('🎬 URL params:', { courseId });
+
+  // Helper function to fetch offline data
+  const fetchOfflineData = async () => {
+    try {
+      const course = await offlineIntegrationService.getCourseData(courseId);
+      const modules = await offlineIntegrationService.getModulesData(courseId) || [];
+      const assessments = await offlineIntegrationService.getAssessmentsData(courseId) || [];
+      const progress = await offlineIntegrationService.getProgressData(courseId) || 0;
+      const enrollment = await offlineIntegrationService.getEnrollmentData(courseId) || false;
+      const started = true; // Allow started state in offline mode
+      
+      console.log('📱 Offline data loaded for course:', courseId, {
+        course: !!course,
+        modules: modules.length,
+        assessments: assessments.length,
+        progress: progress,
+        enrollment: enrollment,
+        started: started
+      });
+      
+      return { course, modules, assessments, progress, enrollment, started };
+    } catch (error) {
+      console.error('❌ Failed to load offline data:', error);
+      return { course: null, modules: [], assessments: [], progress: 0, enrollment: false, started: true };
+    }
+  };
+
   useEffect(() => {
     const fetchCourseData = async () => {
       try {
         setLoading(true);
-        console.log('🚀 CourseContentPage: Starting to fetch course data for ID:', id);
+        setError('');
+        console.log('🚀 CourseContentPage: Starting to fetch course data for courseId:', courseId);
         console.log('📊 Location state course:', course);
+        console.log('🔍 Current URL:', window.location.href);
+        console.log('🔍 Course ID from params:', courseId);
+        
         const token = localStorage.getItem('token');
         const isOnline = navigator.onLine;
         console.log('🔑 Token exists:', !!token);
         console.log('🌐 Network status:', isOnline ? 'online' : 'offline');
+
+        if (!courseId) {
+          console.error('❌ No course ID provided');
+          setError('No course ID provided');
+          setLoading(false);
+          return;
+        }
 
         let courseData = course;
         let modulesData = [];
@@ -79,143 +122,179 @@ const CourseContentPage = () => {
         let enrollmentData = false;
         let startedData = false;
 
-        if (isOnline) {
-          try {
-            // Try online API calls first (preserving existing behavior)
-            console.log('🌐 Online mode: Fetching course data from API...');
-            
-            // Fetch course details if not provided in location state
-            if (!courseData && id) {
-              console.log('🔍 Fetching course details for ID:', id);
-              const courseResponse = await fetch(`/api/courses/${id}`, {
+        // Add timeout to prevent infinite loading
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Request timeout')), 10000); // 10 second timeout
+        });
+
+        const fetchPromise = (async () => {
+          if (isOnline) {
+            try {
+              // Try online API calls first (preserving existing behavior)
+              console.log('🌐 Online mode: Fetching course data from API...');
+              
+              // Test the course API endpoint first
+              console.log('🧪 Testing course API endpoint...');
+              const testResponse = await fetch(`/api/courses/${courseId}`, {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+              console.log('🧪 Test response status:', testResponse.status);
+              console.log('🧪 Test response ok:', testResponse.ok);
+              
+              if (!testResponse.ok) {
+                const testError = await testResponse.text();
+                console.error('🧪 Test failed:', testError);
+                throw new Error(`Course API test failed: ${testResponse.status} - ${testError}`);
+              }
+              
+              // Fetch course details if not provided in location state
+              if (!courseData && courseId) {
+                console.log('🔍 Using test response data for course details');
+                const courseApiData = await testResponse.json();
+                console.log('✅ Course data received:', courseApiData);
+                courseData = courseApiData.data?.course;
+                console.log('✅ Course object:', courseData);
+                
+                // Store course data for offline use
+                await offlineIntegrationService.storeCourseData(courseId, courseData);
+              }
+
+              // Fetch course modules using courseId path parameter instead of query parameter
+              console.log('🧩 Fetching modules for course ID:', courseId);
+              const modulesUrl = `/api/courses/modules?course=${courseId}`;
+              console.log('🔍 Modules API URL:', modulesUrl);
+              
+              const modulesResponse = await fetch(modulesUrl, {
                 headers: {
                   'Authorization': `Bearer ${token}`,
                   'Content-Type': 'application/json'
                 }
               });
 
-              if (courseResponse.ok) {
-                const courseApiData = await courseResponse.json();
-                console.log('✅ Course data received:', courseApiData.data.course);
-                courseData = courseApiData.data.course;
-                
-                // Store course data for offline use
-                await offlineIntegrationService.storeCourseData(id, courseData);
+              console.log('📊 Modules response status:', modulesResponse.status);
+
+              if (modulesResponse.ok) {
+                const modulesApiData = await modulesResponse.json();
+                console.log('✅ Modules data received:', modulesApiData);
+                modulesData = modulesApiData.data?.modules || [];
               } else {
-                const courseError = await courseResponse.text();
-                console.error('❌ Failed to fetch course details:', {
-                  status: courseResponse.status,
-                  error: courseError
+                const modulesError = await modulesResponse.text();
+                console.log('⚠️ Modules fetch failed:', {
+                  status: modulesResponse.status,
+                  error: modulesError
                 });
-                throw new Error(`Failed to load course details: ${courseResponse.status} - ${courseError}`);
+                modulesData = []; // Set empty array instead of leaving undefined
               }
+
+              // Fetch course assessments
+              console.log('📝 Fetching assessments for course ID:', courseId);
+              const assessmentsUrl = `/api/courses/${courseId}/assessments`;
+              console.log('🔍 Assessments API URL:', assessmentsUrl);
+              
+              const assessmentsResponse = await fetch(assessmentsUrl, {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+
+              console.log('📊 Assessments response status:', assessmentsResponse.status);
+
+              if (assessmentsResponse.ok) {
+                const assessmentsApiData = await assessmentsResponse.json();
+                console.log('✅ Assessments data received:', assessmentsApiData);
+                assessmentsData = assessmentsApiData.data?.assessments || [];
+              } else {
+                const assessmentsError = await assessmentsResponse.text();
+                console.log('⚠️ Assessments fetch failed:', {
+                  status: assessmentsResponse.status,
+                  error: assessmentsError
+                });
+                assessmentsData = []; // Set empty array instead of leaving undefined
+              }
+
+              // Check if user is enrolled first
+              console.log('🔍 Checking enrollment for course ID:', courseId);
+              const enrollmentUrl = `/api/courses/enrolled/courses/${courseId}`;
+              console.log('🔍 Enrollment API URL:', enrollmentUrl);
+              
+              const enrollmentResponse = await fetch(enrollmentUrl, {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+
+              console.log('📊 Enrollment response status:', enrollmentResponse.status);
+              
+              if (enrollmentResponse.ok) {
+                const enrollmentApiData = await enrollmentResponse.json();
+                console.log('✅ Enrollment check passed:', enrollmentApiData);
+                enrollmentData = true;
+                
+                // User is enrolled, try to fetch progress
+                console.log('📈 Fetching user progress...');
+                const progressUrl = `/api/courses/${courseId}/progress`;
+                console.log('🔍 Progress API URL:', progressUrl);
+                
+                const progressResponse = await fetch(progressUrl, {
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                  }
+                });
+
+                console.log('📊 Progress response status:', progressResponse.status);
+                
+                if (progressResponse.ok) {
+                  const progressApiData = await progressResponse.json();
+                  console.log('✅ Progress data received:', progressApiData);
+                  progressData = progressApiData.data?.progressPercentage || 0;
+                  startedData = true;
+                } else {
+                  const progressError = await progressResponse.text();
+                  console.log('⚠️ Progress fetch failed:', {
+                    status: progressResponse.status,
+                    error: progressError
+                  });
+                  // No progress found, but user is enrolled - start with 0% progress
+                  console.log('⚠️ Starting with 0% progress');
+                  progressData = 0;
+                  startedData = true;
+                }
+              } else {
+                const enrollmentError = await enrollmentResponse.text();
+                console.log('❌ Enrollment check failed:', {
+                  status: enrollmentResponse.status,
+                  error: enrollmentError
+                });
+                
+                // User not enrolled, but still allow access to show course content
+                // They can still view modules and assessments but won't track progress
+                console.log('⚠️ User not enrolled, allowing view-only access');
+                enrollmentData = false;
+                progressData = 0;
+                startedData = true;
+              }
+
+            } catch (onlineError) {
+              console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
+              
+              // Fall back to offline data if online fails
+              const offlineData = await fetchOfflineData();
+              courseData = offlineData.course || courseData;
+              modulesData = offlineData.modules;
+              assessmentsData = offlineData.assessments;
+              progressData = offlineData.progress;
+              enrollmentData = offlineData.enrollment;
+              startedData = offlineData.started;
             }
-
-        // Fetch course modules using courseId path parameter instead of query parameter
-        console.log('🧩 Fetching modules for course ID:', id);
-        const modulesResponse = await fetch(`/api/courses/${id}/modules`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (modulesResponse.ok) {
-          const modulesData = await modulesResponse.json();
-          console.log('✅ Modules data received:', modulesData.data.modules);
-          setModules(modulesData.data.modules || []);
-        } else {
-          const modulesError = await modulesResponse.text();
-          console.log('⚠️ Modules fetch failed:', {
-            status: modulesResponse.status,
-            error: modulesError
-          });
-          setModules([]); // Set empty array instead of leaving undefined
-        }
-
-        // Fetch course assessments
-        console.log('📝 Fetching assessments for course ID:', id);
-        const assessmentsResponse = await fetch(`/api/courses/${id}/assessments`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (assessmentsResponse.ok) {
-          const assessmentsData = await assessmentsResponse.json();
-          console.log('✅ Assessments data received:', assessmentsData.data.assessments);
-          setAssessments(assessmentsData.data.assessments || []);
-        } else {
-          const assessmentsError = await assessmentsResponse.text();
-          console.log('⚠️ Assessments fetch failed:', {
-            status: assessmentsResponse.status,
-            error: assessmentsError
-          });
-          setAssessments([]); // Set empty array instead of leaving undefined
-        }
-
-        // Check if user is enrolled first
-        console.log('🔍 Checking enrollment for course ID:', id);
-        const enrollmentResponse = await fetch(`/api/courses/enrolled/courses/${id}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        console.log('📊 Enrollment response status:', enrollmentResponse.status);
-        
-        if (enrollmentResponse.ok) {
-          const enrollmentData = await enrollmentResponse.json();
-          console.log('✅ Enrollment check passed:', enrollmentData);
-          setIsEnrolled(true);
-          
-          // User is enrolled, try to fetch progress
-          console.log('📈 Fetching user progress...');
-          const progressResponse = await fetch(`/api/courses/${id}/progress`, {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
-          });
-
-          console.log('📊 Progress response status:', progressResponse.status);
-          
-          if (progressResponse.ok) {
-            const progressData = await progressResponse.json();
-            console.log('✅ Progress data received:', progressData);
-            setProgress(progressData.data.progressPercentage || 0);
-            setStarted(true);
           } else {
-            const progressError = await progressResponse.text();
-            console.log('⚠️ Progress fetch failed:', {
-              status: progressResponse.status,
-              error: progressError
-            });
-            // No progress found, but user is enrolled - start with 0% progress
-            console.log('⚠️ Starting with 0% progress');
-            setProgress(0);
-            setStarted(true);
-          }
-        } else {
-          const enrollmentError = await enrollmentResponse.text();
-          console.log('❌ Enrollment check failed:', {
-            status: enrollmentResponse.status,
-            error: enrollmentError
-          });
-          
-          // User not enrolled, but still allow access to show course content
-          // They can still view modules and assessments but won't track progress
-          console.log('⚠️ User not enrolled, allowing view-only access');
-          setIsEnrolled(false);
-          setProgress(0);
-          setStarted(true);
-        }
-
-          } catch (onlineError) {
-            console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
-            // Fall back to offline data if online fails
+            // Offline mode: use offline services
+            console.log('📴 Offline mode: Using offline data...');
             const offlineData = await fetchOfflineData();
             courseData = offlineData.course || courseData;
             modulesData = offlineData.modules;
@@ -224,70 +303,67 @@ const CourseContentPage = () => {
             enrollmentData = offlineData.enrollment;
             startedData = offlineData.started;
           }
-        } else {
-          // Offline mode: use offline services
-          console.log('📴 Offline mode: Using offline data...');
-          const offlineData = await fetchOfflineData();
-          courseData = offlineData.course || courseData;
-          modulesData = offlineData.modules;
-          assessmentsData = offlineData.assessments;
-          progressData = offlineData.progress;
-          enrollmentData = offlineData.enrollment;
-          startedData = offlineData.started;
-        }
 
-        // Update state with fetched data
-        setCourse(courseData);
-        setModules(modulesData);
-        setAssessments(assessmentsData);
-        setProgress(progressData);
-        setIsEnrolled(enrollmentData);
-        setStarted(startedData);
+          // Update state with fetched data
+          console.log('📊 Setting course data:', {
+            course: !!courseData,
+            modules: modulesData.length,
+            assessments: assessmentsData.length,
+            progress: progressData,
+            enrollment: enrollmentData,
+            started: startedData
+          });
+          
+          setCourse(courseData);
+          setModules(modulesData);
+          setAssessments(assessmentsData);
+          setProgress(progressData);
+          setIsEnrolled(enrollmentData);
+          setStarted(startedData);
+        })();
+
+        // Race between fetch and timeout
+        await Promise.race([fetchPromise, timeoutPromise]);
 
       } catch (err) {
         console.error('❌ Error fetching course data:', err);
         console.error('❌ Error details:', {
           message: err.message,
           stack: err.stack,
-          courseId: id
+          courseId: courseId
         });
-        setError(`Failed to load course content: ${err.message || 'Unknown error'}`);
+        
+        // If it's a timeout or network error, try to load offline data
+        if (err.message.includes('timeout') || err.message.includes('fetch')) {
+          console.log('🔄 Attempting to load offline data due to timeout/network error...');
+          try {
+            const offlineData = await fetchOfflineData();
+            setCourse(offlineData.course);
+            setModules(offlineData.modules);
+            setAssessments(offlineData.assessments);
+            setProgress(offlineData.progress);
+            setIsEnrolled(offlineData.enrollment);
+            setStarted(offlineData.started);
+          } catch (offlineError) {
+            console.error('❌ Offline data also failed:', offlineError);
+            setError(`Failed to load course content: ${err.message || 'Unknown error'}`);
+          }
+        } else {
+          setError(`Failed to load course content: ${err.message || 'Unknown error'}`);
+        }
       } finally {
         console.log('✅ Course data fetching completed (success or failure)');
         setLoading(false);
       }
     };
 
-    // Helper function to fetch offline data
-    const fetchOfflineData = async () => {
-      try {
-        const course = await offlineIntegrationService.getCourseData(id);
-        const modules = await offlineIntegrationService.getModulesData(id) || [];
-        const assessments = await offlineIntegrationService.getAssessmentsData(id) || [];
-        const progress = await offlineIntegrationService.getProgressData(id) || 0;
-        const enrollment = await offlineIntegrationService.getEnrollmentData(id) || false;
-        const started = true; // Allow started state in offline mode
-        
-        console.log('📱 Offline data loaded for course:', id, {
-          course: !!course,
-          modules: modules.length,
-          assessments: assessments.length,
-          progress: progress,
-          enrollment: enrollment,
-          started: started
-        });
-        
-        return { course, modules, assessments, progress, enrollment, started };
-      } catch (error) {
-        console.error('❌ Failed to load offline data:', error);
-        return { course: null, modules: [], assessments: [], progress: 0, enrollment: false, started: true };
-      }
-    };
-
-    if (id) {
+    if (courseId) {
+      console.log('🎯 useEffect triggered with course ID:', courseId);
       fetchCourseData();
+    } else {
+      console.log('⚠️ useEffect triggered but no course ID provided');
     }
-  }, [id, course, navigate]);
+  }, [courseId]);
 
   const handleModuleComplete = async (moduleId) => {
     try {
@@ -299,7 +375,7 @@ const CourseContentPage = () => {
         try {
           // Try online update first (preserving existing behavior)
           console.log('🌐 Online progress update for module:', moduleId);
-          const response = await fetch(`/api/courses/${id}/progress`, {
+          const response = await fetch(`/api/courses/${courseId}/progress`, {
             method: 'PUT',
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -320,14 +396,14 @@ const CourseContentPage = () => {
         } catch (onlineError) {
           console.warn('⚠️ Online progress update failed, using offline:', onlineError);
           // Fall back to offline update
-          await offlineIntegrationService.updateModuleProgress(id, moduleId, true);
+          await offlineIntegrationService.updateModuleProgress(courseId, moduleId, true);
           updateSuccess = true;
           console.log('✅ Offline progress update successful');
         }
       } else {
         // Offline progress update
         console.log('📴 Offline progress update for module:', moduleId);
-        await offlineIntegrationService.updateModuleProgress(id, moduleId, true);
+        await offlineIntegrationService.updateModuleProgress(courseId, moduleId, true);
         updateSuccess = true;
         console.log('✅ Offline progress update successful');
       }
@@ -344,7 +420,7 @@ const CourseContentPage = () => {
         ));
 
         // Store updated progress for offline use
-        await offlineIntegrationService.storeProgressData(id, newProgress);
+        await offlineIntegrationService.storeProgressData(courseId, newProgress);
       }
     } catch (err) {
       console.error('Error updating progress:', err);
@@ -364,7 +440,7 @@ const CourseContentPage = () => {
   const handleEnroll = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/courses/${id}/enroll`, {
+      const response = await fetch(`/api/courses/${courseId}/enroll`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -391,7 +467,26 @@ const CourseContentPage = () => {
     return (
       <Container>
         <div style={{ textAlign: 'center', padding: '2rem' }}>
-          <div>Loading course content...</div>
+          <div style={{ fontSize: '1.2rem', marginBottom: '1rem', color: '#007BFF' }}>
+            Loading course content...
+          </div>
+          <div style={{ fontSize: '0.9rem', color: '#666', marginBottom: '1rem' }}>
+            Please wait while we fetch your course information
+          </div>
+          <button 
+            onClick={() => window.location.reload()} 
+            style={{ 
+              background: '#007BFF', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: '8px', 
+              padding: '0.5rem 1rem',
+              cursor: 'pointer',
+              fontSize: '0.9rem'
+            }}
+          >
+            Retry
+          </button>
         </div>
       </Container>
     );
@@ -485,7 +580,7 @@ const CourseContentPage = () => {
       
       <Section>
         <h1>{course.title}</h1>
-        <div style={{ color: '#555', marginBottom: 0 }}>{course.description}</div>
+        <div style={{ color: '#555', marginBottom: 0 }}>{course.description || course.overview || `Learn ${course.category || 'new skills'} in this comprehensive course designed for ${course.level || 'beginner'} level students.`}</div>
         <div style={{ marginTop: '1rem', color: '#666' }}>
           Progress: {Math.round(progress)}% {!isEnrolled && '(Preview Mode)'}
         </div>

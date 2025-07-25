@@ -166,11 +166,18 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
   const [assessmentData, setAssessmentData] = useState({
     title: '',
     description: '',
+    courseId: '',
+    moduleId: '',
     dueDate: '',
     totalPoints: 0,
     questions: [],
     timeLimit: 30
   });
+
+  const [courses, setCourses] = useState([]);
+  const [modules, setModules] = useState([]);
+  const [loadingCourses, setLoadingCourses] = useState(false);
+  const [loadingModules, setLoadingModules] = useState(false);
 
   const [currentQuestion, setCurrentQuestion] = useState({
     question: '',
@@ -192,6 +199,8 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
         setAssessmentData({
           title: assessment.title || '',
           description: assessment.description || '',
+          courseId: assessment.courseId || assessment.course || '',
+          moduleId: assessment.moduleId || '',
           dueDate: assessment.dueDate ? new Date(assessment.dueDate).toISOString().slice(0, 16) : '',
           totalPoints: assessment.totalPoints || 0,
           questions: assessment.questions || [],
@@ -202,6 +211,8 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
         setAssessmentData({
           title: '',
           description: '',
+          courseId: '',
+          moduleId: '',
           dueDate: '',
           totalPoints: 0,
           questions: [],
@@ -223,6 +234,71 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
       setEditingQuestionIndex(null);
     }
   }, [isOpen, assessment]);
+
+  // Fetch courses
+  const fetchCourses = async () => {
+    try {
+      setLoadingCourses(true);
+      const response = await fetch('/api/instructor/courses', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setCourses(data.data?.courses || []);
+      }
+    } catch (error) {
+      console.error('Error fetching courses:', error);
+    } finally {
+      setLoadingCourses(false);
+    }
+  };
+
+  // Fetch modules for a course
+  const fetchModules = async (courseId) => {
+    if (!courseId) {
+      setModules([]);
+      return;
+    }
+
+    try {
+      setLoadingModules(true);
+      const response = await fetch(`/api/courses/${courseId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setModules(data.data?.course?.modules || []);
+      }
+    } catch (error) {
+      console.error('Error fetching modules:', error);
+    } finally {
+      setLoadingModules(false);
+    }
+  };
+
+  // Load courses when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      fetchCourses();
+    }
+  }, [isOpen]);
+
+  // Load modules when course changes
+  useEffect(() => {
+    if (assessmentData.courseId) {
+      fetchModules(assessmentData.courseId);
+    } else {
+      setModules([]);
+    }
+  }, [assessmentData.courseId]);
 
   // Add validation function for quiz questions
   const validateQuizQuestion = (question) => {
@@ -474,7 +550,7 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
           `${isQuiz ? 'Quiz' : 'Assessment'} updated successfully!` : 
           `${isQuiz ? 'Quiz' : 'Assessment'} created successfully!`;
         
-        alert(message);
+        // Success message - no alert needed
       }
       
       // Close the modal
@@ -515,6 +591,38 @@ export default function AssessmentCreator({ isOpen, onClose, onSave, assessment 
             placeholder={`Enter ${isQuiz ? 'quiz' : 'assessment'} description`}
             rows="3"
           />
+
+        <Label>Course</Label>
+        <Select
+          value={assessmentData.courseId}
+          onChange={e => setAssessmentData(prev => ({ 
+            ...prev, 
+            courseId: e.target.value,
+            moduleId: '' // Reset module when course changes
+          }))}
+          disabled={loadingCourses}
+        >
+          <option value="">Select a course</option>
+          {courses.map(course => (
+            <option key={course._id} value={course._id}>
+              {course.title}
+            </option>
+          ))}
+        </Select>
+
+        <Label>Module</Label>
+        <Select
+          value={assessmentData.moduleId}
+          onChange={e => setAssessmentData(prev => ({ ...prev, moduleId: e.target.value }))}
+          disabled={!assessmentData.courseId || loadingModules}
+        >
+          <option value="">Select a module</option>
+          {modules.map(module => (
+            <option key={module._id} value={module._id}>
+              {module.title}
+            </option>
+          ))}
+        </Select>
 
 
 

@@ -478,9 +478,12 @@ class OfflineIntegrationService {
       }
       
       if (courseData) {
-        // Store in a course-specific cache for quick access
-        const courseKey = `course_${courseId}`;
-        await this.dataCache.storeData(courseKey, courseData);
+        // Store in the courseDataStore instead of dynamic object stores
+        await this.dataCache.storeData('courseDataStore', {
+          courseId: courseId,
+          data: courseData,
+          timestamp: Date.now()
+        });
         console.log('✅ Course data stored for offline access:', courseId);
       }
       
@@ -488,6 +491,59 @@ class OfflineIntegrationService {
     } catch (error) {
       console.error('❌ Failed to store course data:', error);
       return { success: false, error: error.message };
+    }
+  }
+
+  // Store content item for offline access
+  async storeContentItem(courseId, moduleId, itemIndex, contentItem) {
+    try {
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+      
+      if (contentItem) {
+        // Store in the contentItemStore
+        await this.dataCache.storeData('contentItemStore', {
+          courseId: courseId,
+          moduleId: moduleId,
+          itemIndex: itemIndex,
+          contentItem: contentItem,
+          timestamp: Date.now()
+        });
+        console.log('✅ Content item stored for offline access:', { courseId, moduleId, itemIndex });
+      }
+      
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Failed to store content item:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Get content item from offline storage
+  async getContentItem(courseId, moduleId, itemIndex) {
+    try {
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+      
+      const contentItems = await this.dataCache.getData('contentItemStore') || [];
+      const contentItem = contentItems.find(item => 
+        item.courseId === courseId && 
+        item.moduleId === moduleId && 
+        item.itemIndex === itemIndex
+      );
+      
+      if (contentItem) {
+        console.log('✅ Content item retrieved from offline storage');
+        return contentItem.contentItem;
+      } else {
+        console.log('⚠️ Content item not found in offline storage');
+        return null;
+      }
+    } catch (error) {
+      console.error('❌ Failed to retrieve content item:', error);
+      return null;
     }
   }
 
@@ -637,6 +693,74 @@ class OfflineIntegrationService {
     }
   }
 
+  // Assessment-related functions
+  async getAssessmentData(assessmentId) {
+    try {
+      const assessmentData = await this.dataCache.get(`assessment_${assessmentId}`);
+      console.log('📋 Retrieved assessment data from cache:', !!assessmentData);
+      return assessmentData;
+    } catch (error) {
+      console.error('❌ Failed to get assessment data:', error);
+      return null;
+    }
+  }
+
+  async storeAssessmentData(assessmentId, assessmentData) {
+    try {
+      await this.dataCache.set(`assessment_${assessmentId}`, assessmentData);
+      console.log('✅ Assessment data stored for offline use');
+    } catch (error) {
+      console.error('❌ Failed to store assessment data:', error);
+    }
+  }
+
+  async getAssessment(assessmentId) {
+    return this.getAssessmentData(assessmentId);
+  }
+
+  async storeAssessment(assessmentId, assessmentData) {
+    return this.storeAssessmentData(assessmentId, assessmentData);
+  }
+
+  async submitAssessmentOffline(assessmentId, submissionData) {
+    try {
+      // Store submission for later sync
+      const submissionKey = `assessment_submission_${assessmentId}_${Date.now()}`;
+      await this.dataCache.set(submissionKey, {
+        assessmentId,
+        submissionData,
+        submittedAt: new Date().toISOString(),
+        status: 'pending'
+      });
+      
+      console.log('✅ Assessment submission queued for offline sync');
+      return { success: true, message: 'Assessment submitted offline' };
+    } catch (error) {
+      console.error('❌ Failed to submit assessment offline:', error);
+      return { success: false, message: 'Failed to submit assessment offline' };
+    }
+  }
+
+  async storeAssessmentSubmission(assessmentId, submissionData) {
+    try {
+      await this.dataCache.set(`assessment_submission_${assessmentId}`, submissionData);
+      console.log('✅ Assessment submission stored for offline use');
+    } catch (error) {
+      console.error('❌ Failed to store assessment submission:', error);
+    }
+  }
+
+  async getAssessmentSubmission(assessmentId) {
+    try {
+      const submissionData = await this.dataCache.get(`assessment_submission_${assessmentId}`);
+      console.log('📋 Retrieved assessment submission from cache:', !!submissionData);
+      return submissionData;
+    } catch (error) {
+      console.error('❌ Failed to get assessment submission:', error);
+      return null;
+    }
+  }
+
   async storeJobApplication(jobId, applicationData) {
     try {
       // Add to sync queue for later submission
@@ -652,16 +776,149 @@ class OfflineIntegrationService {
     }
   }
 
+  // Employer Dashboard methods
+  async getEmployerDashboard() {
+    try {
+      console.log('🏢 Getting employer dashboard data from cache...');
+      const dashboardData = await this.dataCache.getData('employerDashboard');
+      return dashboardData || {
+        overview: {
+          jobs: { total: 0, active: 0, pending: 0 },
+          applications: { total: 0, pending: 0, approved: 0, rejected: 0 },
+          scholarships: { total: 0, active: 0, pending: 0 }
+        },
+        recentApplications: [],
+        recentJobs: [],
+        recentActivity: []
+      };
+    } catch (error) {
+      console.error('❌ Failed to get employer dashboard:', error);
+      return {
+        overview: {
+          jobs: { total: 0, active: 0, pending: 0 },
+          applications: { total: 0, pending: 0, approved: 0, rejected: 0 },
+          scholarships: { total: 0, active: 0, pending: 0 }
+        },
+        recentApplications: [],
+        recentJobs: [],
+        recentActivity: []
+      };
+    }
+  }
+
+  async storeEmployerDashboard(dashboardData) {
+    try {
+      console.log('💾 Storing employer dashboard data:', dashboardData);
+      await this.dataCache.storeData('employerDashboard', dashboardData);
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Failed to store employer dashboard:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Employer Jobs methods
+  async getEmployerJobs() {
+    try {
+      console.log('🏢 Getting employer jobs from cache...');
+      const jobs = await this.dataCache.getData('employerJobs') || [];
+      return jobs;
+    } catch (error) {
+      console.error('❌ Failed to get employer jobs:', error);
+      return [];
+    }
+  }
+
+  async storeEmployerJobs(jobs) {
+    try {
+      console.log('💾 Storing employer jobs:', jobs.length);
+      await this.dataCache.storeData('employerJobs', jobs);
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Failed to store employer jobs:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Employer Scholarships methods
+  async getEmployerScholarships() {
+    try {
+      console.log('🏢 Getting employer scholarships from cache...');
+      const scholarships = await this.dataCache.getData('employerScholarships') || [];
+      return scholarships;
+    } catch (error) {
+      console.error('❌ Failed to get employer scholarships:', error);
+      return [];
+    }
+  }
+
+  async storeEmployerScholarships(scholarships) {
+    try {
+      console.log('💾 Storing employer scholarships:', scholarships.length);
+      await this.dataCache.storeData('employerScholarships', scholarships);
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Failed to store employer scholarships:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Employer Applications methods
+  async getEmployerApplications() {
+    try {
+      console.log('🏢 Getting employer applications from cache...');
+      const applications = await this.dataCache.getData('employerApplications') || [];
+      return applications;
+    } catch (error) {
+      console.error('❌ Failed to get employer applications:', error);
+      return [];
+    }
+  }
+
+  async storeEmployerApplications(applications) {
+    try {
+      console.log('💾 Storing employer applications:', applications.length);
+      await this.dataCache.storeData('employerApplications', applications);
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Failed to store employer applications:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  async queueEmployerJobAction(action, jobData) {
+    try {
+      console.log('📝 Queueing employer job action:', action, jobData);
+      
+      const queueItem = {
+        id: Date.now().toString(),
+        type: 'employerJob',
+        action: action,
+        data: jobData,
+        timestamp: new Date().toISOString(),
+        status: 'pending'
+      };
+      
+      await this.addToSyncQueue('employerJob', queueItem);
+      console.log('✅ Employer job action queued for sync');
+      
+      return { success: true, queueId: queueItem.id };
+    } catch (error) {
+      console.error('❌ Failed to queue employer job action:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
   async addToSyncQueue(type, data) {
     try {
-      const syncQueue = await this.dataCache.get('syncQueue') || [];
+      const syncQueue = await this.dataCache.getData('syncQueue') || [];
       syncQueue.push({
         id: Date.now() + Math.random(),
         type,
         data,
         createdAt: new Date().toISOString()
       });
-      await this.dataCache.set('syncQueue', syncQueue);
+      await this.dataCache.storeData('syncQueue', syncQueue);
       console.log('✅ Added to sync queue:', type);
     } catch (error) {
       console.error('❌ Failed to add to sync queue:', error);
@@ -671,7 +928,7 @@ class OfflineIntegrationService {
 
   async processSyncQueue() {
     try {
-      const syncQueue = await this.dataCache.get('syncQueue') || [];
+      const syncQueue = await this.dataCache.getData('syncQueue') || [];
       console.log('🔄 Processing sync queue:', syncQueue.length, 'items');
       
       if (!navigator.onLine || syncQueue.length === 0) {
@@ -684,7 +941,7 @@ class OfflineIntegrationService {
           await this.processSyncItem(item);
           // Remove processed item from queue
           const updatedQueue = syncQueue.filter(queueItem => queueItem.id !== item.id);
-          await this.dataCache.set('syncQueue', updatedQueue);
+          await this.dataCache.storeData('syncQueue', updatedQueue);
         } catch (error) {
           console.error('❌ Failed to process sync item:', item, error);
         }
@@ -716,6 +973,190 @@ class OfflineIntegrationService {
         
       default:
         console.warn('Unknown sync item type:', item.type);
+    }
+  }
+
+  // Update module progress
+  async updateModuleProgress(courseId, moduleId, completed = false) {
+    try {
+      const progressKey = `course_progress_${courseId}`;
+      const progressData = await this.dataCache.getData(progressKey) || {};
+      
+      if (!progressData.modules) {
+        progressData.modules = {};
+      }
+      
+      if (!progressData.modules[moduleId]) {
+        progressData.modules[moduleId] = {};
+      }
+      
+      progressData.modules[moduleId].completed = completed;
+      progressData.modules[moduleId].completedAt = completed ? new Date().toISOString() : null;
+      
+      await this.dataCache.storeData(progressKey, progressData);
+      console.log('📊 Module progress updated:', { courseId, moduleId, completed });
+      
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error updating module progress:', error);
+      throw error;
+    }
+  }
+
+  // Course Discussion Functions
+  async storeCourseDiscussionData(courseId, discussionId, discussionData) {
+    try {
+      const key = `course_discussion_${courseId}_${discussionId}`;
+      await this.dataCache.storeData('discussionData', { key, data: discussionData });
+      console.log('💬 Course discussion data stored:', { courseId, discussionId });
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error storing course discussion data:', error);
+      throw error;
+    }
+  }
+
+  async getCourseDiscussionData(courseId, discussionId) {
+    try {
+      const key = `course_discussion_${courseId}_${discussionId}`;
+      const result = await this.dataCache.getData('discussionData', key);
+      const data = result ? result.data : null;
+      console.log('💬 Course discussion data retrieved:', { courseId, discussionId, found: !!data });
+      return data;
+    } catch (error) {
+      console.error('❌ Error getting course discussion data:', error);
+      return null;
+    }
+  }
+
+  async storeCourseDiscussionReplies(courseId, discussionId, repliesData) {
+    try {
+      const key = `course_discussion_replies_${courseId}_${discussionId}`;
+      await this.dataCache.storeData('discussionData', { key, data: repliesData });
+      console.log('💬 Course discussion replies stored:', { courseId, discussionId, count: repliesData.length });
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error storing course discussion replies:', error);
+      throw error;
+    }
+  }
+
+  async getCourseDiscussionReplies(courseId, discussionId) {
+    try {
+      const key = `course_discussion_replies_${courseId}_${discussionId}`;
+      const result = await this.dataCache.getData('discussionData', key);
+      const data = result ? result.data : [];
+      console.log('💬 Course discussion replies retrieved:', { courseId, discussionId, count: data.length });
+      return data;
+    } catch (error) {
+      console.error('❌ Error getting course discussion replies:', error);
+      return [];
+    }
+  }
+
+  async storeCourseDiscussions(courseId, discussionsData) {
+    try {
+      const key = `course_discussions_${courseId}`;
+      await this.dataCache.storeData('discussionData', { key, data: discussionsData });
+      console.log('💬 Course discussions list stored:', { courseId, count: discussionsData.length });
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error storing course discussions list:', error);
+      throw error;
+    }
+  }
+
+  async getCourseDiscussions(courseId) {
+    try {
+      const key = `course_discussions_${courseId}`;
+      const result = await this.dataCache.getData('discussionData', key);
+      const data = result ? result.data : [];
+      console.log('💬 Course discussions list retrieved:', { courseId, count: data.length });
+      return data;
+    } catch (error) {
+      console.error('❌ Error getting course discussions list:', error);
+      return [];
+    }
+  }
+
+  async submitCourseDiscussionReplyOffline(replyData) {
+    try {
+      const { courseId, discussionId, content, createdAt } = replyData;
+      
+      // Create a new reply object
+      const newReply = {
+        _id: `reply_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        content,
+        createdAt,
+        updatedAt: createdAt,
+        author: this.getCurrentUser(),
+        likes: 0,
+        isOffline: true,
+        pendingSync: true
+      };
+
+      // Get existing replies and add the new one
+      const repliesKey = `course_discussion_replies_${courseId}_${discussionId}`;
+      const existingRepliesResult = await this.dataCache.getData('discussionData', repliesKey);
+      const existingReplies = existingRepliesResult ? existingRepliesResult.data : [];
+      const updatedReplies = [...existingReplies, newReply];
+      
+      // Store updated replies
+      await this.dataCache.storeData('discussionData', { key: repliesKey, data: updatedReplies });
+      
+      // Add to sync queue for when online
+      await this.addToSyncQueue('discussion_reply', {
+        courseId,
+        discussionId,
+        replyData: newReply
+      });
+
+      console.log('💬 Course discussion reply submitted offline:', { courseId, discussionId, replyId: newReply._id });
+      return { success: true, reply: newReply };
+    } catch (error) {
+      console.error('❌ Error submitting course discussion reply offline:', error);
+      throw error;
+    }
+  }
+
+  async likeCourseDiscussionItemOffline(courseId, itemId, isReply = false) {
+    try {
+      const user = this.getCurrentUser();
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
+
+      const likeKey = `discussion_like_${itemId}_${user._id}`;
+      const currentLike = await this.dataCache.getData('discussionLikes', likeKey);
+      
+      if (currentLike) {
+        // Unlike
+        await this.dataCache.removeData('discussionLikes', likeKey);
+        console.log('💬 Discussion item unliked offline:', { courseId, itemId, isReply });
+        return { success: true, liked: false };
+      } else {
+        // Like
+        const likeData = {
+          likeKey: likeKey,
+          itemId,
+          courseId,
+          userId: user._id,
+          isReply,
+          createdAt: new Date().toISOString(),
+          pendingSync: true
+        };
+        
+        await this.dataCache.storeData('discussionLikes', likeData);
+        
+        // Add to sync queue
+        await this.addToSyncQueue('discussion_like', likeData);
+        
+        console.log('💬 Discussion item liked offline:', { courseId, itemId, isReply });
+        return { success: true, liked: true };
+      }
+    } catch (error) {
+      console.error('❌ Error liking course discussion item offline:', error);
+      throw error;
     }
   }
 }

@@ -3,7 +3,7 @@ import styled from 'styled-components';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowBack, Add, Edit, Delete, Forum, Send, Reply } from '@mui/icons-material';
 import { useUser } from '../../contexts/UserContext';
-import offlineIntegrationService from '../../services/offlineIntegrationService';
+
 
 const Container = styled.div`
   padding: 2rem;
@@ -295,48 +295,22 @@ const Discussions = () => {
     try {
       setLoading(true);
       setError('');
+      console.log('🔄 Fetching instructor discussions...');
       
-      const isOnline = navigator.onLine;
-      let discussionsData = [];
-
-      if (isOnline) {
-        try {
-          // Try online API calls first (preserving existing behavior)
-          console.log('🌐 Online mode: Fetching instructor discussions from API...');
-          
-          const response = await fetch('/api/instructor/discussions', {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
-          });
-
-          if (!response.ok) {
-            throw new Error('Failed to fetch discussions');
-          }
-
-          const data = await response.json();
-          discussionsData = data.data?.discussions || [];
-          
-          // Store discussions data for offline use
-          await offlineIntegrationService.storeInstructorDiscussions(discussionsData);
-          console.log('✅ Discussions data stored for offline use');
-        } catch (onlineError) {
-          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
-          
-          // Fall back to offline data if online fails
-          discussionsData = await offlineIntegrationService.getInstructorDiscussions();
-          
-          if (discussionsData.length === 0) {
-            throw onlineError;
-          }
+      const response = await fetch('/api/instructor/discussions', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
-      } else {
-        // Offline mode: use offline services
-        console.log('📴 Offline mode: Using offline discussions data...');
-        discussionsData = await offlineIntegrationService.getInstructorDiscussions();
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch discussions');
       }
 
+      const data = await response.json();
+      const discussionsData = data.data?.discussions || [];
+      console.log('✅ Discussions data received');
       setDiscussions(discussionsData);
     } catch (err) {
       setError(err.message || 'Failed to load discussions');
@@ -375,67 +349,35 @@ const Discussions = () => {
     }
 
     try {
-      const isOnline = navigator.onLine;
+      console.log('🔄 Saving discussion...');
       
-      if (isOnline) {
-        try {
-          console.log('🌐 Online mode: Saving discussion...');
-          
-          const url = editingDiscussion 
-            ? `/api/instructor/discussions/${editingDiscussion._id}`
-            : '/api/instructor/discussions';
-          
-          const method = editingDiscussion ? 'PUT' : 'POST';
+      const url = editingDiscussion 
+        ? `/api/instructor/discussions/${editingDiscussion._id}`
+        : '/api/instructor/discussions';
+      
+      const method = editingDiscussion ? 'PUT' : 'POST';
 
-          const response = await fetch(url, {
-            method,
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({
-              ...formData,
-              courseId: courseId // Add courseId to the request
-            })
-          });
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          ...formData,
+          courseId: courseId // Add courseId to the request
+        })
+      });
 
-          if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || 'Failed to save discussion');
-          }
-
-          setSuccess(editingDiscussion ? 'Discussion updated successfully' : 'Discussion created successfully');
-          fetchDiscussions();
-          closeModal();
-          setTimeout(() => setSuccess(''), 3000);
-        } catch (onlineError) {
-          console.warn('⚠️ Online save failed, queuing for offline sync:', onlineError);
-          
-          // Queue action for offline sync
-          await offlineIntegrationService.queueDiscussionAction({
-            action: editingDiscussion ? 'edit' : 'create',
-            discussionId: editingDiscussion?._id,
-            data: { ...formData, courseId: courseId }
-          });
-          
-          setSuccess(`Discussion ${editingDiscussion ? 'update' : 'creation'} queued for sync when online`);
-          closeModal();
-          setTimeout(() => setSuccess(''), 3000);
-        }
-      } else {
-        // Offline mode: queue action for sync
-        console.log('📴 Offline mode: Queuing discussion action for sync...');
-        
-        await offlineIntegrationService.queueDiscussionAction({
-          action: editingDiscussion ? 'edit' : 'create',
-          discussionId: editingDiscussion?._id,
-          data: { ...formData, courseId: courseId }
-        });
-        
-        setSuccess(`Discussion ${editingDiscussion ? 'update' : 'creation'} queued for sync when online`);
-        closeModal();
-        setTimeout(() => setSuccess(''), 3000);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to save discussion');
       }
+
+      setSuccess(editingDiscussion ? 'Discussion updated successfully' : 'Discussion created successfully');
+      fetchDiscussions();
+      closeModal();
+      setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
       setError(err.message || 'Failed to save discussion');
       setTimeout(() => setError(''), 3000);

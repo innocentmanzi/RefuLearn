@@ -29,6 +29,7 @@ import certificateRoutes from './routes/certificate.routes';
 import scholarshipRoutes from './routes/scholarship.routes';
 import peerLearningRoutes from './routes/peerLearning.routes';
 import quizSessionRoutes from './routes/quiz-session.routes';
+import notificationRoutes from './routes/notification.routes';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
@@ -57,10 +58,12 @@ const io = new Server(server, {
   }
 });
 
-// Rate limiting
+// Rate limiting - more lenient for development
+const isDevelopment = process.env.NODE_ENV !== 'production';
+
 const generalLimiter = rateLimit({
-  windowMs: parseInt(process.env['RATE_LIMIT_WINDOW_MS'] || '900000'), // 15 minutes
-  max: parseInt(process.env['RATE_LIMIT_MAX_REQUESTS'] || '100'), // limit each IP to 100 requests per windowMs
+  windowMs: parseInt(process.env['RATE_LIMIT_WINDOW_MS'] || (isDevelopment ? '60000' : '900000')), // 1 minute in dev, 15 minutes in prod
+  max: parseInt(process.env['RATE_LIMIT_MAX_REQUESTS'] || (isDevelopment ? '1000' : '100')), // 1000 in dev, 100 in prod
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
@@ -68,8 +71,8 @@ const generalLimiter = rateLimit({
 
 // More lenient rate limiter for progress tracking endpoints
 const progressLimiter = rateLimit({
-  windowMs: parseInt(process.env['PROGRESS_RATE_LIMIT_WINDOW_MS'] || '60000'), // 1 minute
-  max: parseInt(process.env['PROGRESS_RATE_LIMIT_MAX_REQUESTS'] || '50'), // 50 requests per minute
+  windowMs: parseInt(process.env['PROGRESS_RATE_LIMIT_WINDOW_MS'] || (isDevelopment ? '60000' : '60000')), // 1 minute
+  max: parseInt(process.env['PROGRESS_RATE_LIMIT_MAX_REQUESTS'] || (isDevelopment ? '500' : '50')), // 500 in dev, 50 in prod
   message: 'Too many progress requests, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
@@ -102,9 +105,13 @@ app.use(cors({
 app.use(compression());
 app.use(morgan('combined', { stream: { write: (message) => logger.info(message.trim()) } }));
 
-// Apply different rate limiters based on path
-app.use('/api/courses/*/progress', progressLimiter); // More lenient for progress endpoints
-app.use(generalLimiter); // General rate limiter for all other endpoints
+// Apply different rate limiters based on path - but skip in development
+if (!isDevelopment) {
+  app.use('/api/courses/*/progress', progressLimiter); // More lenient for progress endpoints
+  app.use(generalLimiter); // General rate limiter for all other endpoints
+} else {
+  console.log('🚧 Development mode: Rate limiting disabled');
+}
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -172,6 +179,7 @@ app.use('/api/certificates', certificateRoutes);
 app.use('/api/scholarships', scholarshipRoutes);
 app.use('/api/peer-learning', peerLearningRoutes);
 app.use('/api/quiz-sessions', authenticateToken, quizSessionRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/', swaggerUi.serve, swaggerUi.setup(apiDocs));
 
 // Socket.IO connection handling
@@ -200,7 +208,7 @@ app.use(errorHandler);
 // Make io available to routes
 app.set('io', io);
 
-const PORT = process.env['PORT'] || 5000;
+const PORT = 5001; // Force port 5001 to avoid conflicts
 
 const startServer = async () => {
   try {
@@ -236,17 +244,33 @@ const startServer = async () => {
   }
 };
 
-// Handle unhandled promise rejections
+// Handle unhandled promise rejections - don't crash in development
 process.on('unhandledRejection', (err: Error) => {
   logger.error('Unhandled Promise Rejection:', err);
+  
+  // In development, log the error but don't crash the server
+  if (isDevelopment) {
+    console.warn('⚠️ Development mode: Server continues despite unhandled rejection');
+    return;
+  }
+  
+  // In production, gracefully shut down
   server.close(() => {
     process.exit(1);
   });
 });
 
-// Handle uncaught exceptions
+// Handle uncaught exceptions - don't crash in development  
 process.on('uncaughtException', (err: Error) => {
   logger.error('Uncaught Exception:', err);
+  
+  // In development, log the error but don't crash the server
+  if (isDevelopment) {
+    console.warn('⚠️ Development mode: Server continues despite uncaught exception');
+    return;
+  }
+  
+  // In production, exit immediately
   process.exit(1);
 });
 

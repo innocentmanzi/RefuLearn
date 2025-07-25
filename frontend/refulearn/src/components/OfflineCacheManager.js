@@ -310,7 +310,7 @@ const OfflineCacheManager = () => {
         
         {showDetails && storageInfo?.databases && (
           <div>
-            {Object.entries(storageInfo.databases).map(([name, info]) => (
+            {Object.entries(storageInfo.databases || {}).map(([name, info]) => (
               <DetailItem key={name}>
                 <DatabaseName>{name}</DatabaseName>
                 <DatabaseStats>

@@ -3,7 +3,7 @@ import styled from 'styled-components';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowBack, Add, Edit, Delete, Group, People, PersonAdd } from '@mui/icons-material';
 import { useUser } from '../../contexts/UserContext';
-import offlineIntegrationService from '../../services/offlineIntegrationService';
+
 
 const Container = styled.div`
   padding: 2rem;
@@ -314,48 +314,22 @@ const Groups = () => {
     try {
       setLoading(true);
       setError('');
+      console.log('🔄 Fetching instructor groups...');
       
-      const isOnline = navigator.onLine;
-      let groupsData = [];
-
-      if (isOnline) {
-        try {
-          // Try online API calls first (preserving existing behavior)
-          console.log('🌐 Online mode: Fetching instructor groups from API...');
-          
-          const response = await fetch('/api/instructor/groups', {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
-          });
-
-          if (!response.ok) {
-            throw new Error('Failed to fetch groups');
-          }
-
-          const data = await response.json();
-          groupsData = data.data?.groups || [];
-          
-          // Store groups data for offline use
-          await offlineIntegrationService.storeInstructorGroups(groupsData);
-          console.log('✅ Groups data stored for offline use');
-        } catch (onlineError) {
-          console.warn('⚠️ Online API failed, falling back to offline data:', onlineError);
-          
-          // Fall back to offline data if online fails
-          groupsData = await offlineIntegrationService.getInstructorGroups();
-          
-          if (groupsData.length === 0) {
-            throw onlineError;
-          }
+      const response = await fetch('/api/instructor/groups', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
-      } else {
-        // Offline mode: use offline services
-        console.log('📴 Offline mode: Using offline groups data...');
-        groupsData = await offlineIntegrationService.getInstructorGroups();
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch groups');
       }
 
+      const data = await response.json();
+      const groupsData = data.data?.groups || [];
+      console.log('✅ Groups data received');
       setGroups(groupsData);
     } catch (err) {
       setError(err.message || 'Failed to load groups');
@@ -394,64 +368,32 @@ const Groups = () => {
     }
 
     try {
-      const isOnline = navigator.onLine;
+      console.log('🔄 Saving group...');
       
-      if (isOnline) {
-        try {
-          console.log('🌐 Online mode: Saving group...');
-          
-          const url = editingGroup 
-            ? `/api/instructor/groups/${editingGroup._id}`
-            : '/api/instructor/groups';
-          
-          const method = editingGroup ? 'PUT' : 'POST';
+      const url = editingGroup 
+        ? `/api/instructor/groups/${editingGroup._id}`
+        : '/api/instructor/groups';
+      
+      const method = editingGroup ? 'PUT' : 'POST';
 
-          const response = await fetch(url, {
-            method,
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify(formData)
-          });
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(formData)
+      });
 
-          if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || 'Failed to save group');
-          }
-
-          setSuccess(editingGroup ? 'Group updated successfully' : 'Group created successfully');
-          fetchGroups();
-          closeModal();
-          setTimeout(() => setSuccess(''), 3000);
-        } catch (onlineError) {
-          console.warn('⚠️ Online save failed, queuing for offline sync:', onlineError);
-          
-          // Queue action for offline sync
-          await offlineIntegrationService.queueGroupAction({
-            action: editingGroup ? 'edit' : 'create',
-            groupId: editingGroup?._id,
-            data: formData
-          });
-          
-          setSuccess(`Group ${editingGroup ? 'update' : 'creation'} queued for sync when online`);
-          closeModal();
-          setTimeout(() => setSuccess(''), 3000);
-        }
-      } else {
-        // Offline mode: queue action for sync
-        console.log('📴 Offline mode: Queuing group action for sync...');
-        
-        await offlineIntegrationService.queueGroupAction({
-          action: editingGroup ? 'edit' : 'create',
-          groupId: editingGroup?._id,
-          data: formData
-        });
-        
-        setSuccess(`Group ${editingGroup ? 'update' : 'creation'} queued for sync when online`);
-        closeModal();
-        setTimeout(() => setSuccess(''), 3000);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to save group');
       }
+
+      setSuccess(editingGroup ? 'Group updated successfully' : 'Group created successfully');
+      fetchGroups();
+      closeModal();
+      setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
       setError(err.message || 'Failed to save group');
       setTimeout(() => setError(''), 3000);
@@ -464,51 +406,23 @@ const Groups = () => {
     }
 
     try {
-      const isOnline = navigator.onLine;
+      console.log('🔄 Deleting group...');
       
-      if (isOnline) {
-        try {
-          console.log('🌐 Online mode: Deleting group...');
-          
-          const response = await fetch(`/api/instructor/groups/${groupId}`, {
-            method: 'DELETE',
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          });
-
-          if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || 'Failed to delete group');
-          }
-
-          setSuccess('Group deleted successfully');
-          fetchGroups();
-          setTimeout(() => setSuccess(''), 3000);
-        } catch (onlineError) {
-          console.warn('⚠️ Online delete failed, queuing for offline sync:', onlineError);
-          
-          // Queue action for offline sync
-          await offlineIntegrationService.queueGroupAction({
-            action: 'delete',
-            groupId: groupId
-          });
-          
-          setSuccess('Group deletion queued for sync when online');
-          setTimeout(() => setSuccess(''), 3000);
+      const response = await fetch(`/api/instructor/groups/${groupId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
         }
-      } else {
-        // Offline mode: queue action for sync
-        console.log('📴 Offline mode: Queuing group deletion for sync...');
-        
-        await offlineIntegrationService.queueGroupAction({
-          action: 'delete',
-          groupId: groupId
-        });
-        
-        setSuccess('Group deletion queued for sync when online');
-        setTimeout(() => setSuccess(''), 3000);
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to delete group');
       }
+
+      setSuccess('Group deleted successfully');
+      fetchGroups();
+      setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
       setError(err.message || 'Failed to delete group');
       setTimeout(() => setError(''), 3000);

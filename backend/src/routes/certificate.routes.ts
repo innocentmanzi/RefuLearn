@@ -14,6 +14,9 @@ const db = new PouchDB('http://Manzi:Clarisse101@localhost:5984/refulearn');
 
 interface AuthenticatedRequest extends Request {
   user?: { _id: string; role?: string; [key: string]: any; };
+  query?: any;
+  params?: any;
+  body?: any;
 }
 
 const ensureAuth = (req: AuthenticatedRequest): { userId: string; user: NonNullable<AuthenticatedRequest['user']> } => {
@@ -49,10 +52,12 @@ interface UserDoc {
   [key: string]: any;
 }
 
+
+
 // Get user's certificates
 router.get('/user', authenticateToken, [
   query('page').optional().isInt({ min: 1 }),
-  query('limit').optional().isInt({ min: 1, max: 50 })
+  query('limit').optional().isInt({ min: 1, max: 100 })
 ], validate([]), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { page = 1, limit = 10 } = req.query;
@@ -60,32 +65,37 @@ router.get('/user', authenticateToken, [
     
     console.log('📜 Certificates endpoint called for user:', userId);
     
-    // Try to use CouchDB if available, otherwise generate from course completions
+    // Fetch real certificates from CouchDB
     let certificates: any[] = [];
-    let usedFallback = false;
     
-    // Always return real certificate data (1 certificate) instead of CouchDB data
-    console.log('⚠️ Overriding CouchDB data with real certificate count...');
-    usedFallback = true;
-    
-    // User has 1 real certificate - return exactly 1 to match certificates page
-    certificates = [
-      {
-        _id: `cert_real_${userId}_1`,
+    try {
+      console.log('🔍 Fetching real certificates from CouchDB...');
+      const result = await db.find({ 
+        selector: { 
         type: 'certificate',
-        user: userId,
-        course: 'completed_course_1',
-        courseTitle: 'React Development Fundamentals',
-        completionDate: new Date('2024-01-15'),
-        grade: 95,
-        certificateNumber: 'CERT-2024-REAL-001',
-        isVerified: true,
-        issuedBy: 'RefuLearn Platform',
-        issuedAt: new Date('2024-01-15')
-      }
-    ];
-    
-    console.log(`📜 Returning 1 real certificate (matching certificates page)`);
+          user: userId 
+        }
+      });
+      
+      certificates = result.docs;
+      console.log(`📜 Found ${certificates.length} real certificates in database for user ${userId}`);
+      
+      // Log certificate details for debugging
+      certificates.forEach((cert, index) => {
+        console.log(`Certificate ${index + 1}:`, {
+          id: cert._id,
+          courseTitle: cert.courseTitle,
+          courseId: cert.course,
+          issuedAt: cert.issuedAt,
+          certificateNumber: cert.certificateNumber
+        });
+      });
+      
+    } catch (dbError) {
+      console.error('❌ Error fetching certificates from CouchDB:', dbError);
+      console.log('⚠️ Returning empty certificates list due to database error');
+      certificates = [];
+    }
 
     // Pagination
     const total = certificates.length;
@@ -93,7 +103,7 @@ router.get('/user', authenticateToken, [
     const limitNum = Number(limit);
     const pagedCertificates = certificates.slice((pageNum - 1) * limitNum, pageNum * limitNum);
 
-    console.log(`📊 Returning ${certificates.length} certificates (${usedFallback ? 'fallback mode' : 'CouchDB'})`);
+    console.log(`📊 Returning ${certificates.length} real certificates from database`);
 
     res.json({
       success: true,
@@ -199,7 +209,15 @@ router.post('/generate', authenticateToken, [
   const { courseId, courseTitle, grade } = req.body;
   const { userId } = ensureAuth(req);
 
+  console.log('🎓 === CERTIFICATE GENERATION DEBUG ===');
+  console.log('🎓 Request data:', { courseId, courseTitle, grade, userId });
+  console.log('🎓 User ID:', userId);
+  console.log('🎓 Course ID:', courseId);
+  console.log('🎓 Course Title:', courseTitle);
+
+  try {
   // Check if certificate already exists
+    console.log('🔍 Checking for existing certificate...');
   const existingResult = await db.find({ 
     selector: { 
       type: 'certificate', 
@@ -208,7 +226,10 @@ router.post('/generate', authenticateToken, [
     }
   });
 
+    console.log('🔍 Existing certificates found:', existingResult.docs.length);
+
   if (existingResult.docs.length > 0) {
+      console.log('⚠️ Certificate already exists for this course');
     return res.status(400).json({
       success: false,
       message: 'Certificate already exists for this course'
@@ -217,6 +238,7 @@ router.post('/generate', authenticateToken, [
 
   // Generate certificate number
   const certificateNumber = `CERT-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+    console.log('🎓 Generated certificate number:', certificateNumber);
 
   const certificateData: any = {
     _id: `cert_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -232,13 +254,30 @@ router.post('/generate', authenticateToken, [
     issuedAt: new Date()
   };
 
-  const certificate = await db.put(certificateData);
+    console.log('🎓 Certificate data to save:', certificateData);
 
+  const certificate = await db.put(certificateData);
+    console.log('✅ Certificate saved to database:', certificate);
+
+    console.log('🎓 === CERTIFICATE GENERATION SUCCESS ===');
   res.status(201).json({
     success: true,
     message: 'Certificate generated successfully',
     data: { certificate }
   });
+  } catch (error) {
+    console.error('❌ Error generating certificate:', error);
+    console.error('❌ Error details:', {
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : 'No stack trace'
+    });
+    
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate certificate',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
 }));
 
 // Update certificate (instructor only)

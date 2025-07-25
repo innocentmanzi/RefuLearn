@@ -182,6 +182,7 @@ const PasswordToggle = styled.button`
 `;
 
 const Login = () => {
+  const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('refugee');
@@ -309,31 +310,36 @@ const Login = () => {
       }
       
       if (loginSuccess && userData) {
-        login(userData);
-        setSuccess('Login successful! Redirecting...');
-        
-        // Redirect based on user role
-        setTimeout(() => {
-          const userRole = userData.role || 'refugee';
+        try {
+          await login(userData);
+          setSuccess('Login successful! Redirecting...');
           
-          console.log('🚀 Redirecting user with role:', userRole);
-          
-          switch (userRole) {
-            case 'admin':
-              navigate('/admin/dashboard');
-              break;
-            case 'instructor':
-              navigate('/instructor/dashboard');
-              break;
-            case 'employer':
-              navigate('/employer/dashboard');
-              break;
-            case 'refugee':
-            default:
-              navigate('/dashboard');
-              break;
-          }
-        }, 1000);
+          // Redirect based on user role
+          setTimeout(() => {
+            const userRole = userData.role || 'refugee';
+            
+            console.log('🚀 Redirecting user with role:', userRole);
+            
+            switch (userRole) {
+              case 'admin':
+                navigate('/admin/dashboard');
+                break;
+              case 'instructor':
+                navigate('/instructor/dashboard');
+                break;
+              case 'employer':
+                navigate('/employer/dashboard');
+                break;
+              case 'refugee':
+              default:
+                navigate('/dashboard');
+                break;
+            }
+          }, 1000);
+        } catch (loginError) {
+          console.error('❌ Error during login process:', loginError);
+          setError('Login successful but profile loading failed. Please refresh the page.');
+        }
       }
     } catch (err) {
       console.error('Login error:', err);
@@ -350,7 +356,7 @@ const Login = () => {
       </LogoAbsolute>
       
       <Form onSubmit={handleSubmit}>
-        <Title>Login</Title>
+        <Title>{t('login.title', 'Login')}</Title>
         
         {error && <ErrorMessage>{error}</ErrorMessage>}
         {success && <SuccessMessage>{success}</SuccessMessage>}
@@ -371,7 +377,7 @@ const Login = () => {
         
         <Input
           type="email"
-          placeholder="Email"
+          placeholder={t('login.email', 'Email')}
           value={email}
           onChange={e => setEmail(e.target.value)}
           required
@@ -379,7 +385,7 @@ const Login = () => {
         <PasswordWrapper>
           <PasswordInput
             type={showPassword ? "text" : "password"}
-            placeholder="Password"
+            placeholder={t('login.password', 'Password')}
             value={password}
             onChange={e => setPassword(e.target.value)}
             disabled={loading}
@@ -395,18 +401,18 @@ const Login = () => {
         </PasswordWrapper>
         
         <Button type="submit" disabled={loading}>
-          {loading ? 'Logging in...' : 'Login'}
+          {loading ? t('login.loggingIn', 'Logging in...') : t('login.submit', 'Login')}
         </Button>
         
         <div style={{ marginTop: '1rem', textAlign: 'center' }}>
           <Link to="/forgot-password" style={{ color: '#007bff', textDecoration: 'none', fontSize: '0.9rem' }}>
-            Forgot your password?
+            {t('login.forgotPassword', 'Forgot your password?')}
           </Link>
         </div>
       </Form>
       
       <div style={{ marginTop: '1rem', textAlign: 'center' }}>
-        Don't have an account? <Link to="/register">Register</Link>
+        {t('login.noAccount', 'Don\'t have an account?')} <Link to="/register">{t('login.register', 'Register')}</Link>
       </div>
     </Container>
   );

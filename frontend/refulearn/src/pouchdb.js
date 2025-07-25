@@ -10,8 +10,8 @@ PouchDB.plugin(PouchDBIdb);
 // Configuration
 const COUCHDB_URL = process.env.REACT_APP_COUCHDB_URL || 'http://localhost:5984';
 const COUCHDB_DATABASE = process.env.REACT_APP_COUCHDB_DATABASE || 'refulearn';
-const COUCHDB_USERNAME = process.env.REACT_APP_COUCHDB_USERNAME || 'admin';
-const COUCHDB_PASSWORD = process.env.REACT_APP_COUCHDB_PASSWORD || 'password';
+const COUCHDB_USERNAME = process.env.REACT_APP_COUCHDB_USERNAME || 'Manzi';
+const COUCHDB_PASSWORD = process.env.REACT_APP_COUCHDB_PASSWORD || 'Clarisse101';
 
 // Legacy database instances for backward compatibility
 const localDB = new PouchDB('refulearn-local', { adapter: 'idb' });
