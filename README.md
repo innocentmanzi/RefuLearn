@@ -28,8 +28,8 @@
 
 ### 🔄 **Offline-First Architecture**
 - **PWA Support**: Install as a native app on any device
-- **Offline Learning**: Access courses and content without internet connection
-- **Background Sync**: Automatic data synchronization when connection is restored
+- **Offline Learning**: Access courses and content without an internet connection
+- **Background Sync**: Automatic data synchronization when the connection is restored
 - **Local Storage**: PouchDB-powered local database for offline functionality
 
 ### 👥 **Multi-Role Platform**
