@@ -64,7 +64,7 @@
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/your-username/refulearn.git
+   git clone https://github.com/innocentmanzi/refulearn.git
    cd refulearn
    ```
 
