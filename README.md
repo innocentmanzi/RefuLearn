@@ -177,16 +177,16 @@ npm run start            # Start production server
 
 # Testing
 npm run test             # Run all tests
-npm run test:watch       # Run tests in watch mode
-npm run test:coverage    # Generate test coverage report
+npm run test: watch       # Run tests in watch mode
+npm run test: coverage    # Generate test coverage report
 
 # Database
-npm run couchdb:setup    # Setup CouchDB databases
-npm run supabase:setup   # Setup Supabase configuration
+npm run couchdb: setup    # Setup CouchDB databases
+npm run supabase: setup   # Setup Supabase configuration
 
 # Code Quality
 npm run lint             # Run ESLint
-npm run lint:fix         # Fix ESLint issues
+npm run lint: fix         # Fix ESLint issues
 ```
 
 ### Frontend Scripts
