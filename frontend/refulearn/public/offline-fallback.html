@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="icon" href="/favicon.ico" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#000000" />
+  <title>RefuLearn - Loading...</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f5f5f5;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      text-align: center;
+    }
+    .loading-container {
+      background: white;
+      padding: 3rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      max-width: 500px;
+      width: 90%;
+    }
+    .logo {
+      font-size: 2.5rem;
+      margin-bottom: 1rem;
+      color: #007bff;
+    }
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #007bff;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin: 1rem auto;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 1rem;
+      font-size: 1.5rem;
+    }
+    p {
+      color: #666;
+      line-height: 1.6;
+      margin-bottom: 1.5rem;
+    }
+    .status {
+      color: #007bff;
+      font-weight: bold;
+      margin: 1rem 0;
+    }
+    .retry-btn {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 1rem;
+      margin: 0.5rem;
+      transition: background 0.3s;
+    }
+    .retry-btn:hover {
+      background: #0056b3;
+    }
+  </style>
+</head>
+<body>
+  <div class="loading-container">
+    <div class="logo">📚 RefuLearn</div>
+    <div class="spinner"></div>
+    <h1>Loading Application...</h1>
+    <p class="status" id="status">Initializing...</p>
+    <p>Please wait while we prepare your learning experience.</p>
+    <button class="retry-btn" onclick="window.location.reload()">🔄 Retry</button>
+    <button class="retry-btn" onclick="window.location.href='/'">🏠 Home</button>
+  </div>
+
+  <script>
+    let attempts = 0;
+    const maxAttempts = 10;
+    const statusEl = document.getElementById('status');
+
+    function updateStatus(message) {
+      statusEl.textContent = message;
+      console.log('[Offline Fallback]', message);
+    }
+
+    function tryToLoadApp() {
+      attempts++;
+      updateStatus(`Attempting to load app (${attempts}/${maxAttempts})...`);
+
+      // Try to fetch the main app
+      fetch('/', { 
+        method: 'GET',
+        cache: 'no-cache'
+      })
+      .then(response => {
+        if (response.ok) {
+          updateStatus('App found! Redirecting...');
+          setTimeout(() => {
+            window.location.href = '/';
+          }, 500);
+        } else {
+          throw new Error('App not available');
+        }
+      })
+      .catch(error => {
+        if (attempts < maxAttempts) {
+          updateStatus(`Retrying in 3 seconds... (${attempts}/${maxAttempts})`);
+          setTimeout(tryToLoadApp, 3000);
+        } else {
+          updateStatus('App unavailable. Please check your connection.');
+        }
+      });
+    }
+
+    // Start trying to load the app
+    setTimeout(tryToLoadApp, 1000);
+
+    // Auto-reload when online
+    window.addEventListener('online', function() {
+      updateStatus('Connection restored! Reloading...');
+      setTimeout(() => window.location.reload(), 1000);
+    });
+
+    // Listen for service worker messages
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', function(event) {
+        if (event.data && event.data.type === 'APP_READY') {
+          updateStatus('App is ready! Redirecting...');
+          setTimeout(() => window.location.href = '/', 500);
+        }
+      });
+    }
+  </script>
+</body>
+</html> 
