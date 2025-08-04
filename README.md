@@ -28,8 +28,8 @@
 
 ### 🔄 **Offline-First Architecture**
 - **PWA Support**: Install as a native app on any device
-- **Offline Learning**: Access courses and content without internet connection
-- **Background Sync**: Automatic data synchronization when connection is restored
+- **Offline Learning**: Access courses and content without an internet connection
+- **Background Sync**: Automatic data synchronization when the connection is restored
 - **Local Storage**: PouchDB-powered local database for offline functionality
 
 ### 👥 **Multi-Role Platform**
@@ -64,7 +64,7 @@
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/your-username/refulearn.git
+   git clone https://github.com/innocentmanzi/refulearn.git
    cd refulearn
    ```
 
@@ -104,10 +104,10 @@
    ```bash
    # Setup CouchDB
    cd backend
-   npm run couchdb:setup
+   npm run couchdb: setup
    
    # Setup Supabase (optional)
-   npm run supabase:setup
+   npm run supabase: setup
    ```
 
 5. **Start the application**
@@ -279,7 +279,7 @@ cd frontend/refulearn
 npm test
 
 # Test coverage
-npm run test:coverage
+npm run test: coverage
 ```
 
 ### Test Structure
@@ -351,26 +351,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **📱 PWA Installation**: Install the app directly from your browser for the best experience
 
 ### Demo Features to Showcase
-- **Offline Learning**: Try accessing courses without internet connection
+- **Offline Learning**: Try accessing courses without an internet connection
 - **Multi-Language**: Switch between English, French, Kinyarwanda, and Swahili
 - **Role-Based Access**: Experience different interfaces for Students, Instructors, Employers, and Admins
 - **PWA Installation**: Add to home screen for app-like experience
-- **Real-time Sync**: Test background synchronization when connection is restored
+- **Real-time Sync**: Test background synchronization when the connection is restored
 
 ## 📞 Support
-
-- **Documentation**: [Wiki](https://github.com/your-username/refulearn/wiki)
-- **Issues**: [GitHub Issues](https://github.com/your-username/refulearn/issues)
 - **Email**: support@refulearn.org
 
 ---
-
-<div align="center">
-
-**Made with ❤️ for refugee communities worldwide**
-
-[![GitHub stars](https://img.shields.io/github/stars/your-username/refulearn?style=social)](https://github.com/your-username/refulearn)
-[![GitHub forks](https://img.shields.io/github/forks/your-username/refulearn?style=social)](https://github.com/your-username/refulearn)
-[![GitHub issues](https://img.shields.io/github/issues/your-username/refulearn)](https://github.com/your-username/refulearn/issues)
-
-</div>
